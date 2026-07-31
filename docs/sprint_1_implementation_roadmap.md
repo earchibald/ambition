@@ -12,8 +12,10 @@ Sections 8-10): Sprint 1 also delivers (a) a minimal GameClock (schedules need t
 (b) the ECS-owned SpatialHash + CollisionResolveSystem + PickSystem that replace
 move_and_slide/Area3D/physics-raycasts for movement, collision, melee targeting, interaction,
 and Tactical-Lens picking (NavigationServer3D is a sanctioned Active-only steering exception),
-and (c) generational entity handles with atomic destroy across all registries. Combat uses the
-defined strength/density/force model, not undefined stats.
+and (c) generational entity handles with atomic destroy across all registries. Sprint 1 also
+introduces the PerceptionSystem primitive (sight cone + DDA LoS, hearing/noise ephemerals,
+witness events) so combat, stealth, and crime are not omniscient. Combat uses the defined
+strength/density/force model, not undefined stats.
 
 Step 1: The Tick Driver & ECS Data Structure
 
@@ -23,10 +25,14 @@ Required Implementation:
 Implement the GameLoopManager to drive the ECS ticks safely from Godot's engine.
 
 Initialize the Component Registries (structs/data classes).
+
+Add the first observability counters from docs/debugging_and_observability_architecture.md:
+tick durations, component counts, alive handle count, and per-system entity counts. These are
+debug/read-only surfaces, not gameplay logic.
 Scaffolding Validation:
 
 Reference: sprint_1_technical_scaffolding.md (Section 1).
-Success State: The console prints an entity's hunger increasing by 1 every Simulation Tick (1Hz) while its position updates 60 times a second on the Micro Tick.
+Success State: The console prints an entity's hunger increasing on the 2Hz Simulation Tick while its position updates 60 times a second on the Micro Tick.
 
 Step 2: The Physical Reality (Matter & Chemistry)
 
@@ -77,7 +83,7 @@ Implement ScheduleComponent and MetabolismSystem.
 Implement the static Utility AI Evaluator.
 Scaffolding Validation:
 
-Reference: sprint_1_technical_scaffolding.md (Section 6).
+Reference: sprint_1_technical_scaffolding.md (Sections 7-8).
 Success State: The NPC hauls rocks. When hunger > 80, it interrupts its Routine to execute ActionIntent_Consume on a MAT_BIOMASS entity.
 
 Step 6: Action Resolution (Combat & Kinetics)
@@ -91,4 +97,4 @@ Implement Spoilage timers turning MAT_BIOMASS into Filth.
 Scaffolding Validation:
 
 Reference: the_first_hour_day_0_gameplay_and_transition.md (Phase 4: Combat Resolution).
-Success State: The player swings an Iron Sword at a Rat. The ECS calculates: Player_Velocity * (Weapon_Mass + Player_Strength). The rat's health hits 0, it becomes a [Corpse] item, bleeds, and the blood spreads via Cellular Automata.
+Success State: The player swings an Iron Sword at a Rat. The ECS calculates: Player_Velocity * (Weapon_Mass + BodyComponent.strength). The rat's health hits 0, it becomes a [Corpse] item, bleeds, and the blood spreads via Cellular Automata.

@@ -8,7 +8,7 @@ These two documents are authoritative and override any older spec they contradic
 
 docs/architecture_decisions.md - The Architecture Decision Record (ADR). Canonical cross-cutting decisions (physics model, world model, ticks, LLM, save, performance, identity). WINS over any conflicting spec.
 
-docs/ADVERSARIAL_REVIEW.md - The end-to-end adversarial review that produced those decisions. Read for the "why" and for the list of still-open engineering fixes.
+docs/ADVERSARIAL_REVIEW.md - Historical end-to-end adversarial review that produced the ADR. Read for the "why"; dated review docs are repair logs unless STATE.md says one is pending.
 
 1. Core Architecture (Read First)
 
@@ -18,7 +18,23 @@ docs/ecs_architecture_and_data_layer_specification.md - The foundational ruleboo
 
 docs/component_and_field_registry.md - Canonical component/field/enum/tag registry. Every sprint and system doc must match it (ADR-13).
 
+docs/persistence_and_save_architecture.md - The first-class Save & Quit / Lineage / schema-version persistence contract (ADR-6). Required before Sprint 3 depends on death-loop persistence.
+
 docs/game_vision_and_architecture_the_living_delve.md - The overarching game design document.
+
+docs/invariants_and_test_strategy.md - Cross-system invariants and required test gates. Use
+this to decide whether a sprint is actually correct, not merely implemented.
+
+docs/debugging_and_observability_architecture.md - Debug overlays, event tracing, counters,
+and "why did this NPC do that?" inspection surfaces for tuning the systemic simulation.
+
+docs/content_authoring_and_schema_validation.md - Data/content schema, ID, migration, and
+validation contract for materials, creatures, runes, reactions, cultures, job templates, and
+LLM prompts.
+
+docs/archetypal_content_catalog.md - Pure-content seed catalog of reusable systemic object
+families (fixtures, containers, documents, hazards, route markers, social tokens) that should
+be authored once schemas exist.
 
 2. System Specifications (The Rules of Reality)
 
@@ -67,6 +83,8 @@ Sprint 1: The Core Vertical Slice (Micro Tick, ECS Physics/Collision, Spatial In
 
 Sprint 2: The World Canvas (DAG Generation, Macro-Tick, Chunk Streaming).
 
+Sprint P / Sprint 2.5: Persistence Contract (versioned save/load, RNG stream state, WorldGrid/DAG/component serialization). `docs/persistence_and_save_architecture.md` is the complete roadmap/scaffold for this workstream unless it is later split into dedicated sprint files.
+
 Sprint 3: The Brains & Bloodline (LLM Bridge, Interregnum Fast-Forward).
 
 Sprint 4: The Crucible (Chemistry Reactions, Spell Compilation, Mutation).
@@ -75,7 +93,11 @@ Sprint 5: Content & Data (JSON Schemas, Dictionaries).
 
 Sprint 6: LLM Prompt Fine-Tuning.
 
-Note: A dedicated Persistence/Serialization workstream (see ADR-6) is required and is not yet slotted into a numbered sprint; treat it as a first-class deliverable.
+Note: The Persistence/Serialization workstream (see ADR-6 and docs/persistence_and_save_architecture.md) is a first-class deliverable and should land before Sprint 3's death-loop implementation depends on it.
+
+Every sprint must preserve docs/invariants_and_test_strategy.md and expose the debug surfaces
+specified in docs/debugging_and_observability_architecture.md as its systems come online.
+Content/data work must validate against docs/content_authoring_and_schema_validation.md.
 
 5. Tooling & Conventions (Pinned)
 
@@ -87,8 +109,9 @@ Linter: gdtoolkit (gdlint/gdformat), pinned in CI. Lints first-party dirs only; 
 
 Testing: GUT (Godot Unit Test) in addons/gut, installed via script/submodule (Sprint 0).
 
-copilot-instructions.md is a symlink to CLAUDE.md. NOTE: symlinks may not resolve on Windows
-checkouts / some CI runners; contributors on Windows should read CLAUDE.md directly.
+CLAUDE.md is the root canonical agent instruction file. copilot-instructions.md is a symlink
+to CLAUDE.md. NOTE: symlinks may not resolve on Windows checkouts / some CI runners;
+contributors on Windows should read CLAUDE.md directly.
 
 build_repo.py was a ONE-SHOT bootstrap generator and is now retired — do NOT re-run it (it
 would overwrite hand-edited files such as the CI workflow and project.godot). Kept only for

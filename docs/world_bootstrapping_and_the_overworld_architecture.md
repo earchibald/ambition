@@ -21,7 +21,9 @@ The Core (Ring 1 - Radius 10 tiles): Essential services.
 
 [Zone_Market]: General merchants.
 
-The Industry (Ring 2 - Radius 20 tiles): [Zone_Smithy], [Zone_Alchemist]. These require EnergyComponent stations (Forges) and generate [Filth_Minor] (smoke/ash), so they are placed away from the plaza.
+The Industry (Ring 2 - Radius 20 tiles): [Zone_Smithy], [Zone_Alchemist]. These require
+HeatSourceComponent stations (Forges) and generate [Filth_Minor] (smoke/ash), so they are
+placed away from the plaza.
 
 The Agrarian Rim (Ring 3 - Radius 30 tiles): [Zone_Farm]. Spawns MAT_BIOMASS crops.
 
@@ -109,16 +111,21 @@ Because property is physically owned and zoned by NPCs, a newly spawned player w
 
 Entity 0 is initialized with a [Guest_Status] tag inside the Village limits.
 
-This acts as a temporary override in the ECS SocialSystem, preventing [Prof_Guard] entities from attacking them for entering [Zone_Market] or [Zone_Tavern]. This status is permanently revoked if the player commits an act with the [Crime] tag.
+This acts as a temporary override in the ECS SocialSystem, preventing [Prof_Guard] entities
+from attacking them for entering [Zone_Market] or [Zone_Tavern]. This status is permanently
+revoked only when a [Crime] act produces a PerceptionSystem WitnessEvent (guard line of sight,
+hearing/noise evidence, or victim report) that propagates through memory/gossip; unwitnessed
+crimes do not instantly alert the faction.
 
 7. Integrated Corrections (ADR / Adversarial Review)
 
 Authoritative note: governed by docs/architecture_decisions.md.
 
 Guest-Status crime (review D3): [Guest_Status] revocation is witness-gated, not omniscient.
-See factions doc §6 — a [Crime] act must be perceived by a witness (guard vision cone or
-victim) to propagate reputation via gossip and revoke guest status; a "caught red-handed"
-fast path exists for a witnessing guard. Unwitnessed crimes do not instantly alert the faction.
+See factions doc §6 — a [Crime] act must produce a PerceptionSystem WitnessEvent (guard
+vision cone + line of sight, hearing/noise evidence, or victim) to propagate reputation via
+gossip and revoke guest status; a "caught red-handed" fast path exists for a witnessing
+guard. Unwitnessed crimes do not instantly alert the faction.
 
 Climate cadence (ADR-9): the ClimateSystem runs on the Macro tick = 1 in-game hour, so
 weather (rain -> MAT_WATER puddles, [Mud]) updates at hourly granularity. The 360-day/4-season

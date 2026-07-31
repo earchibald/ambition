@@ -16,7 +16,7 @@ To push this to Outstanding, we need to address a few areas (Accessibility, Ergo
 
 Accessibility & The Translation Cipher
 
-The Text: "Fluency Low: The UI scrambles 50% of the letters. 'The #$%&@ hoard bread while we starve!'"
+The Text: "Fluency Low: The UI obscures 50% of the sentence with symbol gibberish."
 
 The Issue: While highly thematic, arbitrary symbol-scrambling breaks screen readers and creates severe roadblocks for dyslexic players.
 

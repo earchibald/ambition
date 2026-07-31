@@ -49,6 +49,9 @@ Step 4: Quality Assurance (Unit Testing & Linting)
 The Objective: Ensure logic is tested and formatting is standard.
 Required Implementation:
 
+Read and enforce docs/invariants_and_test_strategy.md. Sprint 0's CI exists to protect those
+invariants, not just to run a token test command.
+
 Install GUT (Godot Unit Test). Use a bash script (curl or wget) to pull the GUT addon repository directly into res://addons/gut, or add it as a git submodule.
 
 CRITICAL: All test files MUST be prefixed with test_ (e.g., test_ecs_entity_creation.gd). If they are not, GUT will ignore them, resulting in a false-positive CI pass.
@@ -62,6 +65,9 @@ Required Implementation:
 
 Implement a GitHub Actions workflow (.github/workflows/godot_ci.yml).
 
+Reserve hooks for future invariant/content validation scripts described in
+docs/invariants_and_test_strategy.md and docs/content_authoring_and_schema_validation.md.
+
 CRITICAL: The workflow must run godot --headless --editor --quit ONCE before running tests to build the .godot/ import cache, otherwise the test step will hang indefinitely.
 
 CRITICAL: The checkout step MUST include submodules: recursive in case GUT was installed via submodule.
@@ -71,7 +77,9 @@ Step 6: AI Agent Onboarding & System Prompts
 The Objective: Guarantee that any LLM/Coding Agent operating within this repository understands the boundaries.
 Required Implementation:
 
-Create CLAUDE.md in the root directory using the exact scaffolding provided.
+Create/maintain CLAUDE.md in the root directory using the exact scaffolding provided. Any
+tool-specific mirrors (`.claude/CLAUDE.md`, `copilot-instructions.md`) must point to it or
+remain byte-for-byte equivalent so onboarding instructions never dangle.
 
 Implement the rigid STATE.md protocol to prevent context-window bloat during handoffs.
 

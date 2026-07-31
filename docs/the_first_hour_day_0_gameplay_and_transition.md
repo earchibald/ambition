@@ -14,8 +14,9 @@ Initialization Payload: Entity 0 is constructed via the world_bootstrapping_and_
 {
   "BodyComponent": { "health": 100, "stamina": 100, "skills": {} },
   "MindComponent": { "insight": {"Cult_Dwarf": 10}, "known_runes": ["RUNE_KINETIC"] },
-  "InventoryComponent": { "held_items": [Entity_401, Entity_402], "max_volume": 50000 },
-  "ChemistryComponent": { "tags": ["Guest_Status"] }
+  "InventoryComponent": { "held_items": [{"index": 401, "generation": 1}, {"index": 402, "generation": 1}], "total_volume_used": 1200 },
+  "ContainerComponent": { "capacity_cm3": 50000 },
+  "ChemistryComponent": { "active_tags": ["Guest_Status"] }
 }
 
 
@@ -42,7 +43,9 @@ Base_Value (10) * (1 + (Demand_MILITARY / Local_Iron_Stockpile + 1)) * Quality (
 
 The Transaction: The player places 15 MAT_GOLD physical entities on the barter zone. The Godot UI sends a JobIntent_Trade.
 
-Resolution: The ECS verifies the gold's total mass_kg equals the required value. The Merchant's AI accepts. The ECS removes the [Owned_By_Faction: 12] tag from the shield. The player equips it.
+Resolution: The ECS verifies the offered coins' summed value meets the price (mass remains
+only an encumbrance/physics property). The Merchant's AI accepts. The ECS transfers the
+shield's OwnershipComponent from faction 12 to Faction 0. The player equips it.
 
 The Rumor Mill (DAG Leakage): Passing the well, an NPC (Entity 112) is running a Job_Chat.
 
@@ -84,7 +87,7 @@ The Tier 2 Scavenger (Emergent AI): The player spots a Goblin [Prof_Hauler] mini
 
 Perception: The Goblin's VisionCone intersects the player.
 
-Threat Calculation: The Goblin's GOAP AI evaluates the player's equipment (Dagger + Shield) vs. its own (Pickaxe). Player Threat > Goblin Combat_Skill.
+Threat Calculation: The Goblin's Utility AI evaluates the player's equipment (Dagger + Shield) vs. its own (Pickaxe). Player Threat > Goblin Combat_Skill.
 
 State Shift: The Goblin's JobComponent aborts Job_Mine. It pushes Job_Flee(Target: Nearest_Guard) to the top of its queue. It turns and runs, emitting an ECS [Alert] aura that will wake up adjacent hostile NPCs.
 
@@ -94,7 +97,7 @@ They execute ActionIntent_Mine.
 
 The wall's MaterialComposition yields 5 MAT_COPPER nuggets.
 
-The player puts them in their backpack. The InventorySystem adds 5kg to the player's Total_Mass. The player's movement speed slightly decreases due to the Godot character controller reading the new ECS mass float.
+The player puts them in their backpack. The InventorySystem adds 5kg to the player's Total_Mass. The player's movement speed slightly decreases because ECS movement resolution applies the mass divisor before the viewer reads the resulting PositionComponent.
 
 The Loop Closes: The player is cold, their stamina is draining, they have 5kg of copper, and they know the Goblin is bringing a guard. They retreat to the elevator. The simulation of Floor 1 returns to Simulated state, while the Village wakes back up into the Active state to receive them.
 

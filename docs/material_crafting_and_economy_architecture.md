@@ -7,7 +7,7 @@ Context: This document defines the physical reality of items, crafting, and the 
 
 An item is an Entity with specific components:
 
-PhysicalPropertyComponent: mass_kg (float), volume_cm3 (float), temperature (float), phase (Enum: Solid, Liquid, Gas).
+PhysicalPropertyComponent: mass_kg (derived cache), volume_cm3 (float), temperature (float), heat_capacity (float), phase (Enum: Solid, Liquid, Gas).
 
 MaterialCompositionComponent: Dict of materials/percentages (e.g., {"MAT_IRON": 0.8, "MAT_WOOD": 0.2}).
 
@@ -131,7 +131,7 @@ Filthy_Armor + Water_Flask = Cleans armor, creates Dirty_Water.
 
 B. Station Crafting & Thermodynamics (The Supply Chain)
 
-Stations require an EnergyComponent (Heat).
+Stations require a HeatSourceComponent that uses the same heat model as materials.
 
 Station: Forge ([Requires_Heat_Source])
 
@@ -159,7 +159,9 @@ Currency granularity (resolves review D6): the atomic coin (MAT_GOLD, quantity-s
 
 Mass source of truth (resolves review C5): mass_kg is a derived cache. Authoritative mass = volume_cm3 * sum(material_pct * density_kg_per_cm3) over MaterialCompositionComponent, using densities from the Sprint 5 material dictionary. Recompute mass whenever composition or volume changes (alloying, partial consumption, dilution). Never edit mass_kg independently.
 
-To buy a sword, the player must physically place coins (or nuggets) totaling the weight of the required value onto the Merchant's barter table.
+To buy a sword, the player must physically place coins (or nuggets) whose summed coin value
+meets the required price onto the Merchant's barter table. Their mass still matters for
+encumbrance and physics, but payment validation sums value, not weight.
 
 Because gold has the [Heavy] tag, carrying 10,000 gold coins will physically encumber the player, forcing them to use the Adventurer's Residence stash or hire a [Prof_Hauler] NPC to carry their wealth.
 

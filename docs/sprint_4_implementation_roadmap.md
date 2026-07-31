@@ -38,7 +38,8 @@ Update ActionResolutionSystem to handle ActionIntent_Cast.
 
 When executed, spawn an [EphemeralEntity] into the ECS. This entity has a strict TTL (Time-To-Live).
 
-The EphemeralEntity moves via physics or expands, applying its Catalyst tags to any entity it collides with.
+The EphemeralEntity moves via the ECS movement/collision systems or expands as an ECS aura,
+applying Catalyst tags to entities found via SpatialHash overlap.
 
 Success State: The player casts "Fireball." A glowing Node3D moves through the world. It hits a Goblin, applies the [Burning] tag, and deletes itself.
 

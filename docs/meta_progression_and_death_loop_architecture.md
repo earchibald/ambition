@@ -18,7 +18,10 @@ When Entity 0 (The Player) reaches 0 Health, the game does not end, and it does 
 
 The player's PlayerInputComponent is detached.
 
-The player entity is converted into a Corpse item. Its InventoryComponent spills into a localized [Loot_Pile] entity on that specific tile.
+Death creates a separate Corpse/remains entity at the player's final tile. The old Entity 0
+handle is then atomically destroyed/retired, its generation is bumped, and index 0 is reserved
+for the next adventurer. Its InventoryComponent spills into a localized [Loot_Pile] entity or
+corpse/container manifest before the old handle is invalidated.
 
 The game enters the Interregnum State.
 
@@ -26,7 +29,9 @@ The game enters the Interregnum State.
 
 To signify the arrival of a new adventurer on the annual cadence, the engine must simulate the passage of one year.
 
-The Macro-Tick Burst: The ECS engine suspends the Micro and Simulation ticks, and rapidly executes 12 "Monthly" Macro-Ticks.
+The Coarse Interregnum Burst: The ECS engine suspends the Micro and Simulation ticks, and
+rapidly executes 12 monthly coarse interregnum passes. These are not ordinary hourly Macro
+Ticks; they operate on ledgers, abstract populations, DAG edges, and manifests.
 
 World Evolution: During this burst:
 
@@ -60,7 +65,8 @@ Chemistry & Crafting: If a previous adventurer successfully combined Fungal_Wood
 
 Spell Schematics: Successfully compiled and cast spell graphs (e.g., standardizing a "Fireball" layout in the GrimoireUI) are saved as templates.
 
-Biological Insight: The highest BestiaryComponent data achieved (monster weaknesses, species tags) is carried over.
+Biological Insight: The highest MindComponent.insight data achieved for monster weaknesses
+and species tags is carried over.
 
 B. Auto-Recorded History (The DAG Chronicle)
 
@@ -78,7 +84,9 @@ Suggested / Pinned Notes: By shift-clicking an entity or zone in the Tactical Le
 
 5. Re-Entry (The Next Generation)
 
-After the Interregnum State completes, the engine finalizes the spawn process for the new Entity 0.
+After the Interregnum State completes, the engine finalizes the spawn process for the new
+Entity 0 by reusing index 0 with generation + 1. Stale references to the previous adventurer
+must fail handle validation; the corpse/remains entity has its own non-player handle.
 
 Character Generation: The new Entity 0 spawns in the Residence with baseline BodyComponent and MindComponent stats. Muscle memory (e.g., Blade_Familiarity) is reset to zero. They are physically a novice.
 
@@ -88,6 +96,9 @@ World Impact: They walk out into a village that has organically reacted to the p
 
 6. Technical Implementation constraints
 
-Garbage Collection During Time Skip: The coder must ensure the Macro-Tick burst aggressively deletes insignificant entities (like singular dropped arrows or minor blood splatters) to prevent the ECS memory footprint from bloating infinitely over multiple deaths.
+Garbage Collection During Time Skip: The coder must ensure the coarse interregnum pass
+aggressively deletes insignificant entities (like singular dropped arrows or minor blood
+splatters) to prevent the ECS memory footprint from bloating infinitely over multiple deaths.
+Identity-bearing items follow MaterializationComponent policy and persistence manifests.
 
 Seed Continuity: The procedural noise seeds for the dungeon floors must not change. Floor 3 is still Floor 3. If a wall was mined out by the previous player, that wall remains missing (or is perhaps shored up with wooden scaffolding by a newly moved-in Goblin faction).

@@ -9,7 +9,10 @@ The LLM does not micro-manage. It acts as the "CEO" of a faction.
 
 The Reasoner (LLM): Operates asynchronously. It evaluates the macro-state of the world and sets high-level Objectives and Emotional States.
 
-The Planner (Engine AI): The ECS (via GOAP or Utility AI) acts as the workforce. It receives the LLM's Objective and breaks it down into individual JobComponents for Tier 2 entities.
+The Planner (Engine AI): The ECS expands the LLM's Objective through deterministic,
+data-driven JobTemplates (ADR-4). It receives the objective and breaks it down into
+individual JobComponents for Tier 2 entities. A true search planner is reserved for a future
+implementation behind the same `plan(objective, faction) -> jobs` interface.
 
 Crucial Constraint: The ECS must never wait on the LLM. The game continues running while the API call is in flight. Factions continue their current routines until the API returns a validated payload.
 
@@ -23,7 +26,8 @@ Persona & History (From DAG): "You are Ug, Goblin King of Floor 3. Your faction 
 
 Current State (From ECS): "Population: 45. Food: Low. Wealth: High."
 
-Recent Events (The Salience Filter): The system parses the MemoryComponent and injects ONLY the 5 most recent chronological events, plus up to 3 "Core Memories" (events with a high_emotional_weight tag).
+Recent Events (The Salience Filter): The system parses faction_memory / MemoryComponent and
+injects ONLY the top 3 memories by decayed weight plus the 3 most recent chronological events.
 
 Valid Action Space (Anti-Hallucination): A strict list of valid high-level goals (GATHER_RESOURCES, RAID_FACTION, FORTIFY).
 
@@ -36,7 +40,7 @@ The LLM must be constrained to output strictly formatted JSON using Function Cal
 Expected JSON Structure:
 
 {
-  "thought_process": "We are starving. We must raid the gnomes for supplies.",
+  "reason_summary": "Food is low and the gnomes are the nearest viable target.",
   "objective": "RAID_FACTION",
   "target_faction_id": 12,
   "emotion_state": "DESPERATE",
@@ -50,7 +54,9 @@ Once the JSON is received, it cannot be trusted implicitly. The world may have c
 
 Validation Gate: The Engine checks if the Faction Leader is still alive. It then checks if target_faction_id matches an active DAG node. If validation fails (due to LLM hallucination or world-state changes), the payload is rejected and the objective defaults to FORTIFY.
 
-Job Generation: If validated, the objective (RAID_FACTION) is passed to the GOAP system, which translates it into ECS JobComponents (e.g., "Equip Weapons," "Pathfind to Target Zone") and pushes them to Tier 2 workers.
+Job Generation: If validated, the objective (RAID_FACTION) is passed to the JobTemplate
+planner, which expands it into ECS JobComponents (e.g., "Equip Weapons," "Pathfind to Target
+Zone") and pushes them to Tier 2 workers.
 
 Flavor Text: The public_declaration is stored in the leader's MemoryComponent to be repeated by NPCs via the Gossip System.
 
@@ -74,9 +80,9 @@ Tests/CI inject a NullLLMProvider stub returning a canned valid FORTIFY payload.
 output uses response_format {"type":"json_object"} (or provider equivalent). Identical prompts
 are cached by hash within a run to control cost; the staggered queue caps request rate.
 
-AI backbone (ADR-4): the Planner does NOT run GOAP yet — objectives expand via data-driven
-JobTemplates (Sprint 3 §6). "GOAP or Utility AI" language elsewhere means "this pluggable
-planner"; true GOAP may replace it later behind plan(objective, faction) -> jobs.
+AI backbone (ADR-4): the Planner uses data-driven JobTemplates (Sprint 3 §6), with the
+implementation hidden behind `plan(objective, faction) -> jobs` so a search planner can be
+swapped in later if needed.
 
 Player identity (ADR-14): the player is Faction 0 with a synthetic Faction-0 DAG node, so
 "target the player" validates in the Validation Gate. The older "14: The Player" example is
@@ -90,4 +96,10 @@ the faction has no individuals. The Salience Filter selects top-3 by weight + 3 
 Conversation UX under "never block" (review F1): a Diplomatic Ping (player speaks to a Tier-3
 entity) fires an async request but the ECS never stalls. The NPC immediately emits a diegetic
 "thinking" bark from a local table; when the response lands, the real line replaces it. On
-timeout/error, a fallback line is shown and the objective path uses the Fallback Matrix.
+timeout/error, a fallback line is shown and the current objective is maintained until the next
+Macro reasoning opportunity.
+
+Output rationale: the schema uses `reason_summary` (brief audit text, max 200 chars); do not
+request hidden chain-of-thought-style output from the provider.
+Fallback Matrix: timeout -> maintain current objective and requeue next Macro tick; invalid
+JSON -> FORTIFY; hallucinated/invalid target -> FORTIFY with target stripped.

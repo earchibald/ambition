@@ -63,7 +63,8 @@ Decay: To prevent grinding against a wall, skills have a soft cap based on the p
 
 Insight & Lore (Knowledge-Driven Growth)
 
-The world is filled with unknown entities. The player has a Bestiary/InsightComponent.
+The world is filled with unknown entities. The player's knowledge lives in
+MindComponent.insight and Lineage Journal entries.
 
 Anatomical Study: Killing and butchering a Tier 2 Spider entity yields physical parts, but also increases the player's Insight[Arachnid]. High insight reveals weak points (increasing critical hit multipliers against that specific tag) and reveals their ECS data in the Tactical Lens UI.
 

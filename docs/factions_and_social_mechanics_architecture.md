@@ -21,9 +21,9 @@ Macro-Level (Faction Entities)
 
 Factions themselves are abstract Tier 1 entities in the ECS that hold macro-data.
 
-FactionCoreComponent: faction_id, name, culture_tags (e.g., [Militaristic, Subterranean, Clan-Based]).
+FactionCoreComponent: faction_id, name, culture_tags (e.g., [Militaristic, Subterranean, Clan-Based]), diplomacy, abstract_wealth_ledger, abstract_population, faction_memory.
 
-DiplomacyComponent: A dictionary mapping target faction_id to a RelationshipState.
+Diplomacy data lives in FactionCoreComponent.diplomacy: a top-K dictionary mapping target faction_id to a RelationshipState.
 
 RelationshipState: score (-100 to 100), status (Enum: War, Neutral, Trade, Allied), grievances (List of recent offenses).
 
@@ -71,7 +71,7 @@ Factions exert influence over zones via ClaimTags.
 
 If two neutral factions attempt to mine the same ResourceSource, their Tier 2 entities will engage in "brawls" (non-lethal or low-lethal combat).
 
-These brawls generate grievances in the DiplomacyComponent.
+These brawls generate grievances in FactionCoreComponent.diplomacy.
 
 Total War:
 
@@ -85,7 +85,7 @@ Military-tagged Tier 2 entities will actively seek out and attempt to kill entit
 
 The player interacts with this system purely through gameplay loops, not UI menus.
 
-Earning Reputation: Completing a physical action (dropping a pile of iron ore in a friendly village stockpile, assisting a goblin patrol under attack by spiders) is detected by the SocialSystem and positively adjusts the score in the faction's DiplomacyComponent towards Faction 0 (the player).
+Earning Reputation: Completing a physical action (dropping a pile of iron ore in a friendly village stockpile, assisting a goblin patrol under attack by spiders) is detected by the SocialSystem and positively adjusts the score in the faction's FactionCoreComponent.diplomacy entry towards Faction 0 (the player).
 
 Losing Reputation: Stealing from stockpiles, attacking citizens, or introducing extreme Filth into a faction's zone generates massive grievances.
 
@@ -102,8 +102,8 @@ docs/component_and_field_registry.md. The following resolve review findings B6, 
 D4, D5, F3.
 
 Ownership representation (C7): item ownership is the OwnershipComponent{faction_id} — NOT a
-tag. Zone control uses ClaimTags on the zone entity (distinct from item ownership). The
-"[Owned_By_Faction: N]" tag phrasing elsewhere is void.
+tag. Zone control uses ClaimTags on the zone entity (distinct from item ownership). Any legacy
+ownership-as-tag phrasing elsewhere is void.
 
 Faction memory for Abstracted factions (B6): a leader's salient LLM context cannot depend on
 individual Tier-2 gossip, because Abstracted factions have no individuals. Therefore
@@ -119,16 +119,17 @@ base_weight(event_type) * recency_falloff(age) + emotional_bonus(core). Salience
 Decay is applied on the Macro tick; core memories decay slowly, mundane ones quickly.
 
 Crime detection vs. gossip (D3): revoking [Guest_Status] is NOT an omniscient global flag.
-A [Crime] act only propagates reputation when a witness perceives it (a guard's vision cone,
-or a victim entity) — that witness gains a MemoryEvent and, via the gossip/Job_Chat pipeline,
-the village faction's reputation toward Faction 0 degrades and [Guest_Status] is revoked. An
-explicit "caught red-handed" fast path exists (a witnessing [Prof_Guard] reacts immediately),
-but an unwitnessed crime does not instantly alert the whole faction. This reconciles the
-world_bootstrap "revoked on [Crime]" rule with the emergent, non-hivemind reputation model.
+A [Crime] act only propagates reputation when PerceptionSystem creates a WitnessEvent (guard
+vision cone + DDA line of sight, hearing/noise evidence, or a victim entity). That witness
+gains a MemoryEvent and, via the gossip/Job_Chat pipeline, the village faction's reputation
+toward Faction 0 degrades and [Guest_Status] is revoked. An explicit "caught red-handed" fast
+path exists (a witnessing [Prof_Guard] reacts immediately), but an unwitnessed crime does not
+instantly alert the whole faction. This reconciles the world_bootstrap "revoked on [Crime]"
+rule with the emergent, non-hivemind reputation model.
 
 Bounded factions & diplomacy (D4, ADR-12): hard cap on simultaneous factions / Tier-3 LLM
 agents (default 24). When exceeded, the weakest are merged or abstracted into gray-box pools.
-DiplomacyComponent keeps only the top-K relationships (default 12) by |score|/recency;
+FactionCoreComponent.diplomacy keeps only the top-K relationships (default 12) by |score|/recency;
 dropped relationships default to NEUTRAL. Schism splinters and gray-box migrations both
 respect this cap (a schism that would exceed it merges the weakest existing faction first).
 

@@ -57,13 +57,31 @@ class PositionComponent extends RefCounted:
     var exact_pos: Vector3
     var velocity: Vector3 = Vector3.ZERO # Explicitly required for ActionResolution physics math
     var current_node_id: int = -1 # abstract-graph node when Simulated
+    var current_edge: int = -1
+    var edge_progress: float = 0.0
+    var edge_speed: float = 0.0
 
 class PhysicalPropertyComponent extends RefCounted:
     var quantity: int = 1 # Mandatory for stacking (e.g. 10,000 gold coins as 1 entity)
     var mass_kg: float
     var volume_cm3: float
     var temperature: float = 20.0
-    var phase: String = "Solid" 
+    var heat_capacity: float = 1.0
+    var phase: Phase = Phase.SOLID
+
+class BodyComponent extends RefCounted:
+    var max_health: float = 100.0
+    var health: float = 100.0
+    var stamina: float = 100.0
+    var strength: float = 10.0
+    var exposure: Dictionary = {}
+
+class PerceptionComponent extends RefCounted:
+    var sight_range_m: float = 20.0
+    var fov_degrees: float = 110.0
+    var hearing_sensitivity: float = 1.0
+    var awareness_state: AwarenessState = AwarenessState.UNAWARE
+    var last_known_targets: Dictionary = {} # { EntityHandle: Vector3 }
 
 class NeedsComponent extends RefCounted:
     var hunger: float = 0.0
@@ -75,11 +93,12 @@ class NeedsComponent extends RefCounted:
 The Registry Structure
 
 # ECSManager.gd (Autoload)
-var next_entity_id: int = 1
-var active_entities: Array[int] = []
+var generations: PackedInt32Array = PackedInt32Array()
+var free_indices: Array[int] = []
+var active_entities: Array[EntityHandle] = []
 
 # Component Registries (Sparse Sets via Godot Dictionaries)
-var positions: Dictionary = {} # { entity_id: PositionComponent }
+var positions: Dictionary = {} # { EntityHandle: PositionComponent }
 var physicals: Dictionary = {} 
 var needs: Dictionary = {}
 
@@ -90,9 +109,9 @@ var needs: Dictionary = {}
 
 The global event bus (ECSEvents.gd Autoload) communicates state changes.
 
-signal entity_created(entity_id: int, tags: Array[String], initial_pos: Vector3)
-signal entity_destroyed(entity_id: int)
-signal entity_moved(entity_id: int, new_pos: Vector3)
+signal entity_created(entity: EntityHandle, tags: Array[StringName], initial_pos: Vector3)
+signal entity_destroyed(entity: EntityHandle)
+signal entity_moved(entity: EntityHandle, new_pos: Vector3)
 signal chunk_state_changed(chunk_id: Vector3i, is_active: bool)
 
 
@@ -101,17 +120,17 @@ signal chunk_state_changed(chunk_id: Vector3i, is_active: bool)
 The ViewManager (The "Dumb" Viewer)
 
 # ViewManager.gd
-var visual_dictionary: Dictionary = {} # { entity_id: Node3D }
+var visual_dictionary: Dictionary = {} # { EntityHandle: Node3D }
 
-func _on_entity_created(entity_id, tags, pos):
+func _on_entity_created(entity: EntityHandle, tags: Array[StringName], pos: Vector3):
     # Instantiate a purely visual Node3D based on tags. 
     # NO PHYSICS NODES (No CollisionShape3D / RigidBody3D).
     
 func _process(delta):
     # Interpolate visual positions based on ECS exact_pos for smooth rendering
-    for entity_id in visual_dictionary:
-        var node = visual_dictionary[entity_id]
-        var target_pos = ECSManager.positions[entity_id].exact_pos
+    for entity in visual_dictionary:
+        var node = visual_dictionary[entity]
+        var target_pos = ECSManager.positions[entity].exact_pos
         node.global_position = node.global_position.lerp(target_pos, delta * 15.0)
 
 
@@ -122,20 +141,21 @@ Player input does not move the player. It generates data structs that the ECS pr
 
 # ActionIntent Struct
 class ActionIntent extends RefCounted:
-    var type: String # e.g., "MOVE", "MELEE", "DROP"
-    var target_id: int = -1
+    var type: StringName # e.g., &"MOVE", &"MELEE", &"DROP"
+    var target: EntityHandle = EntityHandle.invalid()
     var vector_data: Vector3 = Vector3.ZERO
 
 # ECSManager Data Additions:
-var action_queues: Dictionary = {} # { entity_id: Array[ActionIntent] }
+var action_queues: Dictionary = {} # { EntityHandle: Array[ActionIntent] }
 
 
 
-When Godot reads Input.get_vector(), it pushes an ActionIntent (type="MOVE", vector_data=Input Vector) to Entity 0's action_queue. The ECS Micro Tick pops this queue and applies it to Entity 0's velocity.
+When Godot reads Input.get_vector(), it pushes an ActionIntent (type=&"MOVE", vector_data=Input Vector) to Entity 0's action_queue. The ECS Micro Tick pops this queue and applies it to Entity 0's velocity.
 
 5. Cellular Automata Data Structure (Fluid Dynamics)
 
-Chunks hold 1D arrays representing 2D/3D grids.
+Chunks hold 1D arrays representing the canonical 2D-per-chunk fluid grid plus a separate
+height_map (ADR-3). Do not implement a 3D voxel fluid volume.
 
 class FluidGridComponent extends RefCounted:
     var grid_size: int = 64 
@@ -152,21 +172,26 @@ class FluidGridComponent extends RefCounted:
 
 Mandatory Patch: The main thread will freeze if chunks shift to Active and 50 entities request paths synchronously.
 
-ECS System: Emits request_path(entity_id, start_pos, target_pos). Entity enters Idle_Waiting_For_Path state.
+ECS System: Emits request_path(entity: EntityHandle, start_pos, target_pos). Entity enters Idle_Waiting_For_Path state.
 
 NavBridge (Godot): Queues the requests. Processes max N (e.g., 5) per frame.
 
-NavBridge Query: MUST use NavigationServer3D.query_path_async(). Do NOT use map_get_path().
+NavBridge Query: Sprint 1 must verify the exact Godot 4.7.1 NavigationServer3D API before
+coding. Do NOT mandate a fictional async method. The architecture requirement is that
+NavBridge owns the asynchronous behavior: queue path requests, process a bounded number per
+frame with the pinned API's safe query shape, and fall back to tile_map grid A* if a region or
+API path is unavailable. Do NOT call an unbounded synchronous `map_get_path()` burst that can
+freeze the main thread.
 
-Godot to ECS: Emits path_calculated(entity_id, path_array). Entity shifts to Moving state.
+Godot to ECS: Emits path_calculated(entity: EntityHandle, path_array). Entity shifts to Moving state.
 
 7. Sprint 1 AI: Utility Evaluation Math & The Acoustic Fix
 
 Run this during the Simulation Tick for entities with a NeedsComponent and ScheduleComponent.
 
 # Pseudo-code inside JobResolutionSystem
-func evaluate_needs(entity_id: int) -> String:
-    var needs = ECSManager.needs[entity_id]
+func evaluate_needs(entity: EntityHandle) -> StringName:
+    var needs = ECSManager.needs[entity]
     
     var hunger_urgency = (needs.hunger / 100.0) * 2.0 # Weight multiplier
     var energy_urgency = (1.0 - (needs.energy / 100.0)) * 1.5
@@ -188,7 +213,9 @@ DO NOT instantly assign Job_Combat(Target=Player).
 
 DO spawn an [Ephemeral_Noise_Entity] at the point of impact.
 
-If the Goblin does not have the Player in its VisionCone, its AI parses the noise entity and assigns Job_Investigate(Impact_Location).
+If the Goblin's PerceptionComponent does not currently perceive the player via sight cone +
+DDA line of sight, its AI parses the noise entity and assigns Job_Investigate(Impact_Location)
+instead of omniscient Job_Combat(Target=Player).
 
 8. The GameClock (pulled into Sprint 1 — ADR-9)
 
@@ -213,9 +240,9 @@ The Sim-tick utility evaluator reads GameClock.hour to pick the active schedule 
 These replace move_and_slide / Area3D / physics raycasts. Godot stays a dumb viewer.
 
 # SpatialHash.gd (per Active chunk, rebuilt/updated each Micro tick)
-var cells: Dictionary = {} # { Vector2i(cell_x, cell_z): PackedInt32Array of entity_ids }
-func query_radius(pos: Vector3, r: float) -> Array[int]: ...   # melee/AoE/proximity
-func query_ray(origin: Vector3, dir: Vector3) -> int: ...      # crosshair/mouse pick (grid DDA)
+var cells: Dictionary = {} # { Vector2i(cell_x, cell_z): Array[EntityHandle] }
+func query_radius(pos: Vector3, r: float) -> Array[EntityHandle]: ...   # melee/AoE/proximity
+func query_ray(origin: Vector3, dir: Vector3) -> EntityHandle: ...      # crosshair/mouse pick (grid DDA)
 
 # CollisionResolveSystem (Micro tick, AFTER velocity integration)
 # For each active mover: compute desired exact_pos += velocity*delta, then sweep its AABB
@@ -240,3 +267,19 @@ Sprint 5 bestiary). Kinetic force is in Newtons-equivalent game units:
 A hit "kills" when impact_force exceeds the target's structural threshold
 (target.mass_kg * target.density * TOUGHNESS_CONST). Define TOUGHNESS_CONST in one place.
 Targeting uses PickSystem.query_ray (Section 9), NOT a Godot raycast.
+
+11. Perception, Hearing, and Witness Events (REQUIRED Sprint 1)
+
+Perception is the shared primitive for combat fairness, stealth, crime, and alerts.
+
+# PerceptionSystem.gd (Simulation Tick, with Micro queries for Active combat)
+# Sight: query candidates from SpatialHash, test FOV + range, then DDA line-of-sight through
+# chunk.tile_map. Steam/smoke/solid tiles block or attenuate visibility.
+# Hearing: consume Ephemeral noise payloads / SensoryEmitterComponent, apply wall/material
+# attenuation, and set awareness_state=INVESTIGATING with a last-known location.
+# Witness: if an entity perceives a [Crime] action, emit WitnessEvent(observer, subject,
+# action, location, tick, confidence) and write a MemoryEvent. Reputation changes through
+# gossip/faction_memory, never via a global crime flag.
+
+Tests to add with implementation: unseen crime does not revoke Guest_Status; noise behind a
+wall creates Investigating, not Combat; steam blocks line of sight.

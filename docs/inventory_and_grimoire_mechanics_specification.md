@@ -29,9 +29,12 @@ B. Smart Sub-Containers & Diegetic Sorting
 
 The Concept: Eliminating inventory tetris via rule-based physical bags that exist inside the main backpack.
 
-ECS Implementation: The Backpack's InventoryComponent contains a sub_containers array. Each sub-container is an entity with a FilterTag component.
+ECS Implementation: The Backpack's InventoryComponent contains a sub_containers array. Each
+sub-container is an entity with ContainerComponent capacity and accept/reject filters.
 
-Nesting Limitation: To prevent infinite volume recursion exploits ("bags of holding inside bags of holding"), sub-containers strictly reject items that also possess the [Container] tag.
+Nesting Limitation: To prevent infinite volume recursion exploits ("bags of holding inside
+bags of holding"), sub-containers strictly reject entities with ContainerComponent unless
+their own `allow_nested_container` flag explicitly permits it.
 
 UX Flow: In the UI, the Backpack is a vertical list. Sub-containers act as collapsible headers. Clicking "Auto-Sort" routes items to matching headers based on ECS tags.
 
@@ -133,6 +136,11 @@ splits when a partial amount is spilled/dropped: decrement source.quantity and s
 entity with the removed quantity (and identical material/quality/tags). Pickup auto-merges
 into an existing stack with matching material_id + quality + tags. The [Rupture_Cooldown]
 (3.0s) still guards against cascade emptying.
+
+Materialization policy (review 2026-07-31 A3): backpack contents, sub-containers, Residence
+stash contents, equipped items, artifacts, and caravan cargo are identity-bearing manifests
+when LoD downgrades. Only explicit fungible commodity stacks ledgerize; containers preserve
+nested manifests rather than flattening to raw material ledgers.
 
 Absorb_Tag conservation (review D8): see magic doc §6 — Absorb consumes a quantified
 environmental resource atomically; concurrent absorbs cannot double-spend, and the Dry Run

@@ -17,13 +17,15 @@ Every Tier 2 entity possesses a ScheduleComponent. This maps the 24-hour Macro-T
 
 Sleep (e.g., 22:00 - 06:00): Seeks a designated [Bed] or [Safe_Zone]. Pauses most sensory processing. Replenishes energy.
 
-Work (e.g., 06:00 - 18:00): Executes jobs derived from their ProfessionTag and the faction's global JobQueue.
+Work (e.g., 06:00 - 18:00): Executes jobs derived from their ProfessionComponent and the faction's global JobQueue.
 
 Leisure (e.g., 18:00 - 22:00): Seeks [Social_Zone] (Taverns, Plazas, Shrines). Replenishes morale.
 
 3. Professions & Roles (The Job Enablers)
 
-An entity's ProfessionTag acts as a filter for the faction's JobQueue. The Faction Planner generates hundreds of jobs; the Profession determines who claims what.
+An entity's ProfessionComponent acts as a filter for the faction's JobQueue. Legacy prose like
+`[Prof_Hauler]` is shorthand for `ProfessionComponent.profession = &"Prof_Hauler"`. The
+Faction Planner generates hundreds of jobs; the Profession determines who claims what.
 
 A. The Civilian Economy (Sustainment)
 
@@ -97,9 +99,13 @@ overlaps (queried via the ECS SpatialHash). Sprint 4 magic builds ON this primit
 than introducing it, so social/alert features do not depend on the Sprint 4 magic system.
 
 Job-claim lifecycle (see factions doc §6): the faction JobQueue holds JobComponents with
-status:JobStatus and claimed_by:EntityHandle. A ProfessionTag filters which jobs an entity
+status:JobStatus and claimed_by:EntityHandle. ProfessionComponent filters which jobs an entity
 may claim; claiming sets status=CLAIMED. If the claimant dies/aborts, the job returns to OPEN.
 This prevents orphaned jobs and double-claims within the single-threaded tick.
+
+Perception/witness primitive: social alerting uses PerceptionSystem, not omniscience.
+Witnessed crimes create WitnessEvents and MemoryEvents; unwitnessed crimes do not update
+faction reputation until discovered through normal sensory/evidence paths.
 
 Time source (ADR-9): schedule blocks read the GameClock (introduced in Sprint 1). Sleep
 22:00-06:00, Work 06:00-18:00, Leisure 18:00-22:00 are hour ranges evaluated on the Sim tick.

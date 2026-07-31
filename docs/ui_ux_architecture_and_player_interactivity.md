@@ -91,7 +91,9 @@ As long as Total_Held_Volume < VolumeCapacity_cm3, the item fits. The computer h
 
 Mass Penalty: Total mass_kg held across all slots acts as a divisor against the player's movement speed ActionIntent.
 
-Fluid Handling: Liquids (MAT_WATER, Venom) cannot exist bare in the inventory. If the player tries to "pick up" a puddle, the UI checks for an empty [Container] tag item (like a flask). If none exists, the action fails.
+Fluid Handling: Liquids (MAT_WATER, Venom) cannot exist bare in the inventory. If the player
+tries to "pick up" a puddle, the UI asks the ECS for an empty item with ContainerComponent
+that accepts liquids (like a flask). If none exists, the action fails.
 
 6. The Grimoire (Spell Compilation UI)
 

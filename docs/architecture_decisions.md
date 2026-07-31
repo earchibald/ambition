@@ -109,8 +109,10 @@ the same `objective → jobs` interface if emergent planning is needed.
 between-run persistence (Lineage Journal). Runs may be very long.
 
 **Consequences:**
-- A first-class **Persistence system** is required (promote to an explicit Sprint — see
-  ADR-9 sequencing). Save payload is authoritative and versioned:
+- A first-class **Persistence system** is required and documented in
+  `docs/persistence_and_save_architecture.md`. Recommended slot: Sprint P / Sprint 2.5,
+  after Sprint 1 establishes handles/registries and before Sprint 3 death-loop behavior
+  depends on saves. Save payload is authoritative and versioned:
   - ECS: every component registry (design components to serialize cleanly — see ADR-7).
   - World: `DAG` (with runtime edges), `WorldGrid` (chunk states, tile_maps, ledgers,
     volume pools), lazy-gen status per floor, master seed + RNG stream states (ADR-8).
@@ -185,8 +187,8 @@ GC still runs to clear any residual loose items, but the *economic* tax is appli
 ## ADR-12 — Bounded factions & runtime DAG
 **Decision (fixes review §D4/D5):**
 - Hard cap on simultaneous factions / Tier-3 LLM agents (**default 24**, tunable). When
-  exceeded, merge or abstract the weakest into gray-box pools. `DiplomacyComponent` keeps
-  only the top-K (**default 12**) relationships.
+  exceeded, merge or abstract the weakest into gray-box pools.
+  `FactionCoreComponent.diplomacy` keeps only the top-K (**default 12**) relationships.
 - The runtime **DAG is periodically compacted**: prune edges/nodes with no live
   descendants, artifacts, or physical ruins, on a slow cadence and at each interregnum.
 
@@ -230,10 +232,44 @@ edited into the relevant specs next.
 **UPDATE (2026-07-31): all of the above have now been integrated into their owning specs.**
 See ADVERSARIAL_REVIEW §N and the per-doc "Integrated Corrections" sections. The only
 remaining deferrals are implementation-time (code enforcement of ADR-12 caps, the Persistence
-system build-out, and property/integration tests), not open spec contradictions.
+system build-out per the new Persistence spec, and property/integration tests), not open spec
+contradictions.
 
 ## ADR-15 — Pinned Godot version: 4.7.1
 **Decision (human):** Godot **4.7.1** is the canonical engine version, unless a concrete
 blocker forces otherwise. Pinned in `project.godot` (`config/features "4.7"`),
 `.github/workflows/godot_ci.yml` (`barichello/godot-ci:4.7.1`), and `README.md §5`. All
 three must stay in sync (resolves review I4). Supersedes the earlier 4.2.1 references.
+
+## ADR-16 — Post-review engineering clarifications (2026-07-31)
+**Decision:** The fresh dated review (`docs/ADVERSARIAL_REVIEW_2026-07-31.md`) identified no
+new product-decision blocker. Its engineering clarifications are accepted into the specs:
+
+- **Perception is explicit.** Sight/hearing/witness behavior is owned by PerceptionSystem and
+  uses SpatialHash + DDA line of sight + Ephemeral/SensoryEmitter noise. Crime/reputation
+  requires WitnessEvents, not omniscience.
+- **Persistence is slotted.** `docs/persistence_and_save_architecture.md` defines the ADR-6
+  contract and should land as Sprint P / Sprint 2.5 before Sprint 3 relies on the death loop.
+- **LoD materialization preserves identity.** Only fungible commodity stacks ledgerize.
+  Equipped gear, artifacts, containers/stashes, and caravan cargo preserve manifests.
+- **Mutable topology is tracked.** Tile/elevation/hazard mutations dirty ChunkData,
+  AbstractGraph edges, and Active NavServer regions; grid A* is the fallback while rebaking.
+- **Registry coverage expands.** Containers, heat sources, professions, perception, sensory
+  emitters, materialization policy, and witness events are canonical registry concepts.
+
+## ADR-17 — Control surfaces: invariants, observability, and content validation
+**Decision:** The project treats control surfaces as first-class architecture, not optional
+tooling. Three specs are authoritative:
+
+- `docs/invariants_and_test_strategy.md` defines the non-negotiable invariants and sprint
+  gates. A sprint is not done if it violates those invariants.
+- `docs/debugging_and_observability_architecture.md` defines the debug overlays, event trace,
+  counters, and explainability surfaces needed to tune and audit emergent behavior.
+- `docs/content_authoring_and_schema_validation.md` defines data schemas, ID conventions,
+  cross-reference validation, migrations, and fail-loud content policy.
+- `docs/archetypal_content_catalog.md` defines the initial reusable pure-content object
+  families that exercise existing systems without expanding engine scope.
+
+**Consequence:** Future implementation must add tests, counters, debug views, and content
+validators alongside systems as they come online. These are not polish tasks; they are how the
+simulation remains controllable.
