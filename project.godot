@@ -21,7 +21,10 @@ config/icon="res://icon.svg"
 ; so GameLoopManager._physics_process runs after the state it drives exists (ADR-9).
 ; All three scripts `extends Node` — Godot refuses to autoload anything that does not.
 ECSEvents="*res://singletons/ECSEvents.gd"
+RNGService="*res://singletons/RNGService.gd"
+GameClock="*res://singletons/GameClock.gd"
 ECSManager="*res://singletons/ECSManager.gd"
+World="*res://singletons/World.gd"
 GameLoopManager="*res://singletons/GameLoopManager.gd"
 
 [editor_plugins]
