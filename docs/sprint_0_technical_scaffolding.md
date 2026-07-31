@@ -88,6 +88,21 @@ must fail on `SCRIPT ERROR` / `^ERROR:` in the output.
 
 **R7 — Pin the GUT version.** Use the tag `v9.7.1`, verified green on Godot 4.7.1.
 
+**R8 — The container has no bash. Never write a bashism in a `run:` block.** Found on the first
+real Actions run, not locally: `barichello/godot-ci:4.7.1` ships no bash, so Actions silently
+falls back to `sh -e {0}` (dash). `set -euo pipefail` then dies with
+`Illegal option -o pipefail` and kills the job in its very first step, before a single check
+executes. Name the shell explicitly with `defaults.run.shell: sh` so the constraint is visible
+rather than implicit, and use `set -eu`.
+
+Two consequences follow, and both must be honoured:
+- **No `pipefail`.** Never place a command whose failure must fail the build on the left of a
+  pipe — its exit status is discarded. Redirect to a file and inspect the file instead.
+- **No bash arrays and no `[[ ]]`.** Plain POSIX test syntax only.
+
+This is the fifth verified defect in a workflow that originally reported success while doing
+nothing at all. Local reasoning cannot find this class of bug; only a real run can.
+
 
 
 3. The PR Template

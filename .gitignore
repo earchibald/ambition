@@ -17,3 +17,13 @@ llm_secrets.cfg
 
 # Clearance rendered-preview artifacts
 .clearance-rendered-preview-*/
+
+# CI / test artifacts
+gut_results.xml
+boot.log
+
+# Soak-harness output (ADR-20). Baselines under tests/soak/baselines/ ARE committed.
+soak_out/
+
+# NOTE on *.import above: those sidecars are normally committed so CI does not re-import art
+# from scratch. Harmless while assets/ is empty; revisit before adding real assets.
