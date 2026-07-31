@@ -21,6 +21,10 @@ const WATER_REFRESH_S: float = 0.25
 ## Below this many units a cell is a damp patch, not a puddle, and drawing it is noise.
 const WATER_VISIBLE_MIN_UNITS: int = 8
 
+## How tall a solid tile is drawn. Single source of truth: `DebugOverlay` marches the cursor ray
+## against this same height, so a wall you can see is a wall the cursor readout agrees about.
+const WALL_HEIGHT_M: float = 2.4
+
 var _floors: MultiMeshInstance3D = null
 var _walls: MultiMeshInstance3D = null
 var _water: MultiMeshInstance3D = null
@@ -29,7 +33,7 @@ var _accumulator: float = 0.0
 
 func _ready() -> void:
 	_floors = _make_layer(Vector3(1.0, 0.1, 1.0), Color(0.42, 0.40, 0.38))
-	_walls = _make_layer(Vector3(1.0, 2.4, 1.0), Color(0.24, 0.23, 0.26))
+	_walls = _make_layer(Vector3(1.0, WALL_HEIGHT_M, 1.0), Color(0.24, 0.23, 0.26))
 	_water = _make_layer(Vector3(1.0, 0.12, 1.0), Color(0.20, 0.45, 0.75, 0.65), true)
 	World.world_ready.connect(_on_world_ready)
 	if World.booted:
@@ -63,7 +67,8 @@ func _rebuild_tiles(chunk: ChunkData) -> void:
 		for x in WorldConstants.CHUNK_TILES:
 			var centre: Vector3 = chunk.tile_to_world(x, y)
 			if chunk.is_solid(x, y):
-				wall_transforms.append(Transform3D(Basis.IDENTITY, centre + Vector3(0, 1.2, 0)))
+				var lift := Vector3(0.0, WALL_HEIGHT_M * 0.5, 0.0)
+				wall_transforms.append(Transform3D(Basis.IDENTITY, centre + lift))
 			else:
 				floor_transforms.append(Transform3D(Basis.IDENTITY, centre))
 	_fill(_floors, floor_transforms)

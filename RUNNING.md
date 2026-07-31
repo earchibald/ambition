@@ -47,6 +47,7 @@ You spawn in a 64x64 stone arena. The debug overlay is on by default in the top-
 | `E` | Interact / take | Casts a ray from the camera through `PickSystem`, and pushes a `TAKE` intent if it hits an entity within 2.5 m. |
 | `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
+| `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
 | `Esc` | Cancel | Mapped, not yet consumed. |
 
 There is no mouse-look. The camera is a fixed-offset third-person follow rig.
@@ -94,20 +95,43 @@ The `you:` line is how you verify anything in the table above. Every arena featu
 * `open` / `SOLID`, `elev`, `fluid` — the three tile facts the simulation actually reads.
   `elev` is the number the step-up and drop rules compare; `fluid` is what the CA moves.
 
-So to check the arena is what §3 claims, walk east and watch the numbers:
+There are **two separate questions**, and each has its own tool. Do not confuse them.
 
-| Walk to | Expect |
+**"Is the map what the spec says?"** — use the cursor. No walking. Point the mouse at any tile on
+screen and read the `cursor:` line. The ray is marched against the real height map, so it is
+correct on the ledge and in the pit too, not just on flat ground.
+
+| Point the cursor at | Expect |
 |---|---|
-| tile x=24 (except y=32-33) | You stop. The cursor readout over it says `SOLID`. |
-| tile (24, 32) or (24, 33) | You pass through — that is the doorway. |
-| tiles (40-49, 40-49) | `elev +0.40m`, and you climbed it without jumping. That is the step rule. |
-| tiles (40-45, 12-17) | `elev -2.50m`, and you fell rather than stepped down. |
-| tile (10, 10) | `fluid` above zero. That is the puddle. |
+| tile x=24, any y except 32-33 | `SOLID` |
+| tile (24, 32) or (24, 33) | `open` — the doorway |
+| tiles (40-49, 40-49) | `elev +0.40m` — the ledge |
+| tiles (40-45, 12-17) | `elev -2.50m` — the pit |
+| tile (10, 10) | `fluid` above zero — the puddle |
 
-The `cursor` line reports the tile under your mouse, so you can survey the map without walking
-it. It is derived from the camera ray against the **y=0 ground plane**, so over the raised ledge
-and inside the pit it reads a tile or two off. It is exact on flat ground, which is most of the
-arena. `Tab` also adds the selected entity's tile to the inspector block.
+**"Do the movement rules work?"** — this one needs walking, because the rules are about what
+happens when a body moves into a tile. The cursor cannot answer it: it reads terrain, not
+collision. Watch the `you:` line as you go.
+
+| Walk into | Expect |
+|---|---|
+| the wall at x=24 | You stop, and slide along it rather than sticking |
+| the doorway at (24, 32-33) | You pass through |
+| the ledge at (40-49, 40-49) | You **step up** without jumping, and `you:` reports `elev +0.40m` |
+| the pit at (40-45, 12-17) | You **fall** rather than stepping down, and take fall damage |
+| the diagonal pinch at (50, 20)/(51, 21) | You do **not** slip through the shared corner |
+| the puddle at (10, 10) | `fluid` drops in the cell you displace, and `CA updates` rises |
+
+`Tab` adds the selected entity's tile to the inspector block as well.
+
+### If the text is too small
+
+The overlay defaults to 20 pt at a 1280x720 reference and scales with the window, since the
+project uses `canvas_items` stretch. To change it:
+
+* Press `=` to enlarge and `-` to shrink, at any time. The choice is saved immediately and
+  survives a restart.
+* Or set `"overlay_font_size"` in `debug_config.json` (see the path below). Range is 10 to 64.
 
 The two lines worth watching:
 

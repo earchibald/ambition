@@ -132,6 +132,53 @@ func test_tile_readout_matches_the_authored_arena() -> void:
 	)
 
 
+## Readability is a requirement, not a preference. 13 pt was picked by an agent that never had to
+## read it on a real monitor, and a fixed pixel size does not grow when the window does.
+func test_overlay_text_is_legible_and_adjustable() -> void:
+	assert_gte(
+		DebugFlags.DEFAULT_OVERLAY_FONT_SIZE, 16, "the default overlay size is actually readable"
+	)
+	assert_true(InputMap.has_action(&"overlay_text_bigger"), "text size is adjustable at runtime")
+	assert_true(InputMap.has_action(&"overlay_text_smaller"), "and shrinkable again")
+
+
+## Fixed-pixel CanvasLayer text does not scale with the window, so enlarging the window made the
+## overlay relatively SMALLER. `canvas_items` is what fixes that.
+func test_window_stretch_scales_the_ui() -> void:
+	assert_eq(
+		ProjectSettings.get_setting("display/window/stretch/mode", ""),
+		"canvas_items",
+		"UI scales with the window instead of staying a fixed pixel size"
+	)
+
+
+## The cursor is a SURVEY tool and must be right about the two tiles worth surveying. A y=0 plane
+## intersection is correct on flat ground and wrong on exactly the ledge and the pit — the only
+## tiles in the arena whose elevation is not zero.
+func test_cursor_reads_elevation_from_the_height_map() -> void:
+	var overlay: DebugOverlay = DebugOverlay.new()
+	add_child_autofree(overlay)
+	var chunk: ChunkData = World.active_chunk
+
+	# Straight down onto the ledge: the marched ray must stop at +0.40 m, not at y=0.
+	assert_string_contains(
+		overlay._tile_readout(chunk, Vector2i(45, 45)),
+		"+0.40m",
+		"the ledge tile reports the raised surface"
+	)
+	# The pit floor is 2.5 m down; a flat-plane cursor would report the tile as level ground.
+	assert_string_contains(
+		overlay._tile_readout(chunk, Vector2i(42, 14)),
+		"-2.50m",
+		"the pit tile reports the sunken floor"
+	)
+	assert_lt(
+		chunk.height_at(42, 14),
+		chunk.height_at(45, 45),
+		"the pit and the ledge are genuinely different elevations, so the check is not vacuous"
+	)
+
+
 ## Bullet-time and the inspector shared one key, which is why the inspector was unreachable.
 func test_inspect_and_slow_time_are_separate_actions() -> void:
 	assert_true(InputMap.has_action(&"inspect"), "inspect is mapped")

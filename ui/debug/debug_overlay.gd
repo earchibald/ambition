@@ -9,6 +9,11 @@ extends CanvasLayer
 
 const REFRESH_INTERVAL_S: float = 0.25
 
+## How far the cursor ray is marched, and how finely. 0.25 m is a quarter tile, which is well
+## under the smallest feature in the arena, and 240 samples at 4 Hz costs nothing.
+const CURSOR_MAX_DIST_M: float = 60.0
+const CURSOR_STEP_M: float = 0.25
+
 var _label: Label = null
 var _selected_row: int = -1
 var _accumulator: float = 0.0
@@ -17,9 +22,41 @@ var _accumulator: float = 0.0
 func _ready() -> void:
 	_label = Label.new()
 	_label.position = Vector2(12, 12)
-	_label.add_theme_font_size_override("font_size", 13)
+	# Dark outline: the overlay is drawn over a mid-grey stone floor, and unoutlined light text
+	# on it is barely readable regardless of size.
+	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_label.add_theme_constant_override("outline_size", 6)
+	_apply_font_size()
 	add_child(_label)
 	visible = DebugFlags.tick_counters_enabled
+
+
+## Text size is adjustable at runtime, because "edit a JSON file in the user data directory and
+## restart" is not a real answer to "I cannot read this".
+func _unhandled_input(event: InputEvent) -> void:
+	if not visible or not event.is_pressed():
+		return
+	var delta: int = 0
+	if event.is_action(&"overlay_text_bigger"):
+		delta = 2
+	elif event.is_action(&"overlay_text_smaller"):
+		delta = -2
+	if delta == 0:
+		return
+	DebugFlags.overlay_font_size = clampi(
+		DebugFlags.overlay_font_size + delta,
+		DebugFlags.MIN_OVERLAY_FONT_SIZE,
+		DebugFlags.MAX_OVERLAY_FONT_SIZE
+	)
+	_apply_font_size()
+	DebugFlags.save_config()
+	get_viewport().set_input_as_handled()
+
+
+func _apply_font_size() -> void:
+	if _label == null:
+		return
+	_label.add_theme_font_size_override("font_size", DebugFlags.overlay_font_size)
 
 
 func _process(delta: float) -> void:
@@ -118,29 +155,45 @@ func _player_location() -> String:
 	]
 
 
-## The tile under the mouse, so the arena map can be checked without walking the whole grid.
+## The tile under the mouse. This is a SURVEY tool: it answers "what is over there" for any tile
+## on screen, with no walking involved. Walking is only needed to test the movement RULES, which
+## are a separate question — see the two tables in RUNNING.md.
 ##
-## Derived from the camera ray against the y=0 GROUND PLANE, not from PickSystem: the DDA march
-## only registers a hit on SOLID tiles, so over open floor it correctly returns no tile at all.
-## On the raised ledge and in the pit this therefore reads one tile or two off — labelled below
-## rather than silently wrong.
+## Marched against the actual height map rather than intersected with the y=0 plane. A flat-plane
+## approximation is wrong at exactly the two places worth inspecting — the raised ledge and the
+## pit — because those are the only tiles whose elevation is not zero.
+##
+## Not routed through PickSystem: the DDA march registers a hit only on SOLID tiles, so over open
+## floor it correctly reports nothing at all, which is useless for a terrain survey.
 func _cursor_location() -> String:
 	var chunk: ChunkData = World.active_chunk
 	var camera: Camera3D = get_viewport().get_camera_3d()
 	if chunk == null or camera == null:
 		return "cursor: <no camera>"
+	var tile: Vector2i = _cursor_tile(chunk, camera)
+	if tile.x < 0:
+		return "cursor: <not over the arena>"
+	return "cursor: tile %s   %s" % [_format_tile(tile), _tile_readout(chunk, tile)]
+
+
+## Steps along the camera ray until it meets terrain: either the side of a solid tile, or the
+## floor surface of an open one. Returns (-1, -1) if it leaves the chunk without hitting.
+func _cursor_tile(chunk: ChunkData, camera: Camera3D) -> Vector2i:
 	var mouse: Vector2 = get_viewport().get_mouse_position()
 	var origin: Vector3 = camera.project_ray_origin(mouse)
 	var direction: Vector3 = camera.project_ray_normal(mouse)
-	if absf(direction.y) < 0.0001:
-		return "cursor: <ray parallel to ground>"
-	var distance: float = -origin.y / direction.y
-	if distance < 0.0:
-		return "cursor: <pointing at the sky>"
-	var tile: Vector2i = chunk.world_to_tile(origin + direction * distance)
-	return "cursor (ground plane): tile %s   %s" % [
-		_format_tile(tile), _tile_readout(chunk, tile)
-	]
+	var travelled: float = 0.0
+	while travelled < CURSOR_MAX_DIST_M:
+		var point: Vector3 = origin + direction * travelled
+		var tile: Vector2i = chunk.world_to_tile(point)
+		if _in_chunk(tile):
+			if chunk.is_solid(tile.x, tile.y):
+				if point.y <= TerrainView.WALL_HEIGHT_M:
+					return tile
+			elif point.y <= chunk.height_at(tile.x, tile.y):
+				return tile
+		travelled += CURSOR_STEP_M
+	return Vector2i(-1, -1)
 
 
 ## Kind, elevation and fluid for one tile. Elevation is what the step-up and drop rules read,
