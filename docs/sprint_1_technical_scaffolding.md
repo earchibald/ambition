@@ -304,7 +304,30 @@ func evaluate_needs(handle: int, current: StringName) -> StringName:
         return &"ActionIntent_Work" # Fallback to the ScheduleComponent block
 
 Note: the roadmap's "hunger > 80" and this threshold are now the SAME number (80). The old
-`(hunger/100)*2.0 > 1.5` weighting fired at 75 and contradicted the roadmap.
+`(hunger/100)*2.0 > 1.5` weighting fired at 75 and contradicted the roadmap. Note also that the
+old weights were algebraically INERT — multiplying by a constant and comparing to a constant is
+identical to `hunger > 75`, and the two urgencies were never compared to each other, so it was a
+fixed priority ladder, not utility AI. Sleep was also unreachable while hungry: an NPC at
+hunger 76 / energy 0 returned Consume forever, and with an empty stockpile there was no
+precondition-failure path, so it returned the same unsatisfiable intent every tick, permanently.
+
+JOB LATCH (REQUIRED — without it NavBridge is overrun 10x). The evaluator runs every Simulation
+tick and previously returned a fresh intent with no commitment to the in-flight JobComponent,
+whose `status` field existed but was never consulted. So an NPC walking 10 seconds to the tavern
+re-issued its intent — and a path request — twice per second for the whole trip. At 1,500 NPCs x
+2 Hz that is 3,000 path requests/second against NavBridge's bounded 300/second, so the queue
+grows without bound and every entity sits in Idle_Waiting_For_Path forever. With a latch, an NPC
+re-paths only on destination change (~1 per 30 s) = ~50/s, comfortably inside budget.
+
+    const PREEMPT_MARGIN: float = 1.35
+    const FAIL_COOLDOWN_TICKS: int = 20
+    # If job.status in {CLAIMED, IN_PROGRESS}, KEEP it unless
+    #   new_score > current_score * PREEMPT_MARGIN, or the job aborts.
+    # On precondition failure (e.g. stockpile empty), mark that action unavailable for
+    #   FAIL_COOLDOWN_TICKS so the entity cannot livelock on an unsatisfiable intent.
+
+Prefer a true argmax over comparable scores rather than an if/elif ladder, so hunger 76 does not
+unconditionally beat energy 0.
 
 
 
@@ -356,7 +379,13 @@ SpatialHash rebuild for 1,500 entities costs 0.188 ms (M5 Max) / 0.34 ms (M1) = 
 Micro budget. Rebuild-every-tick is fine up to ~6,000 entities. Do NOT optimize this.
 
 # SpatialHash.gd (per Active chunk, rebuilt each Micro tick). Handles are ints (ADR-19).
-var cells: Dictionary = {} # { Vector2i(cell_x, cell_z): PackedInt64Array }
+# USE A FLAT COUNTING SORT, NOT A Dictionary-of-Arrays. Rebuilding
+# { Vector2i: Array } every Micro tick allocates hundreds of Arrays 60 times a second —
+# sustained GC pressure that shows up as frame SPIKES, not as mean-time cost, so no
+# average-case benchmark catches it. Measured: a flat counting sort into PackedInt32Array
+# buckets is 1.64x faster at N=1500 and 1.74x at N=3000, and is allocation-free.
+#   cell_start: PackedInt32Array  (size cells+1, prefix sums)
+#   cell_items: PackedInt32Array  (size N, row indices bucketed by cell)
 func query_radius(pos: Vector3, r: float) -> PackedInt64Array: ...  # melee/AoE/proximity
 # query_ray MUST return distance, normal, and the tile — PickSystem needs "entity OR tile",
 # and the old `-> EntityHandle` signature could not express a tile hit or a nearest-hit test.

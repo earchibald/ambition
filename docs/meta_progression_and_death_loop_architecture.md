@@ -33,6 +33,24 @@ The Coarse Interregnum Burst: The ECS engine suspends the Micro and Simulation t
 rapidly executes 12 monthly coarse interregnum passes. These are not ordinary hourly Macro
 Ticks; they operate on ledgers, abstract populations, DAG edges, and manifests.
 
+REPUTATION DECAY TOWARD FACTION 0 (REQUIRED — fixes an unwinnable spawn, 2026-07-31).
+ADR-14 fixes Player = Entity 0 = Faction 0 permanently, and `FactionCoreComponent.diplomacy`
+toward Faction 0 is serialized across the Interregnum. So as specified, **hostility is a lineage
+property while competence is not**: if adventurer #3 murdered village guards, adventurer #4
+spawns in the Residence — inside village limits, at 06:00, as a physical novice with a rusted
+dagger — into a faction already at War with Faction 0. That state is unwinnable and reachable in
+a single run. Nothing in any doc bounded it.
+
+Therefore, on each Interregnum pass:
+- Decay every faction's `diplomacy` score toward Faction 0 by **60–75% toward neutral**.
+- Hard-clamp the **spawn faction** (the Surface Village) to a floor of `NEUTRAL` at re-entry.
+- Keep the grievances themselves as **DAG history** the player can read and NPCs can bark about.
+  The scar survives as memory and story; the mechanical hostility mostly does not.
+- Optionally preserve exactly one relationship intact past an extreme threshold, so the system
+  stays legible ("the Dwarves still remember").
+Diegetic justification is free: a year passed, the offender is dead, and the new adventurer is a
+different person who inherited the house.
+
 World Evolution: During this burst:
 
 Ecology: Filth left by the player spawns massive rat populations. Puddles of water evaporate or freeze.

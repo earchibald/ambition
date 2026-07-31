@@ -45,6 +45,17 @@ Every save file has one root object:
 The save payload is authoritative for visited/mutated state. Seeds are only used to lazily
 regenerate unvisited content, consistent with ADR-1.
 
+**CRITICAL (ADR-21) — a plain JSON root cannot hold this payload.** Godot's JSON parses every
+number as a double, so 64-bit integers are silently corrupted. Verified on 4.7.1: an RNG stream
+state of `-5247995915623386297` round-trips to `-5247995915623386112.0`, and the restored stream
+then produces a different sequence (`0.94077587` instead of `0.93109381`). That silently breaks
+ADR-8's only promise. Therefore:
+- Any 64-bit integer — **RNG stream state (§8) and packed EntityHandles (ADR-19)** — is stored as
+  a hi/lo pair of sub-2^32 integers, or via `var_to_str`. Never as a bare JSON number.
+- Bulk `Packed*Array` grids are stored as binary blobs via `var_to_bytes`; the JSON carries only
+  offsets and a checksum. Measured 218x faster to decode (0.02 ms vs 4.1 ms for 262,144 ints).
+- `float` fields are fine in JSON. Only integers wider than 2^53 are at risk.
+
 ## 3. Entity handles and registries
 
 Entity references serialize as `{ "index": int, "generation": int }`. Entity index `0` is

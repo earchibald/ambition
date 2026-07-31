@@ -50,9 +50,29 @@ The Concept: Stealth is heavily compromised by the acoustic properties of the ma
 
 The Acoustic Math: Every material has an Acoustic_Resonance float. MAT_GLASS is 0.9, MAT_IRON is 0.7, MAT_CLOTH is 0.1.
 
-The StealthSystem calculates the player's noise emission radius. To prevent a player carrying 1,000 glass vials from creating an infinite ping that wakes up the entire map, the math uses a logarithmic curve: Base_Noise + Log10(Sum of Inventory Acoustic Values) * Velocity.
+CORRECTED (2026-07-31). The old curve was
+`Base_Noise + Log10(Sum of Inventory Acoustic Values) * Velocity`, described as creating "a hard
+cap where inventory noise cannot exceed a 30-meter radius." It does not. `log10` is unbounded,
+so there is no cap at all — 1,000 glass vials (sum 900) while falling at 10 m/s gives
+`5 + 2.954*10 = 34.5 m`, already past 30. It is also undefined on an empty inventory
+(`log10(0) = -inf`), returns NEGATIVE radii (one cloth item at 20 m/s gives -15 m), and collapses
+to `Base_Noise` at zero velocity, so standing still while carrying 1,000 vials is silent.
 
-This creates a hard cap where inventory noise cannot exceed a 30-meter radius.
+    const BASE_NOISE_M: float = 2.0
+    const K_ACOUSTIC: float = 6.0
+    const V_REF_MPS: float = 3.0
+    const MAX_NOISE_M: float = 30.0
+
+    noise_radius_m = clamp(BASE_NOISE_M
+                           + K_ACOUSTIC * log10(1.0 + acoustic_sum) * (velocity_mps / V_REF_MPS),
+                           BASE_NOISE_M, MAX_NOISE_M)
+
+Verification: empty inventory -> `log10(1) = 0` -> 2 m (defined). 1,000 glass vials walking ->
+19.7 m. Falling at 15 m/s -> clamped to exactly 30 m (the cap is now real). Standing still ->
+2 m, not 0. Monotone in both inputs and never negative.
+
+This feeds `SensoryEmitterComponent.noise_radius_m`, which the hearing model in
+sprint_1_technical_scaffolding §11 converts to decibels and attenuates through walls.
 
 The Solution (Wrapping & Lining): Players have two systemic ways to solve this.
 

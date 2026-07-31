@@ -114,10 +114,40 @@ leader's context stays fresh even when its faction is Abstracted. Individual gos
 feeds Tier-2 MemoryComponents when Active/Simulated and is periodically summarized up into
 faction_memory.
 
-Memory weight & decay (F3): each MemoryEvent has weight:float and core:bool. weight =
-base_weight(event_type) * recency_falloff(age) + emotional_bonus(core). Salience selection
-(LLM) takes the top-3 by weight (Core Memories) plus the 3 most recent, per the LLM doc.
-Decay is applied on the Macro tick; core memories decay slowly, mundane ones quickly.
+Memory weight & decay (F3) — CORRECTED 2026-07-31. Each MemoryEvent has `weight:float`,
+`core:bool`, and now `event_id:int` (globally unique, assigned at creation).
+
+The old rule was `weight = base_weight(type) * recency_falloff(age) + emotional_bonus(core)`.
+Three defects:
+1. **The additive core bonus collapses every core memory to the same weight.** Because
+   `emotional_bonus` depends only on `core`, as `recency_falloff -> 0` every core memory tends to
+   exactly `emotional_bonus`. Worked: 12 core memories, base_weight 10, bonus 5, 24 h half-life,
+   age 240 h -> all twelve weigh 5.0098. "Top-3 by weight" becomes float-noise ordering, so the
+   LLM salience filter degenerates to arbitrary selection.
+2. **Two contradictory decay definitions.** "Decay is applied on the Macro tick" (incremental)
+   versus `recency_falloff(age)` (age-derived). They differ by 720x across an Interregnum, which
+   runs 12 coarse passes to cover 8,760 in-game hours — so under the incremental reading a
+   memory ages 12 hours across a whole year.
+3. **No cap anywhere**, while the gossip loop UNIONS memory lists between idling NPCs with no
+   dedup key. Worked: 200 NPCs x 30 events, fully mixed, is 1.2M MemoryEvent records, with the
+   same event stored many times over.
+
+Canonical:
+
+    const CORE_FLOOR: float = 0.35
+    const MEMORY_HALF_LIFE_H: float = 72.0
+    const MEMORY_CAP: int = 32            # per entity
+    const FACTION_MEMORY_CAP: int = 64
+    BASE_WEIGHT = { WITNESSED_MURDER: 10.0, WAS_ATTACKED: 8.0, FED: 3.0,
+                    TRADED: 2.0, IDLE_CHAT: 0.5 }
+
+    falloff = pow(0.5, age_in_game_hours / MEMORY_HALF_LIFE_H)   # AGE-DERIVED, never incremental
+    weight  = BASE_WEIGHT[type] * (max(CORE_FLOOR, falloff) if core else falloff)
+
+Multiplicative, so core memories keep their RELATIVE ordering forever: a core murder floors at
+3.5 while a core meal floors at 1.05. Gossip sync dedups on `event_id`. On overflow, evict the
+lowest-weight non-core event. Because decay is age-derived, Interregnum tick granularity is
+irrelevant.
 
 Crime detection vs. gossip (D3): revoking [Guest_Status] is NOT an omniscient global flag.
 A [Crime] act only propagates reputation when PerceptionSystem creates a WitnessEvent (guard

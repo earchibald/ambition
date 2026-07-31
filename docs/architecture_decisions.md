@@ -321,18 +321,88 @@ each call, so `intent.target == EntityHandle.invalid()` is **always false**, bre
 **Canonical representation — a plain `int`:**
 
     class_name EH
-    const INVALID: int = -1
+    const INVALID: int = 0        # NOT -1 — see below
     static func make(index: int, generation: int) -> int:
         return (generation << 32) | (index & 0xFFFFFFFF)
     static func index_of(h: int) -> int: return h & 0xFFFFFFFF
     static func gen_of(h: int) -> int:   return h >> 32
+    static func is_valid(h: int) -> bool: return h > 0
 
 Generations start at **1**, so a live handle is never `0` and an uninitialised int is detectable.
+`INVALID = 0`, **not** `-1`: GDScript's `>>` rejects negative operands, and in a constant
+expression it is a hard parse error — verified:
+`const BAD := -1 >> 32` → *"Parse Error: Invalid operands for bit shifting. Only positive
+operands are supported."* (At runtime `-1 >> 32` merely yields a meaningless `-1`, and
+`index_of(-1)` yields 4294967295.) With `INVALID = 0` no negative shift can ever arise.
 Verified: packed-int keys hash by value (`d.has(make(5,1))` → true, size 1); `PackedInt64Array`
 stores them; typed signal params accept them.
 
-**Why int and not `Vector2i`:** `Vector2i` also hashes by value (verified) but stringifies to
-`"(5, 1)"` and does not parse back, so it cannot round-trip through JSON saves.
+**Why int and not `Vector2i`:** `Vector2i` also hashes by value (verified) but `JSON.stringify`
+emits it as the lossy *string* `"(5, 1)"`, which does not parse back. It is also ~26% slower as
+a Dictionary key (measured).
+
+**Why saves still use `{"index": i, "generation": g}` and never a bare packed handle:**
+**Godot's JSON parses every number as a double.** A packed handle above 2^53 loses precision
+outright. Splitting into two sub-2^32 integers is what makes it safe. (This is the same defect
+that breaks RNG stream persistence — see ADR-21.)
+
+**Registry SHAPE matters more than the key type — measured.** Fixing the key alone leaves the
+larger cost in place. Same work (`exact_pos += velocity * dt`), N = 1,500 matching of 3,000:
+
+| Arrangement | ms/tick | speedup |
+|---|---|---|
+| linear scan + mask check (ADR-13 forbids this) | 0.1825 | 1.00x |
+| `query() -> Array[handle]`, AoS Dictionary components | 0.1374 | 1.33x |
+| `query() -> Array[handle]`, SoA Packed columns | 0.0837 | 2.18x |
+| `query() -> PackedInt32Array` **rows**, SoA columns | 0.0611 | 2.99x |
+| archetype block, contiguous rows, SoA columns | 0.0524 | 3.48x |
+
+The archetype index ADR-13 mandates is worth ~1.35x. The **memory layout and the query's return
+shape** are worth another ~2.6x on top. Critically, the difference between rows 2 and 4 is the
+façade's **signature**, not its implementation — so "we can upgrade the index behind the façade
+later" is false by construction. If systems are written against `Array[EntityHandle]` plus
+`positions[handle].exact_pos`, the 2.6x can only be recovered by rewriting every inner loop.
+
+Therefore the query façade contract is fixed **now**:
+- `query(mask) -> PackedInt32Array` of dense **row indices**, never handles.
+- Components are named typed **columns**, fetched once per system per tick *outside* the loop
+  (`var px := ECSManager.col_pos_x`), never via per-entity accessors.
+- A stable `row -> handle` map (`PackedInt64Array`) exists for boundaries only: events, UI, save.
+- `resolve(handle) -> int` (returns -1 if stale) is an explicit **cold-path** call. It should be
+  visibly awkward to use inside a hot loop.
+- Rows for a mask are contiguous or monotonically sorted, so the later archetype-block upgrade
+  is a no-op at every call site.
+- Structural mutation (add/remove component, destroy) defers to a tick boundary so rows are
+  stable for the duration of a system pass.
+
+**Failure mode this closes.** The bug is *latent*, not loud: passing the same handle object
+through a signal works, so early Sprint 1 tests all pass. It fails only on **reconstruction** —
+i.e. save/load, test fixtures, and the debug console — and it fails silently. It also means a
+second write to the same entity creates a duplicate registry entry (measured `size == 2`),
+which directly violates ADR-7's atomic-destroy guarantee.
+Note this is a case of a prior review round converting a minor issue into a critical one while
+marking it resolved: generational handles were adopted partly to stop "dict key churn", and the
+chosen `RefCounted` shape made every registry write leak a duplicate.
+
+## ADR-21 — Save format: JSON cannot hold 64-bit integers
+**Decision (P0 for Sprint P).** `persistence_and_save_architecture.md` §2 mandates a JSON root
+object and §8 mandates saving every `RNGService` stream state. **These are incompatible.**
+Godot's JSON parses all numbers as doubles. Verified on 4.7.1:
+
+    rng.state after 50 draws = -5247995915623386297
+    JSON round trip          -> -5247995915623386112.0   (type FLOAT, not INT)
+    int(parsed) == original  -> false
+    expected next randf 0.93109381  vs  restored 0.94077587   -> CONTINUATION BROKEN
+
+So ADR-8's single promise — "a loaded save continues from the saved stream state" — is silently
+violated by the mandated format. Verified working alternatives: `var_to_bytes`/`bytes_to_var`
+and `var_to_str`/`str_to_var` both round-trip 64-bit ints exactly.
+
+**Canonical:** the JSON root stays as a human-readable *manifest*, but any 64-bit integer
+(RNG stream state, packed handles) must be stored either as a hi/lo pair of sub-2^32 ints or via
+`var_to_str`. Bulk `Packed*Array` grids (`tile_map`, `height_map`, `volume_map`, `material_map`)
+are stored as binary blobs via `var_to_bytes`, with the JSON carrying offsets and a checksum —
+measured **218x faster to decode** than JSON for a 262,144-int array (0.02 ms vs 4.1 ms).
 
 **Consequences:**
 - Registry §1 and every `EntityHandle`-typed field/signal/array become `int` /

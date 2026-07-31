@@ -95,6 +95,39 @@ Let V_base be the base value, Q_local be the local quantity in faction stockpile
 
     Price = V_base * (1 + D_need / (Q_local + 1)) * Quality_Modifier
 
+CORRECTED (2026-07-31). The formula above has a **hard floor at V_base**: with D=5, Q=10,000 the
+multiplier is 1.0005, so a faction drowning in iron still pays full price. There is therefore no
+surplus discount, no price gradient, and nothing to drive the trade-route behaviour the factions
+doc depends on. `D_need` also had no unit, no range, and no update rule (D=1000, Q=0 gives
+1001x base), and `Quality_Modifier` had no values. Canonical replacement:
+
+    D_need in [0, 10], recomputed per Macro tick from the faction's objective target stock
+    const SCARCITY_MAX: float = 4.0     # hard clamp on the multiplier
+    const GLUT_FLOOR: float = 0.25      # price CAN fall to 25% of base
+    const GLUT_REF: float = 200.0
+    const BID_ASK_SPREAD: float = 0.20  # merchant buys at 0.8x, sells at 1.0x
+    QUALITY_MOD = { PRISTINE: 1.0, CHIPPED: 0.65, RUINED: 0.30, SCRAP: 0.10 }
+
+    multiplier = clamp(1.0 + D_need / (Q_local + 1.0) - Q_local / (Q_local + GLUT_REF),
+                       GLUT_FLOOR, SCARCITY_MAX)
+    Price = V_base * multiplier * QUALITY_MOD[condition]
+
+Verification: Q=10,000/D=0 -> clamped to 0.25 -> price 2.5 vs base 10 (a real glut discount).
+Q=0/D=10 -> clamped to 4.0 -> price 40 (bounded). Q=9/D=5/PRISTINE -> 1.457 -> 14.6, which
+matches the Day-0 walkthrough's intended 15. NOTE: that walkthrough's arithmetic as written
+(`1 + D/Q + 1`) has a minimum of 2, so its stated result of 15 was impossible; it needed
+`D/(Q+1) = 0.5`.
+
+Merchants hold a FINITE per-shop coin stock, replenished on the Macro tick from the faction
+ledger. Without it, mined material converts to gold without bound at >= base value.
+
+GOLD SUPPLY SINK (required). GrayBoxSystem adds +50 MAT_GOLD per Macro tick = 1 in-game hour =
+10 real seconds (ADR-9), i.e. 18,000 gold/real-hour/faction and 432,000/real-hour across the
+ADR-12 cap of 24 factions. The only sink is the 40% interregnum entropy tax, applied once per
+player death, giving a steady state of ~648,000 gold per faction. Scale injection with
+`abstract_population` and add a per-Macro-tick consumption sink so ledgers reach steady state
+without depending on the player dying.
+
 Physical Currency: We do not use abstract "Gold" in a UI counter. Gold is physical matter (MAT_GOLD).
 
 Currency granularity (resolves review D6): the atomic coin (MAT_GOLD, quantity-stackable) is worth 1 value unit — the "base_value: 50" in the material table is the value of a unit MASS/nugget of refined gold, NOT a single coin. The barter resolver rounds a float price up to the nearest whole coin and returns change from the merchant's own coin stock; if the merchant cannot make exact change, it rounds in the buyer's favor by <1 coin. Denominations (nugget vs coin) differ only by quantity/mass, not by special-casing.
@@ -123,13 +156,57 @@ The Cleanup: Flowing water pushes Filth into stagnant pools, breeding Tier 1 Swa
 Authoritative note: governed by docs/architecture_decisions.md and the registry.
 
 Consistent heat model (review H2): temperature is not ad-hoc. Each material has a
-heat_capacity; an entity/grid-cell stores temperature and derives thermal energy as
-mass_kg * heat_capacity * temperature. A fixed catalyst like Add_Temperature(1000) adds ENERGY
-(joules-equivalent game units) distributed over the target's mass, so it heats a small item a
-lot and a large volume little. Adjacent cells/entities conduct toward equilibrium each Micro
-tick at a rate scaled by a conduction constant and contact area. Phase changes (freeze <0C,
-boil >100C for water; melt points for metals) trigger on the resulting temperature. This
-replaces per-tag temperature guesses with one representation.
+heat_capacity (see the §2 table); an entity/grid-cell stores temperature and derives thermal
+energy from it. Phase changes trigger on the resulting temperature. This replaces per-tag
+temperature guesses with one representation.
+
+CORRECTED 2026-07-31 — three defects in the original model:
+
+**(a) CONDUCTION NEEDS A STABILITY BOUND AND A CLAMP.** "Conduct toward equilibrium at a rate
+scaled by a conduction constant" gave no constant and no bound. For `T_i += K*dt*sum(T_n - T_i)`
+at dt = 1/60, stability needs `K <= 1/(N*dt)` = 15 for N=4, and monotone convergence needs
+K <= 7.5. Measured over 8 ticks on a 100C/0C pair: K=3 converges (71.5/28.5); K=15 converges
+(50.2/49.8); **K=60 becomes a perfect 2-cycle (100.0/0.0 forever)** — which looks stable because
+energy is conserved, while the cell flickers ICE<->LIQUID<->GAS 30 times a second, spawning and
+destroying steam every frame; **K=150 reaches +3,276,850 / -3,276,750 C in 0.13 s.**
+
+    const CONDUCTION_K: float = 3.0    # game-feel; MUST satisfy K <= 1/(4*dt) = 15
+    # per adjacent pair, once per pair per tick:
+    C_a = mass_a * heat_capacity_a ; C_b = mass_b * heat_capacity_b
+    T_eq = (C_a * T_a + C_b * T_b) / (C_a + C_b)
+    dE = CONDUCTION_K * contact_area_m2 * (T_a - T_b) * dt
+    dE = clamp(dE, -abs(C_b * (T_eq - T_b)), abs(C_a * (T_a - T_eq)))   # cannot overshoot
+    T_a -= dE / C_a ; T_b += dE / C_b
+
+The equilibrium clamp makes overshoot impossible for ANY K, so a mis-tuned constant merely slows
+convergence instead of exploding. Note `CONDUCTION_K` is necessarily a game-feel number: stone's
+real diffusivity gives an equilibration time of ~231 hours at 1 m tiles, i.e. no observable
+transfer at all.
+
+**(b) ENERGY APPLIES TO SURFACE MASS, NOT TOTAL MASS.** Distributing `Add_Temperature(1000)`
+over an entity's whole mass gives absurd results: it raises an iron sword by **+1,485C** (melting
+it) and a human by **+4.1C** (unharmed), and makes a rat 175x more flammable than a human. A
+fireball is a surface effect.
+
+    const SURFACE_DEPTH_CM: float = 0.5
+    heated_mass = min(mass_kg, SURFACE_DEPTH_CM * exposed_area_cm2 * density_kg_per_cm3)
+
+Verification: a human presenting ~4,500 cm2 to the blast heats 2.36 kg -> **+121C**, i.e. severe
+burns. The sword at 200 cm2 heats 0.79 kg -> partial melt. A stone wall at 10,000 cm2 heats
+12.6 kg -> +94C, scorched rather than inert.
+
+**(c) PHASE CHANGE NEEDS LATENT HEAT, AND THE STATE VARIABLE IS ENTHALPY.** As written, a cell's
+bulk temperature crossing 100C flips the WHOLE cell to GAS, so 1,000 kg of water at 99.9C
+flash-boils on receiving 1 kJ (it should boil 0.44 kg). Also `E = m*c*T` with T in Celsius yields
+negative energy below 0C and melts ice with no latent barrier. Store **enthalpy H (joules)** and
+derive temperature and phase fraction from it:
+
+    # material schema gains: latent_fusion_kj_kg, latent_vapor_kj_kg
+    T = f(H, mass, heat_capacity, latent_fusion, latent_vapor)
+    phase_fraction = (H - H_phase_start) / (mass * L)
+
+Water's L_vap is 2,257 kJ/kg and iron needs 370 kJ of L_fus to melt a 1.5 kg sword after reaching
+1538C. Without these, phase changes are free and total.
 
 Reaction matrix keys (review F2): reaction keys are the SORTED tag pair so "A+B" == "B+A".
 Each rule declares whether it fires intra-entity (two tags on one entity) or inter-entity (two

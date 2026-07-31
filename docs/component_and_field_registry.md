@@ -11,7 +11,9 @@ ownership, `swarm_population`, `OwnedByFaction` vs `OwnershipComponent`) cannot 
 
 ## 1. Identity & handles (ADR-7 / ADR-14 / **ADR-19**)
 - **EntityHandle is a plain `int`** — a packed 64-bit value, NOT an object (ADR-19).
-  `index = h & 0xFFFFFFFF`, `generation = h >> 32`, `EH.INVALID = -1`, generations start at 1.
+  `index = h & 0xFFFFFFFF`, `generation = h >> 32`, **`EH.INVALID = 0`**, generations start at 1
+  (so `is_valid(h)` is `h > 0`). Not `-1`: GDScript's `>>` rejects negative operands and a
+  constant-folded `-1 >> 32` is a hard parse error.
   A reused index bumps `generation` so stale reads are detectable. (No bare monotonic ids.)
   **A `RefCounted` handle cannot be a Dictionary key in GDScript** — it hashes by object
   identity, so `d.has(other_handle_with_same_values)` is `false` and the dict silently grows a
@@ -69,7 +71,8 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 
 ## 4. Shared record types
 - `RelationshipState` = `{ score:float(-100..100), status:RelationshipStatus, grievances:Array }`
-- `MemoryEvent` = `{ text:StringName, epoch/tick:int, weight:float, core:bool }`
+- `MemoryEvent` = `{ event_id:int (globally unique — REQUIRED for gossip dedup), text:StringName,
+  tick:int, weight:float, core:bool }`
   (used by both `MemoryComponent` and `FactionCoreComponent.faction_memory`; weight/decay
   model defined in the LLM/factions docs).
 - `WitnessEvent` = `{ observer:EntityHandle, subject:EntityHandle, action:StringName,

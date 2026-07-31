@@ -17,6 +17,52 @@ introduces the PerceptionSystem primitive (sight cone + DDA LoS, hearing/noise e
 witness events) so combat, stealth, and crime are not omniscient. Combat uses the defined
 strength/density/force model, not undefined stats.
 
+MANDATORY BUILD ORDER (added 2026-07-31). The numbered Steps below describe WHAT Sprint 1
+delivers. They are NOT the order to build it in. The Step order puts fluids and collision before
+the grid they run on, and appends SpatialHash as an appendix (§9) although Steps 3, 4, 5, and 6
+all depend on it. Build in these five stages, with a human gate after each of the first four.
+Everything in the Steps still ships; only the sequence changes.
+
+Stage 0 — Skeleton (no gameplay; ADR-7 requires this precede code)
+  EntityHandle (ADR-19 packed int) + free-index list; ECSManager canonical registries + atomic
+  destroy; the query(mask) -> row-indices facade (ADR-19); RNGService streams; ECSEvents signal
+  contract; GameLoopManager three-tick driver; GameClock.
+
+Stage 1 — Hands on keyboard
+  PositionComponent + velocity integrator; ChunkData + a hand-authored test room (no worldgen);
+  SpatialHashSystem; CollisionResolveSystem; ViewManager + camera rig; InputMap + ActionIntent ->
+  action_queue -> velocity; PickSystem.
+  GATE A: a human walks the room and points at things. Fix the interpolation constant, corner
+  catching, and input latency NOW. Hand-rolled character collision fails in feel-only ways
+  (corner catch, stair pop, wall jitter, latency) that NO test detects and ten seconds of play
+  does. Write play note #1.
+
+Stage 2 — Things to do to the room
+  PhysicalProperty + MaterialComposition + derived mass; Inventory/Container with volume+mass and
+  the speed divisor; loose-item integrator with sleep-on-rest; BodyComponent +
+  ActionResolutionSystem melee (§10 energy model); corpse conversion; EphemeralComponent
+  primitive (the shared noise/aura/magic TTL primitive).
+  GATE B: pick up, drop, get slowed, swing, kill. This tests the single riskiest unvalidated bet
+  in the whole design — "combat is just physics" — while it is still cheap to change. Play note #2.
+
+Stage 3 — The world reacts
+  ChemistryComponent tags; thermodynamics (heat capacity, conduction, phase thresholds);
+  FluidDynamicsSystem CA (§5 corrected algorithm); spoilage -> Filth.
+  GATE C: pour water, freeze it, slip on it, bleed into it.
+
+Stage 4 — Something else is alive
+  NeedsComponent + MetabolismSystem; ScheduleComponent reading GameClock; PerceptionSystem
+  (§11); WitnessEvent/MemoryEvent write path; JobComponent + claim lifecycle + utility evaluator
+  with the job latch; NavBridge async queue over grid A*.
+  GATE D: an NPC lives a day, hears you, investigates, eats. Play note #3.
+
+Stage 5 — Observability, built ALONGSIDE Stages 1 and 4, never afterwards
+  Tick/perf strip; ECS entity inspector (selected via PickSystem, which dogfoods the pick path);
+  perception overlay; fluid/tag overlay; raw event log; free camera + spawn console; the
+  --scenario debug boot path (<= 2 s to controllable); the ADR-20 soak harness; tests/perf/
+  benchmark printing real ms per system at N in {50, 500, 1500}.
+  Without a spawn console you cannot reproduce a single success state below on demand.
+
 Step 1: The Tick Driver & ECS Data Structure
 
 The Objective: Establish the decoupled data layer and the Master Clock. The game must run in pure data without Godot rendering a single pixel.

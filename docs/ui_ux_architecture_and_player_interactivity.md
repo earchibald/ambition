@@ -26,7 +26,16 @@ The Gating Mechanism (Crucial): The UI queries the player's MindComponent.insigh
 Dictionary{StringName:int} (registry §2) — e.g. `mind.insight.get(target_tag, 0)`. There is no
 `insight_level` field. It does not show raw data unless the player has earned it.
 
-Insight 0 (Novice): Looking at a puddle. UI says: "Liquid."
+GATE DETAIL, NEVER PRESENCE (corrected 2026-07-31). The Lens is the designated teaching tool and
+was gated behind the very insight a new player lacks — the least information at the moment of
+least knowledge. The rule is now: **the Lens never hides THAT something is dangerous, only WHY.**
+Insight 0 must still surface category and hazard. Additionally, run 1 seeds the Lineage Journal
+with a "Field Primer" of 10-15 pre-unlocked entries for the tags encountered in hour one (water,
+fire, cold, biomass, filth, iron) — diegetically the Residence's previous owner left notes. This
+removes run-1 blindness without flattening the progression curve.
+
+Insight 0 (Novice): Looking at a puddle. UI says: "Liquid — reacts to cold." (Hazard present,
+cause withheld. NOT bare "Liquid".)
 
 Insight 20 (Familiar): UI says: "Water + Unknown Substance."
 
