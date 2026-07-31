@@ -1,0 +1,215 @@
+# Running and Testing The Living Delve
+
+Everything below was executed on macOS with Godot 4.7.1 before it was written down. If a command
+here does not work, that is a bug — file it, do not work around it silently.
+
+## 1. Prerequisites
+
+| Tool | Version | Why |
+|---|---|---|
+| Godot | **4.7.1** exactly | Pinned in `project.godot`, the CI image, and `README.md` §5. Other 4.x versions parse `@abstract` and typed arrays differently. |
+| Python 3 + `gdtoolkit==4.5.*` | for linting only | CI installs it; you only need it locally if you want to lint before pushing. |
+
+Install Godot:
+
+```bash
+brew install --cask godot          # macOS
+godot --version                    # must print 4.7.1
+```
+
+GUT (the test framework) is **vendored** in `addons/gut`. There is nothing to install.
+
+## 2. First run — do this once after cloning
+
+The import step is not optional. `class_name` globals and cross-file enums do not resolve until
+Godot has imported the project, so a fresh clone fails with `Identifier "X" not declared` on
+every single script.
+
+```bash
+cd ambition
+godot --headless --import
+```
+
+## 3. Play it
+
+```bash
+godot res://viewer/Main.tscn
+```
+
+You spawn in a 64x64 stone arena. The debug overlay is on by default in the top-left.
+
+### Controls
+
+| Key | Action | What it does in the ECS |
+|---|---|---|
+| `W` `A` `S` `D` | Move | Pushes a `MOVE` **intent** onto entity 0's action queue. Camera-relative on the XZ plane. Pressing W does not move you; the ECS decides what W means. |
+| `Left mouse` | Attack | `PickSystem.melee_target` selects the nearest living entity inside a 2.0 m reach and a 120° arc, then pushes a `MELEE` intent. |
+| `E` | Interact / take | Casts a ray from the camera through `PickSystem`, and pushes a `TAKE` intent if it hits an entity within 2.5 m. |
+| `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
+| `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
+| `Esc` | Cancel | Mapped, not yet consumed. |
+
+There is no mouse-look. The camera is a fixed-offset third-person follow rig.
+
+### What is in the arena, and what each thing is there to test
+
+The arena is hand-authored in `ecs/world/test_arena.gd`. Every feature exists to exercise one
+rule, so "walking around" is a real test pass:
+
+| Where | Feature | Rule under test |
+|---|---|---|
+| Spawn, tile (8, 32) | You, the cyan box | — |
+| ~3 m east | A **red** box: a corpse rat, 8 HP | Melee, the energy damage model, the gib threshold |
+| ~1.5 m east | A **gold** box: 5 copper nuggets | `TAKE` intent, the loose-item integrator, inventory volume |
+| Tile x=24, full height | Interior wall with a 2-tile doorway at y=32-33 | Wall sliding, and line-of-sight occlusion |
+| Tiles (40-49, 40-49) | Ledge raised 0.4 m | The step-up rule — you should climb it without jumping |
+| Tiles (40-45, 12-17) | Pit, 2.5 m deep | Drop handling and fall damage |
+| Tiles (50, 20) / (51, 21) | Two diagonally touching walls | The vertex-squeeze case: an axis-separated resolve would let you slip through the shared corner |
+| Tile (10, 10) | Blue puddle | The fluid cellular automaton |
+
+### Reading the debug overlay
+
+```
+Spring 1 06:00  |  scenario test_arena
+micro 0.53ms / 8.0ms budget   sim 0.02ms   fluid 0.00ms   spatial 0.49ms
+entities alive 3 (active 3 / cap 3000)   rows 3   free 0
+movers 1  substeps 6  tile-hits 0  entity-hits 0
+CA updates 0  dirty 0   pumped 0
+LoS marches 0 (cache 0, fail 0)  perceived 0  witnesses 0
+stale-handle rejections 0   destroys 0   query rebuilds 13
+```
+
+The two lines worth watching:
+
+* **`micro ... / 8.0ms budget`** appends `<< OVER` when the Micro tick misses ADR-10's budget.
+  With 3 entities it will not. See §6 — it does at 1,500.
+* **`stale-handle rejections`** counts lookups against destroyed entities. Any number above zero
+  after a normal session means something is holding a handle past its generation bump.
+
+`CA updates 0  dirty 0` is correct once the puddle has settled — a settled cell leaves the dirty
+set, which is the whole point of the hysteresis. Break the puddle by walking into it and the
+count rises again.
+
+To change what is drawn, write `debug_config.json` into the user data directory
+(`~/Library/Application Support/Godot/app_userdata/The Living Delve/` on macOS):
+
+```json
+{ "tick_counters_enabled": true, "fluid_overlay_enabled": true, "event_trace_enabled": true }
+```
+
+## 4. Run the tests
+
+The full suite, exactly as CI runs it:
+
+```bash
+godot --headless -s addons/gut/gut_cmdln.gd \
+  -gdir=res://tests \
+  -ginclude_subdirs \
+  -gexit
+```
+
+`-ginclude_subdirs` is **required**, not optional. GUT's `-gdir` does not recurse, so without it
+`tests/invariants/`, `tests/perf/` and `tests/soak/` are silently skipped and the run reports
+green having never opened them.
+
+Expected: **14 scripts, 141 tests, 141 passing, ~7,480 asserts**, in about 1.5 seconds.
+
+One file at a time, which is what you want while iterating:
+
+```bash
+godot --headless -s addons/gut/gut_cmdln.gd -gtest=res://tests/test_fluid_dynamics.gd -gexit
+```
+
+### What each suite covers
+
+| File | Covers |
+|---|---|
+| `test_entity_handle.gd` | Packed 64-bit handles, generation bumps, JSON round-tripping (ADR-19, ADR-21) |
+| `test_ecs_lifecycle.gd` | Row allocation, atomic destroy, the `query(mask)` façade, stale-handle rejection |
+| `test_sprint0_gate.gd` | Autoloads, InputMap, tick cadences, main scene — the Sprint 0 gate as assertions |
+| `test_collision_and_spatial.gd` | Swept AABB, substepping, axis order, diagonal squeeze, step/drop, the spatial hash |
+| `test_fluid_dynamics.gd` | Volume conservation, settling, the ghost apron, LoD round trips, budget deferral |
+| `test_combat_math.gd` | Kinetic energy, the gib threshold, damage floors |
+| `test_perception.gd` | Awareness tiers, symmetric LoS caching, hearing attenuation, witness events |
+| `test_material_and_thermo.gd` | Volume fractions, mass, the enthalpy model, the equilibrium clamp |
+| `test_behaviour.gd` | Utility scoring, hysteresis, the job latch, need-driven preemption |
+| `test_inventory_and_lod.gd` | Container volume, LoD transitions, conservation across them |
+| `test_viewer_visibility.gd` | That you can actually **see** it — see §5 |
+| `invariants/test_forbidden_apis.gd` | The Prime Directive: no physics nodes; `ecs/` never reads wall-clock |
+| `perf/test_micro_tick_benchmark.gd` | The ADR-10 budgets, as numbers — see §6 |
+| `soak/test_soak_invariants.gd` | Long-run conservation and leak checks |
+
+### Lint
+
+```bash
+pip3 install --break-system-packages "gdtoolkit==4.5.*"
+for d in ecs singletons ui viewer tests; do gdlint "$d"; done
+```
+
+Never lint `addons/` — GUT is third-party and is not gdlint-clean.
+
+## 5. Verifying it actually renders
+
+Headless green proves nothing about the screen. Sprint 1 passed 135 tests while rendering an
+empty grey void: nothing in `viewer/` read the tile map, and the player was never announced to
+`ViewManager`, so there was no floor, no walls, and no player body. `test_viewer_visibility.gd`
+exists so that cannot silently recur.
+
+To capture actual frames without a display session:
+
+```bash
+mkdir -p /tmp/frames
+godot --write-movie /tmp/frames/f.png --fixed-fps 10 --quit-after 40 \
+      --resolution 1280x720 res://viewer/Main.tscn
+```
+
+Godot's movie writer emits a PNG per frame. Open the last one. You should see a grey stone floor,
+dark walls, a cyan player box, a red rat, a gold nugget, a blue puddle, and the overlay.
+
+## 6. Performance
+
+The benchmark is a test, not a script, so the budgets fail CI rather than sitting in a wiki:
+
+```bash
+godot --headless -s addons/gut/gut_cmdln.gd \
+  -gtest=res://tests/perf/test_micro_tick_benchmark.gd -gexit
+```
+
+Measured on an M5 Max **debug** build:
+
+```
+PERF  entities=   50  micro(collision+hash)= 0.875 ms  budget=8.0 ms  ok
+PERF  entities=  500  micro(collision+hash)= 4.831 ms  budget=8.0 ms  ok
+PERF  entities= 1500  micro(collision+hash)=13.661 ms  budget=8.0 ms  OVER
+PERF  CA cells= 3844   3.194 ms  0.831 us/cell  -> 20k cells would cost 16.6 ms
+PERF  spatial hash rebuild, 1500 entities = 1.014 ms
+```
+
+**Sprint 1 does not meet the ADR-10 Micro budget at the 1,500-entity target.** Scaling is linear;
+the constant is too high. Do not "fix" this by lowering the entity cap. The agreed response is to
+port the CA and the spatial hash to Rust/GDExtension. See `STATE.md`.
+
+## 7. Git workflow
+
+`main` is stable, `dev` is integration, and you branch off `dev`:
+
+```bash
+git checkout dev && git pull
+git checkout -b feature/my-thing
+# ... work ...
+gh pr create --base dev
+```
+
+Never push to `main`. Never merge your own PR without human review. CI runs lint, import, a boot
+smoke test, and the full GUT suite on every PR into `dev` or `main`.
+
+## 8. When something goes wrong
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Identifier "X" not declared` on every script | Project never imported | `godot --headless --import` |
+| Tests pass but you know they should not | `-ginclude_subdirs` missing, so subdirectories were skipped | Add the flag; check the reported script count is 14 |
+| Boot exits 0 but nothing works | A `_ready()` runtime error still exits 0 | Grep the output for `ECS_BOOT_OK`; its absence is the failure signal |
+| Grey void, no floor or walls | `TerrainView` missing from `Main.tscn` | Run `test_viewer_visibility.gd` |
+| Player invisible | `World._spawn_player` did not emit `entity_created` | Same test |
+| `Input.get_vector()` errors every frame | An action is missing from the InputMap | `test_sprint0_gate.gd` lists every required action |

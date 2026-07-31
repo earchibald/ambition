@@ -5,7 +5,11 @@
 class_name CameraRig
 extends Node3D
 
-const FOLLOW_OFFSET := Vector3(0.0, 6.0, 8.0)
+## Tuned by looking at it, not by guessing. The first values (y=6, z=8) put the horizon halfway
+## up the screen and gave half the frame to empty floor, so the 0.4 m ledge and the 2.5 m pit
+## read as identical flat shapes. A steeper pitch is what makes 2.5D elevation legible, which is
+## the whole reason this camera is third-person.
+const FOLLOW_OFFSET := Vector3(0.0, 11.0, 9.0)
 const FOLLOW_RATE: float = 8.0
 
 @export var camera: Camera3D

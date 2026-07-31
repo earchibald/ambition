@@ -104,6 +104,13 @@ func _spawn_player(chunk: ChunkData) -> void:
 	ECSManager.social_identities[row] = identity
 	ECSManager.add_component_bit(row, ComponentMask.SOCIAL_IDENTITY)
 
+	# ViewManager spawns visuals ONLY in response to this signal. Without it the player had no
+	# body at all: the camera tracked an invisible point, and every movement bug looked instead
+	# like a camera bug. Emitted last, so the entity is fully assembled before anyone sees it.
+	ECSEvents.emit_entity_created(
+		handle, [&"Player"] as Array[StringName], ECSManager.position_of(row)
+	)
+
 
 ## Spawns a simple creature for testing and for the perception/combat gates.
 func spawn_creature(position: Vector3, species: StringName = &"SPC_CORPSE_RAT") -> int:

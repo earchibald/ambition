@@ -54,6 +54,7 @@ func _verify_boot_contract() -> void:
 		&"interact",
 		&"attack",
 		&"inspect",
+		&"slow_time",
 		&"cancel",
 	]:
 		assert(InputMap.has_action(action), "missing InputMap action: %s" % action)

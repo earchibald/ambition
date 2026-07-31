@@ -66,8 +66,9 @@ func _acquire() -> Node3D:
 		reused.visible = true
 		pooled += 1
 		return reused
+	# No mesh here: `_style` assigns a fresh one per entity, so a pooled node never inherits the
+	# previous occupant's appearance.
 	var node := MeshInstance3D.new()
-	node.mesh = BoxMesh.new()
 	add_child(node)
 	return node
 
@@ -77,19 +78,30 @@ func _release(node: Node3D) -> void:
 	_pool.append(node)
 
 
-## Purely cosmetic. Tag-driven colour must always be paired with a shape or label elsewhere;
-## hue alone is not an accessible encoding.
+## Purely cosmetic. Tag-driven colour is always paired with a distinct SIZE here, because hue
+## alone is not an accessible encoding — and because grey-on-grey made every entity in the test
+## arena invisible against the stone floor, which is how a "working" build looked broken.
 func _style(node: Node3D, tags: Array) -> void:
 	if not node is MeshInstance3D:
 		return
 	var mesh_node: MeshInstance3D = node
-	var box: BoxMesh = mesh_node.mesh
+	# Each visual needs its OWN mesh and material. A pooled node handed back with the previous
+	# occupant's mesh would repaint every entity that ever shared it.
+	var box := BoxMesh.new()
+	var colour: Color
 	if tags.has(&"Item"):
 		box.size = Vector3(0.2, 0.2, 0.2)
+		colour = Color(0.95, 0.72, 0.25)
 	elif tags.has(&"Creature"):
 		box.size = Vector3(0.5, 0.5, 0.5)
+		colour = Color(0.80, 0.30, 0.28)
 	else:
 		box.size = Vector3(0.6, 1.8, 0.6)
+		colour = Color(0.35, 0.85, 0.95)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = colour
+	box.material = material
+	mesh_node.mesh = box
 
 
 func counters() -> Dictionary:
