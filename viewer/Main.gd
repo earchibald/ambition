@@ -56,6 +56,7 @@ func _verify_boot_contract() -> void:
 		&"attack_secondary",
 		&"inspect",
 		&"slow_time",
+		&"toggle_gizmos",
 		&"overlay_text_bigger",
 		&"overlay_text_smaller",
 		&"cancel",

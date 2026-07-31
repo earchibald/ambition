@@ -48,10 +48,29 @@ You spawn in a 64x64 stone arena. The debug overlay is on by default in the top-
 | `E` | Interact / take | Takes what is under the cursor, or failing that the nearest thing within 2.5 m **of you**. Reach is measured from the player, never from the camera. |
 | `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
+| `G` | Toggle debug gizmos | Wireframe facing arrow, melee arc, interact radius, sight radius. On by default. |
 | `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
 | `Esc` | Cancel | Mapped, not yet consumed. |
 
-There is no mouse-look. The camera is a fixed-offset third-person follow rig.
+There is no mouse-look. The camera is a fixed-orientation third-person rig with a **deadzone**:
+it does not move at all while you stay within 5 m of its focus point, and outside that it moves
+exactly far enough to put you back on the boundary. It never smooths and never rotates.
+
+### The debug gizmos (`G`)
+
+The player is a featureless box, so the rules that depend on direction and distance had no
+on-screen representation at all. Every radius drawn is **read from the system that enforces it**,
+so a gizmo cannot disagree with the rule it depicts:
+
+| Gizmo | Colour | Source of truth |
+|---|---|---|
+| Facing arrow | yellow | The live aim vector, recomputed each frame from your cursor |
+| Melee wedge | red | `PickSystem.MELEE_REACH_M` (2.0 m) and the ±60° arc test |
+| Interact ring | cyan | `PickSystem.INTERACT_DIST_M` (2.5 m) |
+| Sight ring | violet | `PerceptionComponent.sight_range_m` (12 m), drawn only if the entity has the component |
+
+The wedge is what you aim; if a target is not inside it, the swing will be refused and the event
+feed will say so.
 
 ### What is in the arena, and what each thing is there to test
 

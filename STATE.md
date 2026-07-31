@@ -92,8 +92,31 @@
     Verified after the fixes: the player falls into the pit, lands at frame 32 at 5.4 m/s,
     and rests exactly on the pit floor. **158 tests green**, 12 of them new regression guards in
     `tests/test_playtest_regressions.gd`.
-    STILL UNJUDGED: whether movement FEELS right, `ViewManager.SMOOTHING_RATE = 15.0`, and
-    whether melee reach and arc feel fair.
+    STILL UNJUDGED: whether melee reach and arc feel fair in play.
+
+*   **PLAY NOTE 2026-07-31 (c) — MOTION FEEL. "Swimmy", with a diagnosable cause.**
+    The owner reported the level sloshing around the player enough to cause mild motion
+    queasiness. The cause was TWO independent exponential lags chasing the same moving target at
+    different rates: `ViewManager` smoothed the avatar toward ECS truth at 15.0, and `CameraRig`
+    smoothed the camera toward the player at 8.0. Exponential smoothing toward a moving target
+    never catches it — at speed v and rate k it settles a constant v/k behind. At the 4 m/s walk
+    speed that is 0.27 m for the avatar and 0.50 m for the camera, and the DIFFERENCE is visible
+    drift of the avatar inside its own frame on every acceleration and stop. A third contributor
+    was a per-frame `camera.look_at`, which rotated the entire world a fraction of a degree every
+    frame — invisible in a screenshot, and the most nauseating part of the rig.
+    Both halves are now exact rather than tuned:
+    *   `ViewManager` uses FIXED-TIMESTEP INTERPOLATION between the previous and current
+        simulation positions. Zero steady-state lag, and no tuning constant to get wrong.
+        `SMOOTHING_RATE` is deleted.
+    *   `CameraRig` has a DEADZONE, as the owner suggested. Inside 5 m horizontally (2 m
+        vertically) it does not move at all; outside, it moves exactly far enough to put the
+        player back on the boundary. No smoothing anywhere. Orientation is set once in `_ready`
+        and frozen. The camera tracks the DRAWN position, not raw ECS truth, or it would sit one
+        interpolation fraction ahead of the avatar it frames.
+    Also added, on request: `viewer/debug_gizmos.gd` (`G`) drawing the facing arrow, melee arc,
+    interact radius and sight radius. Every radius is read from the system that enforces it, so a
+    gizmo cannot disagree with its rule. 7 new tests in `tests/test_camera_and_motion.gd` pin the
+    deadzone arithmetic and assert `_process` contains no `look_at`.
 
 *   **PLAY NOTE 2026-07-31 (a) (required by `docs/scope_and_milestones.md` R3):**
     Verified by looking at rendered frames, not by hand at the keyboard — so Gates A/B are

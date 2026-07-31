@@ -31,6 +31,8 @@ static var hard_fail_on_invariant_violation: bool = true
 static var trace_capacity: int = DEFAULT_TRACE_CAPACITY
 
 static var overlay_font_size: int = DEFAULT_OVERLAY_FONT_SIZE
+## Wireframe reach/arc/facing overlays. On by default: Sprint 1 has no other way to see facing.
+static var gizmos_enabled: bool = true
 
 static var _loaded: bool = false
 
@@ -75,6 +77,7 @@ static func _load_config() -> void:
 		parsed.get("hard_fail_on_invariant_violation", hard_fail_on_invariant_violation)
 	)
 	trace_capacity = int(parsed.get("trace_capacity", trace_capacity))
+	gizmos_enabled = bool(parsed.get("gizmos_enabled", gizmos_enabled))
 	overlay_font_size = clampi(
 		int(parsed.get("overlay_font_size", overlay_font_size)),
 		MIN_OVERLAY_FONT_SIZE,
@@ -91,6 +94,7 @@ static func snapshot() -> Dictionary:
 		"hard_fail_on_invariant_violation": hard_fail_on_invariant_violation,
 		"trace_capacity": trace_capacity,
 		"overlay_font_size": overlay_font_size,
+		"gizmos_enabled": gizmos_enabled,
 	}
 
 

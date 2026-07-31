@@ -10,6 +10,11 @@ extends Node
 
 var intents_pushed: int = 0
 
+## The direction the player is currently aiming, recomputed every frame from the cursor. Exposed
+## so DebugGizmos can DRAW it: without this the player is a featureless box with no on-screen
+## indication of facing, and the swing arc is invisible.
+var last_aim: Vector3 = Vector3(0.0, 0.0, 1.0)
+
 var _camera: Camera3D = null
 var _overlay: DebugOverlay = null
 
@@ -44,8 +49,11 @@ func _physics_process(_delta: float) -> void:
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
 
+	# Recomputed every frame, not only on click, so the gizmo shows where a swing WOULD go.
+	last_aim = _aim_direction(row, direction)
+
 	if Input.is_action_just_pressed(&"attack"):
-		_push_attack(row, _aim_direction(row, direction))
+		_push_attack(row, last_aim)
 	if Input.is_action_just_pressed(&"interact"):
 		_push_interact(row)
 	if Input.is_action_just_pressed(&"inspect"):

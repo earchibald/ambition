@@ -8,16 +8,24 @@
 class_name ViewManager
 extends Node3D
 
-## Exponential smoothing toward the ECS position. `lerp(target, delta * 15.0)` overshoots badly
-## at large delta — at delta = 0.5 the weight is 7.5, i.e. 7.5x the distance. This form is
-## frame-rate independent and cannot overshoot.
-const SMOOTHING_RATE: float = 15.0
-
+## FIXED-TIMESTEP INTERPOLATION, not exponential smoothing.
+##
+## The old `lerp(ecs_position, 1 - exp(-15 * delta))` chased a MOVING target, and chasing a moving
+## target never catches it: at speed v with rate k the visual settles a constant v/k behind the
+## truth. At the 4 m/s walk speed that is a permanent 0.27 m lag which appears on acceleration and
+## vanishes on stop. That is the "swimmy" feel — the avatar is rubber-banded to the player's own
+## input.
+##
+## Interpolating between the PREVIOUS and CURRENT physics positions instead is exact: it is the
+## standard fix for 60 Hz simulation under an uncapped render rate, it has zero steady-state lag,
+## and it has no tuning constant to get wrong.
 var spawned: int = 0
 var despawned: int = 0
 var pooled: int = 0
 
 var _visuals: Dictionary = {}
+var _previous: Dictionary = {}
+var _current: Dictionary = {}
 var _pool: Array[Node3D] = []
 
 
@@ -34,6 +42,10 @@ func _on_entity_created(entity: int, tags: Array, initial_pos: Vector3) -> void:
 	node.global_position = initial_pos
 	_style(node, tags)
 	_visuals[row] = node
+	# Seed both endpoints, or the first frame interpolates from the world origin and every new
+	# entity visibly flies in from (0, 0, 0).
+	_previous[row] = initial_pos
+	_current[row] = initial_pos
 	spawned += 1
 
 
@@ -43,21 +55,42 @@ func _on_entity_destroyed(entity: int) -> void:
 		return
 	var node: Node3D = _visuals[row]
 	_visuals.erase(row)
+	_previous.erase(row)
+	_current.erase(row)
 	_release(node)
 	despawned += 1
 
 
-## Interpolates visuals toward ECS truth. Iterates a KEY SNAPSHOT: a signal handler firing
-## mid-iteration would otherwise mutate the dictionary being walked.
-func _process(delta: float) -> void:
-	var weight: float = 1.0 - exp(-SMOOTHING_RATE * delta)
+## Samples ECS truth once per SIMULATION tick. Runs after GameLoopManager because autoloads are
+## processed before scene nodes, so `_current` always holds the position this tick produced.
+func _physics_process(_delta: float) -> void:
+	for row in _visuals.keys():
+		var position: Vector3 = ECSManager.position_of(row)
+		_previous[row] = _current.get(row, position)
+		_current[row] = position
+
+
+## Draws each visual between the last two simulation positions. Iterates a KEY SNAPSHOT: a signal
+## handler firing mid-iteration would otherwise mutate the dictionary being walked.
+func _process(_delta: float) -> void:
+	var fraction: float = Engine.get_physics_interpolation_fraction()
 	for row in _visuals.keys():
 		# An entity destroyed between its signal and this frame must not be dereferenced.
 		if not ECSManager.is_alive(ECSManager.handle_of(row)):
 			_on_entity_destroyed(ECSManager.handle_of(row))
 			continue
-		var node: Node3D = _visuals[row]
-		node.global_position = node.global_position.lerp(ECSManager.position_of(row), weight)
+		var from: Vector3 = _previous.get(row, _current.get(row, Vector3.ZERO))
+		var to: Vector3 = _current.get(row, from)
+		_visuals[row].global_position = from.lerp(to, fraction)
+
+
+## The position a visual is DRAWN at this frame. The camera reads this rather than raw ECS truth,
+## so the player's avatar cannot drift relative to the frame it sits in.
+func visual_position_of(row: int) -> Vector3:
+	if not _current.has(row):
+		return ECSManager.position_of(row)
+	var from: Vector3 = _previous.get(row, _current[row])
+	return from.lerp(_current[row], Engine.get_physics_interpolation_fraction())
 
 
 func _acquire() -> Node3D:
