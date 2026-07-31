@@ -110,3 +110,23 @@ Because property is physically owned and zoned by NPCs, a newly spawned player w
 Entity 0 is initialized with a [Guest_Status] tag inside the Village limits.
 
 This acts as a temporary override in the ECS SocialSystem, preventing [Prof_Guard] entities from attacking them for entering [Zone_Market] or [Zone_Tavern]. This status is permanently revoked if the player commits an act with the [Crime] tag.
+
+7. Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md.
+
+Guest-Status crime (review D3): [Guest_Status] revocation is witness-gated, not omniscient.
+See factions doc §6 — a [Crime] act must be perceived by a witness (guard vision cone or
+victim) to propagate reputation via gossip and revoke guest status; a "caught red-handed"
+fast path exists for a witnessing guard. Unwitnessed crimes do not instantly alert the faction.
+
+Climate cadence (ADR-9): the ClimateSystem runs on the Macro tick = 1 in-game hour, so
+weather (rain -> MAT_WATER puddles, [Mud]) updates at hourly granularity. The 360-day/4-season
+calendar derives from hour counts. This supersedes any "per-macro-tick = per-month" reading.
+
+Player init (ADR-14): Entity 0 = Faction 0. The synthetic Faction-0 DAG node is registered
+here at bootstrap so social/diplomacy systems can track the player like any faction.
+
+Pre-Warm ordering & physics: pre-warm crafted items snap to [Display_Table] coordinates and
+skip the loose-item integrator (Sprint 1 §9) to avoid Day-0 settling churn (matches Sprint 2
+Bootstrapper). Ledger<->physical wealth uses the transactional/idempotent sync (Sprint 2 D1).

@@ -74,11 +74,7 @@ Players can manually write entries to warn their future selves.
 
 Free-form Text: The player can type a physical note before leaving the village (or via a portable "Field Notes" item that uploads to the main journal if they die). Example: "Do not trust the Deep Gnomes on Floor 4, they overcharge for sulfur."
 
-Suggested / Pinned Notes: By shift-clicking an entity or zone in the Tactical Lens, the UI prompts an auto-formatted note: "Pin: High concentration of 
-
-$$Acid$$
-
- in Sector 4-B."
+Suggested / Pinned Notes: By shift-clicking an entity or zone in the Tactical Lens, the UI prompts an auto-formatted note: "Pin: High concentration of [Acid] in Sector 4-B."
 
 5. Re-Entry (The Next Generation)
 

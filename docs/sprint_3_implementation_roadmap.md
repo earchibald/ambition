@@ -28,15 +28,7 @@ When a request is pulled from the queue, query FactionCoreComponent, DiplomacyCo
 CRITICAL - The Salience Filter: Truncate the MemoryComponent to the 5 most recent events and 3 highest-weight "Core Memories". Do not send the entire history.
 
 CRITICAL - Valid Target Enumeration: The context string MUST explicitly list integer IDs of known neighboring factions.
-Success State: Dynamic output: "You are Ug. Pop: 45. Memory: 
-
-$$Player killed 2 guards$$
-
-. Valid Targets: 
-
-$$12: Gnomes, 14: Player$$
-
-."
+Success State: Dynamic output: "You are Ug. Pop: 45. Memory: [Player killed 2 guards]. Valid Targets: [12: Gnomes, Faction-0: Player]." (Player is Faction 0 per ADR-14.)
 
 Step 3: Engine Translation & The Validation Gate
 

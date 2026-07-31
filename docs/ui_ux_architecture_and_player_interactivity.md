@@ -122,3 +122,23 @@ Fluency Low: "The noun? hoard noun? while we verb?!"
 Fluency High: "The Dwarves hoard bread while we starve!"
 
 Bounty Boards: In the Surface Village, the LLM's GATHER_RESOURCES objectives are formatted into physical UI documents on the [Bounty_Board].
+
+8. Integrated Corrections (ADR / Adversarial Review)
+
+Redundant encoding (review G2): the "passive color/particle bleed" that lets experts read the
+sim without the Tactical Lens must NOT rely on hue alone. Each tag pairs a color with a
+distinct shape/motion/particle signature (and the Grimoire's shape language). Acoustic cues
+are additive, never sole. This keeps colorblind and deaf/HoH players on equal footing.
+
+Picking & spatial queries (ADR-2): the Tactical Lens "mouse over an entity to read it" and the
+context-sensitive 'E' router resolve their target via the ECS PickSystem (pure-math camera ray
+through the SpatialHash + tile_map). No Godot physics raycasts / Area3D (Prime Directive).
+NavigationServer3D is only an Active-chunk steering accelerator (sanctioned exception).
+
+Translation Cipher (accessibility, review G1): the cipher uses SEMANTIC replacement (unknown
+words shown as their grammatical function, e.g. "noun?"/"verb?"), never letter/symbol
+scrambling. An accessibility toggle shows raw text. (The old scrambling design is void; see
+ui_ux_qol_review.md for history.)
+
+Inspect input (review, RSI): the Tactical Lens defaults to TOGGLE; a Hold option exists in
+accessibility settings.

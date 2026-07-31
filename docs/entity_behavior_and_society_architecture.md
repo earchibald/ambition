@@ -84,3 +84,25 @@ The Workforce Ratio: The LLM manages ratios, not individuals.
 Example: If the LLM reasons, "We are under attack, we need more defense," it outputs an objective to MILITARIZE.
 
 The Engine Planner receives this, and forcibly reassigns 20% of [Prof_Hauler] entities to [Prof_Guard], directing them to the armory to equip weapons. The sudden lack of Haulers means crops might rot in the fields, leading to starvation a week later—a systemic consequence of the LLM's decision.
+
+6. Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md and
+docs/component_and_field_registry.md.
+
+Aura / Ephemeral primitive is a Sprint 1 deliverable (review G3). Bard morale auras,
+[Alert] auras, and the Sprint 1 [Ephemeral_Noise_Entity] all use ONE shared primitive: an
+EphemeralComponent entity with a TTL and an expanding radius that applies tags to entities it
+overlaps (queried via the ECS SpatialHash). Sprint 4 magic builds ON this primitive rather
+than introducing it, so social/alert features do not depend on the Sprint 4 magic system.
+
+Job-claim lifecycle (see factions doc §6): the faction JobQueue holds JobComponents with
+status:JobStatus and claimed_by:EntityHandle. A ProfessionTag filters which jobs an entity
+may claim; claiming sets status=CLAIMED. If the claimant dies/aborts, the job returns to OPEN.
+This prevents orphaned jobs and double-claims within the single-threaded tick.
+
+Time source (ADR-9): schedule blocks read the GameClock (introduced in Sprint 1). Sleep
+22:00-06:00, Work 06:00-18:00, Leisure 18:00-22:00 are hour ranges evaluated on the Sim tick.
+
+Conversation/rumor sync writes MemoryEvents (registry §4); significant Tier-2 memories are
+periodically summarized up into FactionCoreComponent.faction_memory for the LLM (review B6).

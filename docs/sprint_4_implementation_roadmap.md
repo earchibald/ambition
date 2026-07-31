@@ -56,3 +56,9 @@ When Exposure hits 100, roll on a mutation table. Apply a permanent physiologica
 CRITICAL - Faction Alignment Shift: Connect the SocialSystem to check player tags. If the player mutates to [Tag_Fungal], the Spore-Lord's faction shifts toward neutral, while the Surface Village shifts toward hostile.
 
 Success State: The player wades through toxic sludge. They gain acid resistance, but the village guards refuse to let them into the tavern.
+
+Integrated Corrections (ADR / Adversarial Review): reaction keys are sorted tag-pairs with
+INTRA/INTER scope (F2); temperature uses the material §7 heat model (H2); Absorb_Tag consumes a
+quantified, atomically-guarded environmental resource (D8); magic reuses the Sprint 1 Ephemeral/
+aura primitive; the mutation->faction shift is gossip-propagated reputation, not instant (D3).
+See sprint_4_technical_scaffolding.md §5.

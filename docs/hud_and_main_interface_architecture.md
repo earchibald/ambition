@@ -102,3 +102,20 @@ Save Management (The Lineage):
 "Save & Quit" (Suspends current run).
 
 "Abandon Run" (Force-kills Entity 0, initiating the Interregnum time-skip).
+
+5. Integrated Corrections (ADR / Adversarial Review)
+
+Redundant encoding rule (review G2): information the player must act on in real time MUST use
+redundant channels, never color alone (or sound alone). Every state that has a tag color
+(e.g., [Toxic]=purple) also carries a distinct ICON SHAPE and/or MOTION/PARTICLE pattern, and
+a text label in the Tactical Lens. Acoustic mnemonics are an ADDITIONAL channel, never the
+sole carrier of information (deaf/HoH accessibility). Colorblind filters remain, but do not
+substitute for shape/text redundancy. This is a hard UI rule that Sprint 4 VFX and Sprint 5
+acoustic data must honor.
+
+Picking (ADR-2): HUD mouseover/log-noun tooltips and any world picking resolve targets via the
+ECS PickSystem (camera ray marched through the SpatialHash + tile_map), NOT Godot physics
+raycasts.
+
+Time/versions: schedules and the running log use the GameClock (ADR-9); engine is Godot 4.7.1
+(ADR-15).

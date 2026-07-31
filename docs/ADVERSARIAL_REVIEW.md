@@ -729,3 +729,39 @@ propagated into the specs. Status of each finding:
 - I4 pin one Godot version across project/CI/local; I6 retire build_repo.py; I7 symlink note.
 - J2 normalize mangled markdown/LaTeX across docs.
 - D4/D5/C7 need enforcement in code when the owning sprint lands.
+
+---
+
+## N. Full Integration Pass (2026-07-31)
+
+The human signed off on the [EXEC — FOR REVIEW] items (ADR-2 physics exception, ADR-10 perf
+targets) and pinned Godot 4.7.1 (ADR-15). The previously "STILL OPEN" §M items have now been
+integrated into their owning specs so a fresh adversarial pass reviews one coherent doc set:
+
+- Created docs/component_and_field_registry.md (H3) — canonical components/fields/enums/tags.
+- D2 boundary combat -> sprint_2_technical_scaffolding §7.
+- D3 crime vs gossip -> factions §6 + world_bootstrap §7.
+- D4/D5 caps + DAG compaction -> factions §6, dag §6, sprint_2 §7, sprint_3 §7 (ADR-12).
+- D7 stack split/merge -> inventory_and_grimoire §3 + sprint_5.
+- D8 absorb conservation -> magic §6, inventory_and_grimoire §3, sprint_4 §5.
+- B6 abstract-faction memory -> factions §6, llm §6, sprint_3 §7 (FactionCore.faction_memory).
+- F1 conversation UX -> llm §6, sprint_3 §7.
+- F2 reaction keys/scope -> material §7, sprint_4 §5.
+- F3 memory weight/decay -> factions §6, sprint_6.
+- G1 QoL review relabeled as Resolved Feedback Log.
+- G2 redundant (non-color/sound) encoding rule -> hud §5, ui_ux §8.
+- G3 aura/ephemeral primitive pulled into Sprint 1 -> entity_behavior §6, magic §6.
+- G4 Simulated mover edge_progress -> worldgen §6, sprint_2 §7, ecs §7, day_zero.
+- H1 combat stats/units -> sprint_1 §10 + registry + sprint_5 bestiary.
+- H2 thermodynamics model -> material §7, sprint_4 §5.
+- I4 Godot 4.7.1 pin -> project.godot, CI, README §5, ADR-15.
+- I6 build_repo.py retired (header note). I7 symlink note -> README §5.
+- J2 mangled markdown/LaTeX normalized across docs; stray rendered-preview artifact removed
+  and gitignored.
+- World scale concretized (12 floors + surface, 8x8 chunks/floor, 64x64 tiles) -> dag §6,
+  worldgen §6.
+
+Remaining truly-deferred (correctly, to implementation time, not spec gaps): enforcement of
+ADR-12 caps in code; the Persistence system implementation (ADR-6, spec'd but unslotted);
+property/integration tests for the exploit-prone sync (to be written with the code). These are
+tracked in STATE.md, not as open spec contradictions.

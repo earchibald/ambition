@@ -120,3 +120,24 @@ Medium Insight (21-50): The text is partially translated. Slow_Projectile.
 High Insight (51+): Perfect translation. Heavy_Projectile(Speed: 5, Mass: 20).
 
 Gameplay: A player with Low Insight can still attempt to "Dry Run" the spell to visually guess what the hidden nodes do based on the wireframe simulation, effectively reverse-engineering the magic through trial and error.
+
+3. Integrated Corrections (ADR / Adversarial Review)
+
+Rupture / loose-item motion (review B4/D7): items ejected on backpack rupture (and any
+dropped/thrown solids) move via the Sprint 1 loose-item integrator + grid collision with
+sleep-on-rest (sprint_1_technical_scaffolding.md §9) — there is no Godot rigid-body physics.
+Resting positions are deterministic given the same inputs within a run and are serialized.
+
+Stack split/merge (review D7): a quantity-stacked entity (e.g., 10,000 gold as one entity)
+splits when a partial amount is spilled/dropped: decrement source.quantity and spawn a new
+entity with the removed quantity (and identical material/quality/tags). Pickup auto-merges
+into an existing stack with matching material_id + quality + tags. The [Rupture_Cooldown]
+(3.0s) still guards against cascade emptying.
+
+Absorb_Tag conservation (review D8): see magic doc §6 — Absorb consumes a quantified
+environmental resource atomically; concurrent absorbs cannot double-spend, and the Dry Run
+hologram reflects available environmental quantity.
+
+Grimoire picking/validation: Dry Run uses a dummy math instance (no live physics); geometric
+caps (max radius 15m, max speed) are enforced by the SpellCompiler (Sprint 4). Cipher masking
+is semantic (see ui_ux §8), not scrambled.

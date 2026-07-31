@@ -49,7 +49,7 @@ Step 4: The LoD Boundary System & The Two-Way Sync
 The Objective: Implement the memory-saving core. Entities must safely freeze their physics when the player walks away, without creating exploits.
 Required Implementation:
 
-Build the LoDSystem in the ECS. Track Entity 0's current chunk and its 8 neighbors as Active.
+Build the LoDSystem in the ECS. Track Entity 0's current chunk and its Active set (3x3 same-floor neighborhood + up/down landing chunks per ADR-3) as Active.
 
 Cohesion Check (The Arrow Fix): Projectiles with a [Kinetic_Ephemeral] tag CANNOT be downgraded to Simulated. If they hit a boundary, instantly run a math-based raycast against abstract chunk data and despawn them. Do not freeze them in mid-air.
 

@@ -93,7 +93,7 @@ The global event bus (ECSEvents.gd Autoload) communicates state changes.
 signal entity_created(entity_id: int, tags: Array[String], initial_pos: Vector3)
 signal entity_destroyed(entity_id: int)
 signal entity_moved(entity_id: int, new_pos: Vector3)
-signal chunk_state_changed(chunk_id: int, is_active: bool)
+signal chunk_state_changed(chunk_id: Vector3i, is_active: bool)
 
 
 

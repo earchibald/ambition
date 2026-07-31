@@ -86,3 +86,26 @@ Godot UI: The GrimoireUI allows drag-and-drop connecting of Rune Items. When the
 ECS Interpreter: The ECS receives the payload, verifies the player has the required Runes/Knowledge in their MindComponent, and registers a new Action_ID.
 
 When the player presses 'Cast', Godot sends the Action_ID to the ECS JobQueue, and the ECS handles the physics, spawning the EphemeralEntity and resolving the chemistry tags.
+
+6. Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md.
+
+Absorb_Tag conserves a quantified resource, not a bare tag (review D8). Environmental energy
+is a real quantity (e.g., a campfire's temperature/fuel value). Absorb_Tag removes a bounded
+amount from that quantity and forwards it; the source tag (e.g., [Burning]) is removed only
+when the underlying quantity crosses its extinguish threshold. Concurrent absorbs are resolved
+atomically within the Micro tick (first-come consumes; later casters that find insufficient
+quantity Fizzle), so two casters cannot double-spend the same [Heat].
+
+Auras/ephemerals reuse the Sprint 1 Ephemeral primitive (see entity_behavior §6 / ADR).
+Magic EphemeralEntities have a strict TTL (Sprint 4 scaffolding) and apply Catalyst tags via
+SpatialHash overlap — the same mechanism as bard/alert auras.
+
+Mutation persistence (clarification, ADR-1/ADR-6): mutations are permanent WITHIN a run
+(saved via serialization). On player death, the NEW Entity 0 spawns with a fresh
+BodyComponent (mutations reset — a new adventurer), while MindComponent insight/known_runes
+carry over via the Lineage Journal, per the meta-progression doc.
+
+Skill soft-cap and force units align with the combat model (BodyComponent.strength; force in
+the Newtons-equivalent unit defined in Sprint 1 §10).

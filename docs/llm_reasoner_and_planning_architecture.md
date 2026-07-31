@@ -27,7 +27,7 @@ Recent Events (The Salience Filter): The system parses the MemoryComponent and i
 
 Valid Action Space (Anti-Hallucination): A strict list of valid high-level goals (GATHER_RESOURCES, RAID_FACTION, FORTIFY).
 
-Valid Targets Enumeration: "Available target Faction IDs: [12: Dwarven Outpost, 14: The Player]."
+Valid Targets Enumeration: "Available target Faction IDs: [12: Dwarven Outpost, 0: The Player]." (The player is Faction 0 per ADR-14.)
 
 3. Strict Output Contract (JSON Schema)
 
@@ -63,3 +63,31 @@ Time-Based (Macro Tick): Once every in-game week, a faction re-evaluates its gra
 Crisis Triggers: Severe drops in population or taking direct damage immediately queues a Reasoning Tick.
 
 Diplomatic Ping: The player speaking to a Tier 3 entity triggers a localized, conversational prompt execution.
+
+6. Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md and the registry.
+
+Provider (ADR-5): OpenAI-compatible endpoints via an LLMProvider interface; config is
+{ endpoint, model } (committed, env-overridable) + api_key (env/user://, NEVER committed).
+Tests/CI inject a NullLLMProvider stub returning a canned valid FORTIFY payload. Structured
+output uses response_format {"type":"json_object"} (or provider equivalent). Identical prompts
+are cached by hash within a run to control cost; the staggered queue caps request rate.
+
+AI backbone (ADR-4): the Planner does NOT run GOAP yet — objectives expand via data-driven
+JobTemplates (Sprint 3 §6). "GOAP or Utility AI" language elsewhere means "this pluggable
+planner"; true GOAP may replace it later behind plan(objective, faction) -> jobs.
+
+Player identity (ADR-14): the player is Faction 0 with a synthetic Faction-0 DAG node, so
+"target the player" validates in the Validation Gate. The older "14: The Player" example is
+void; enumerate the player as its real Faction-0 id in Valid Targets.
+
+Abstracted-faction context (review B6): salient memories come from
+FactionCoreComponent.faction_memory (registry §4), which macro systems keep fresh even when
+the faction has no individuals. The Salience Filter selects top-3 by weight + 3 most recent
+(weight/decay model in factions doc §6).
+
+Conversation UX under "never block" (review F1): a Diplomatic Ping (player speaks to a Tier-3
+entity) fires an async request but the ECS never stalls. The NPC immediately emits a diegetic
+"thinking" bark from a local table; when the response lands, the real line replaces it. On
+timeout/error, a fallback line is shown and the objective path uses the Fallback Matrix.

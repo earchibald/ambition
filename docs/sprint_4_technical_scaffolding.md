@@ -89,3 +89,28 @@ func process_exposure(entity_id, delta):
             _trigger_mutation(entity_id, "FUNGAL")
         body.exposure_fungal = 0.0 # Reset to prevent triggering every tick
 
+
+5. Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md and the registry.
+
+Reaction matrix keys (review F2): keys are the SORTED tag pair so order does not matter
+("Burning+Volatile_Gas" == "Volatile_Gas+Burning"). Each rule declares scope: INTRA (two tags
+on one entity) or INTER (two overlapping entities via SpatialHash). Keep the [Reaction_Cooldown]
+anti-recursion lock. Prefer a data-driven rule list over a flat hardcoded dict as content grows.
+
+Thermodynamics (review H2): temperature propagation uses the material/economy §7 heat model
+(heat_capacity, energy = mass*heat_capacity*temp, conduction toward equilibrium). Add_Temperature
+adds energy over mass, not a flat per-entity temperature.
+
+Absorb_Tag conservation (review D8): Absorb consumes a quantified environmental resource
+atomically (magic doc §6); concurrent absorbs cannot double-spend; a Fizzle results if the
+required quantity is absent.
+
+Aura/Ephemeral primitive: Sprint 4 magic BUILDS ON the Sprint 1 Ephemeral primitive
+(entity_behavior §6); EphemeralComponent TTL cleanup is mandatory (§3 above).
+
+Mutation -> faction alignment (review D3): the SocialSystem shift from player mutation tags
+propagates via the witness/gossip reputation path (factions doc §6), not an instant hivemind;
+the Spore-Lord shift toward neutral / Village toward hostile is a reputation delta, gossip-
+propagated. Mutations reset on death; insight persists (magic doc §6).

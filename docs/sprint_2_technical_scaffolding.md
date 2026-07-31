@@ -214,3 +214,20 @@ func execute_boot_sequence(is_player_death: bool):
     ECSManager.add_component(player_id, ChemistryComponent.new(["Guest_Status"]))
 
 
+
+7. Integrated Corrections (open review items landing in Sprint 2)
+
+Boundary combat / cross-LoD interaction (review D2): actions resolve in the ATTACKER's LoD.
+A hostile action from a Simulated chunk into an Active chunk (or exactly on a seam) either
+(a) force-promotes the target chunk to Active if the target is player-adjacent, or
+(b) resolves abstractly (math damage, no animation) if not. Kinetic_Ephemeral projectiles
+never sleep at a boundary — resolve via abstract raycast and despawn (already in _shift_to_
+simulated). State the chosen branch per action type in the ActionResolutionSystem.
+
+Simulated mover progress (review G4): when downgrading to Simulated, DO NOT discard position.
+Set velocity=0 for physics but record current_edge/edge_progress/edge_speed on the abstract
+graph so a world coordinate can be reconstructed for interception and re-promotion to Active.
+
+Faction & DAG caps (ADR-12): the LoD/DAG bootstrap enforces the faction cap (default 24) and
+DiplomacyComponent top-K (default 12); excess factions merge/abstract into gray-box pools.
+Runtime DAG compaction runs on a slow cadence (see DAG doc §6).

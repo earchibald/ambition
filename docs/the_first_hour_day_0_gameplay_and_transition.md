@@ -97,3 +97,17 @@ The wall's MaterialComposition yields 5 MAT_COPPER nuggets.
 The player puts them in their backpack. The InventorySystem adds 5kg to the player's Total_Mass. The player's movement speed slightly decreases due to the Godot character controller reading the new ECS mass float.
 
 The Loop Closes: The player is cold, their stamina is draining, they have 5kg of copper, and they know the Goblin is bringing a guard. They retreat to the elevator. The simulation of Floor 1 returns to Simulated state, while the Village wakes back up into the Active state to receive them.
+
+Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md and the registry. This
+narrative walkthrough predates the ADRs; where it differs, the ADRs win:
+- chunk_id is Vector3i(x,y,floor) (ADR-3); ticks per ADR-9 (Sim 2Hz, Macro hourly).
+- Player = Entity 0 = Faction 0 (ADR-14).
+- Combat targeting uses the ECS PickSystem, and kinetic force uses
+  BodyComponent.strength + the defined force unit (Sprint 1 §10) — not undefined stats.
+- When the Village shifts Active -> Simulated, movers retain current_edge/edge_progress/
+  edge_speed (not just Node_Id) so positions/interceptions can be reconstructed (review G4);
+  wealth uses the transactional/idempotent ledger sync (Sprint 2 D1).
+- Movement/collision is ECS-owned (no move_and_slide); the copper mass affecting speed is the
+  velocity divisor applied in the ECS, read by the viewer.

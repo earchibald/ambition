@@ -60,7 +60,7 @@ jobs:
   test_and_lint:
     runs-on: ubuntu-latest
     container:
-      image: barichello/godot-ci:4.2.1 
+      image: barichello/godot-ci:4.7.1 # ADR-15 (illustrative; the committed workflow is canonical)
     
     steps:
       - name: Checkout Code
@@ -68,8 +68,9 @@ jobs:
 
       - name: GDScript Linter
         run: |
-          pip3 install gdtoolkit
-          gdlint .
+          pip3 install "gdtoolkit==4.3.*"   # pinned
+          # Lint first-party dirs ONLY; never addons/ (third-party GUT is not gdlint-clean).
+          gdlint ecs singletons ui viewer tests
 
       - name: Pre-Import Assets (CRITICAL ANTI-HANG FIX)
         run: |

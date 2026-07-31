@@ -137,3 +137,21 @@ GOAP planner:
 The faction planner instantiates the template's job types, profession-filters them onto Tier-2
 workers, and selects targets via target_selector. The planner exposes plan(objective, faction)
 -> jobs so a true GOAP planner can be swapped in later behind the same interface.
+
+7. Integrated Corrections (open review items landing in Sprint 3)
+
+Abstracted-faction memory (review B6): PromptBuilderSystem reads
+FactionCoreComponent.faction_memory for salient context (populated by macro systems), so a
+leader's prompt is fresh even with no individual Tier-2 entities. Salience = top-3 by weight +
+3 most recent (weight/decay per factions doc §6).
+
+Faction cap enforcement (ADR-12): before queuing a new Tier-3 leader (schism/succession/
+migration), enforce the faction cap (default 24); if exceeded, merge/abstract the weakest
+first so the ReasoningQueue and diplomacy matrix stay bounded.
+
+Conversation UX (review F1): a Diplomatic Ping never blocks — emit a local "thinking" bark
+immediately, replace it when the async response lands, and show a fallback line on timeout
+(FallbackMatrix). See llm doc §6.
+
+Interregnum (ADR-11): the Entropy/Swarm Tax operates on ledgers + swarm counters (already
+corrected in §4). Add the player-death DAG edge to the synthetic Faction-0 node (ADR-14).

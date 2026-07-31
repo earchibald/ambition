@@ -226,3 +226,14 @@ motion), B6 (abstract-faction memory), F2/F3 (reaction keys, memory weights), G-
 (UI/accessibility), H1/H2 (combat stats, thermodynamics), I-series (repo/CI), J-series
 (doc hygiene). These are engineering fixes consistent with the ADRs above; they'll be
 edited into the relevant specs next.
+
+**UPDATE (2026-07-31): all of the above have now been integrated into their owning specs.**
+See ADVERSARIAL_REVIEW §N and the per-doc "Integrated Corrections" sections. The only
+remaining deferrals are implementation-time (code enforcement of ADR-12 caps, the Persistence
+system build-out, and property/integration tests), not open spec contradictions.
+
+## ADR-15 — Pinned Godot version: 4.7.1
+**Decision (human):** Godot **4.7.1** is the canonical engine version, unless a concrete
+blocker forces otherwise. Pinned in `project.godot` (`config/features "4.7"`),
+`.github/workflows/godot_ci.yml` (`barichello/godot-ci:4.7.1`), and `README.md §5`. All
+three must stay in sync (resolves review I4). Supersedes the earlier 4.2.1 references.

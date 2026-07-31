@@ -1,3 +1,15 @@
+RESOLVED FEEDBACK LOG (historical). The four UI/UX growth areas raised below have ALL been
+addressed in the current specs; this file is retained only as a record. See:
+- Accessibility / cipher -> ui_ux §8 (semantic replacement, not scrambling) + hud §5 toggle.
+- Inventory friction -> ui_ux (Smart Backpack) + inventory_and_grimoire (sub-containers,
+  auto-sort, padded pouches).
+- Grimoire iteration -> ui_ux (Blueprint Library) + inventory_and_grimoire (Dry Run).
+- Inspect input fatigue -> Tactical Lens defaults to Toggle (hud §5), passive color+shape
+  bleed (ui_ux §8, with the G2 redundant-encoding rule so it is not color-only).
+The original review text follows unchanged.
+
+---
+
 The tactile, diegetic approach you've taken to the UI is incredibly immersive and respects the systemic core of the game perfectly; evaluating this as a professional game design document targeting your UI/UX team, I'd rate the current architecture as Good.
 
 To push this to Outstanding, we need to address a few areas (Accessibility, Ergonomics, and Feature Completeness) where strict adherence to immersion might accidentally cause player frustration. Here are the primary growth areas:

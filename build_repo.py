@@ -1,3 +1,12 @@
+"""
+RETIRED — one-shot repository bootstrap generator. DO NOT RE-RUN.
+
+Re-running this would overwrite hand-edited files (e.g. .github/workflows/godot_ci.yml,
+project.godot, README.md, CLAUDE.md) that have since diverged from what this script emits.
+Kept only for historical reference (see ADR / ADVERSARIAL_REVIEW §I6). The repository is now
+maintained by hand and by the sprint process, not by this generator.
+"""
+
 import os
 import json
 

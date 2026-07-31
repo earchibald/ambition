@@ -14,7 +14,7 @@ config/name="The Living Delve"
 ; Main scene + icon are restored in Sprint 0 once viewer/Main.tscn and icon.svg exist.
 ; Left unset so the project loads cleanly pre-bootstrap (see ADVERSARIAL_REVIEW §I1).
 ; run/main_scene="res://viewer/Main.tscn"
-config/features=PackedStringArray("4.2", "Forward Plus")
+config/features=PackedStringArray("4.7", "Forward Plus")
 ; config/icon="res://icon.svg"
 
 [autoload]

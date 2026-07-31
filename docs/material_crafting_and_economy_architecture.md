@@ -75,7 +75,7 @@ Mineral
 
 1
 
-Melts into Glass at $T > 1700^\circ\text{C}$.
+Melts into Glass at T > 1700C.
 
 MAT_BIOMASS
 
@@ -115,9 +115,9 @@ Solubility: MAT_VENOM (1 unit) + MAT_WATER (10 units) = Diluted_Poison (Applies 
 
 State Changes (Thermodynamics):
 
-MAT_WATER + $T < 0^\circ\text{C}$ $\rightarrow$ Solid (Ice). Applies [Slippery].
+MAT_WATER + T < 0C -> Solid (Ice). Applies [Slippery].
 
-MAT_WATER + $T > 100^\circ\text{C}$ $\rightarrow$ Gas (Steam). Volumetric cloud, blocks LoS.
+MAT_WATER + T > 100C -> Gas (Steam). Volumetric cloud, blocks LoS.
 
 4. The Crafting Architecture
 
@@ -135,7 +135,7 @@ Stations require an EnergyComponent (Heat).
 
 Station: Forge ([Requires_Heat_Source])
 
-To smelt Iron, the Forge's internal temperature must exceed Iron's melting point ($1538^\circ\text{C}$).
+To smelt Iron, the Forge's internal temperature must exceed Iron's melting point (1538C).
 
 The player (or NPC [Prof_Smith]) must feed it Fuel (Coal, Wood, or Magic).
 
@@ -148,10 +148,10 @@ MAT_COPPER (70%) + MAT_TIN (30%) + Heat = MAT_BRONZE. (Bronze has higher durabil
 There are no fixed prices. Factions value items based on local utility and scarcity.
 
 The Scarcity Math:
-Let $V_{base}$ be the base value, $Q_{local}$ be the local quantity in faction stockpiles, and $D_{need}$ be the faction's current demand (driven by LLM Objectives).
+Let V_base be the base value, Q_local be the local quantity in faction stockpiles, and D_need be the faction's current demand (driven by LLM Objectives).
 
 
-$$Price = V_{base} \times \left(1 + \frac{D_{need}}{Q_{local} + 1}\right) \times Quality\_Modifier$$
+    Price = V_base * (1 + D_need / (Q_local + 1)) * Quality_Modifier
 
 Physical Currency: We do not use abstract "Gold" in a UI counter. Gold is physical matter (MAT_GOLD).
 
@@ -170,3 +170,24 @@ Wear & Tear: Weapons lose Condition based on the hardness of what they hit (stri
 Spoilage: MAT_BIOMASS has a timer. When it hits 0, it transforms into a Filth entity.
 
 The Cleanup: Flowing water pushes Filth into stagnant pools, breeding Tier 1 Swarms (Rats/Slimes).
+
+7. Integrated Corrections: Thermodynamics & Reactions (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md and the registry.
+
+Consistent heat model (review H2): temperature is not ad-hoc. Each material has a
+heat_capacity; an entity/grid-cell stores temperature and derives thermal energy as
+mass_kg * heat_capacity * temperature. A fixed catalyst like Add_Temperature(1000) adds ENERGY
+(joules-equivalent game units) distributed over the target's mass, so it heats a small item a
+lot and a large volume little. Adjacent cells/entities conduct toward equilibrium each Micro
+tick at a rate scaled by a conduction constant and contact area. Phase changes (freeze <0C,
+boil >100C for water; melt points for metals) trigger on the resulting temperature. This
+replaces per-tag temperature guesses with one representation.
+
+Reaction matrix keys (review F2): reaction keys are the SORTED tag pair so "A+B" == "B+A".
+Each rule declares whether it fires intra-entity (two tags on one entity) or inter-entity (two
+overlapping entities, tested via SpatialHash). Reactions are data-driven rules, not a flat
+hardcoded dict, and apply the [Reaction_Cooldown] anti-recursion lock (Sprint 4).
+
+Currency & mass: see §5/§6 above — coin = 1 value unit, base_value 50 is a unit-mass value;
+mass_kg is a derived cache (registry §5).

@@ -63,11 +63,7 @@ Status: Enum (Active, Inactive).
 
 BirthEpoch: Integer.
 
-Tags: List
-
-$$String$$
-
- (e.g., "Militaristic", "Fungal", "Underground").
+Tags: List[String] (e.g., "Militaristic", "Fungal", "Underground").
 
 Edge Data Model:
 
@@ -101,3 +97,24 @@ Surface Empire Node: Periodically pushes "Migration" or "Trade" events to the Su
 
 The Deep Roads Node: Periodically pushes "Invasion" or "Emergence" events to the lowest Dungeon Floor nodes.
 This prevents stagnation during history generation and establishes the pathways for the gray box systems that will run during active gameplay.
+
+6. Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md.
+
+Runtime DAG compaction (review D5): pruning is not only a gen-time step. During gameplay and
+at each Interregnum the DAG accumulates edges (wars, player deaths). Run periodic compaction:
+prune nodes/edges with no live descendants, artifacts, or physical ruins, keeping the graph
+bounded across many death loops. Combined with the faction cap (ADR-12), this bounds both the
+DAG and the diplomacy matrix.
+
+Player node (ADR-14): register a synthetic Faction-0 node for the player at world gen so LLM
+targeting/validation and player-death edges ([Adventurer] --Killed_By--> X) resolve.
+
+World scale (concrete seeds — review "world scale undefined"): initial seeding fixes the
+world dimensions. Defaults (tunable in the world seed): 12 dungeon floors + 1 surface floor;
+each floor is a grid of chunks (default 8x8 chunks/floor; chunk = 64x64 tiles). Epoch loop:
+50 epochs (~500 years). These numbers feed the ADR-10 memory/perf budgets.
+
+Determinism (ADR-1): generation uses the seeded worldgen/dag RNG streams for reproducible
+FIRST generation only; mutated/visited state is saved, not recomputed.

@@ -16,6 +16,8 @@ Before starting any Sprint, you must understand the rules of this universe. The 
 
 docs/ecs_architecture_and_data_layer_specification.md - The foundational rulebook for the pure-data ECS.
 
+docs/component_and_field_registry.md - Canonical component/field/enum/tag registry. Every sprint and system doc must match it (ADR-13).
+
 docs/game_vision_and_architecture_the_living_delve.md - The overarching game design document.
 
 2. System Specifications (The Rules of Reality)
@@ -74,3 +76,20 @@ Sprint 5: Content & Data (JSON Schemas, Dictionaries).
 Sprint 6: LLM Prompt Fine-Tuning.
 
 Note: A dedicated Persistence/Serialization workstream (see ADR-6) is required and is not yet slotted into a numbered sprint; treat it as a first-class deliverable.
+
+5. Tooling & Conventions (Pinned)
+
+Godot Engine: 4.7.1 (canonical). Pinned in three places that MUST stay in sync:
+project.godot (config/features "4.7"), .github/workflows/godot_ci.yml
+(barichello/godot-ci:4.7.1), and this README. Do not upgrade without updating all three.
+
+Linter: gdtoolkit (gdlint/gdformat), pinned in CI. Lints first-party dirs only; never addons/.
+
+Testing: GUT (Godot Unit Test) in addons/gut, installed via script/submodule (Sprint 0).
+
+copilot-instructions.md is a symlink to CLAUDE.md. NOTE: symlinks may not resolve on Windows
+checkouts / some CI runners; contributors on Windows should read CLAUDE.md directly.
+
+build_repo.py was a ONE-SHOT bootstrap generator and is now retired — do NOT re-run it (it
+would overwrite hand-edited files such as the CI workflow and project.godot). Kept only for
+historical reference.

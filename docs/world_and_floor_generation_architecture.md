@@ -219,4 +219,27 @@ The Spine Pathing: The generator must run an A* pathfinding algorithm from the E
 
 Biome Bleed: Biomes do not have hard square edges. Apply a Gaussian blur/dithering algorithm at the borders. A Dwarven Forge bordering a Fungal Cavern should have 10-20 tiles of [Rubble] mixed with [Spores] before fully transitioning.
 
-The Chunking Grid: The map must be divided into chunks (e.g., 64x64 tiles). The ECS LoDSystem evaluates proximity chunk-by-chunk. Only the chunk the player is in, and its 8 immediate neighbors, are set to Active (rendering graphics and real-time physics).
+The Chunking Grid: The map must be divided into chunks (e.g., 64x64 tiles). The ECS LoDSystem evaluates proximity chunk-by-chunk. Only the Active set — the 3x3 same-floor neighborhood around the player's chunk plus the entry/landing chunk of the floor directly above and below (ADR-3) — is set to Active (rendering graphics and real-time physics).
+
+6. Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md and the registry.
+
+2.5D world model (ADR-3): floors are discrete 2.5D planes. chunk_id is Vector3i(x,y,floor).
+The "8 immediate neighbors" Active set is corrected to: the 3x3 SAME-FLOOR neighborhood (9
+chunks) PLUS the entry/landing chunk of the floor directly above and below — not a 3x3x3 cube.
+
+Cellular-Automata dimensionality (review E3): fluid CA runs on a 2D grid per chunk PLUS a
+per-tile height_map (PackedFloat32Array); fluid flows to lower-elevation neighbors. It is NOT
+a 3D voxel volume. Sizing: a 64x64 chunk grid = 4096 cells; simulate only active (dirty)
+cells (ADR-10 budget), overflow to volume_pools/flood buffer.
+
+World scale (concrete): default 12 dungeon floors + surface; 8x8 chunks/floor; chunk = 64x64
+tiles (see DAG doc §6). These bound the ADR-10 budgets. The Spine Pathing / Biome Bleed /
+Chunking rules in §5 operate within these dimensions.
+
+Pathfinding graph ownership (ADR-2): the abstract topological graph built here (nodes = room
+centroids/portals/stairs) is the ECS-owned source of truth for Simulated/Abstracted movement;
+NavigationServer3D is only an Active-chunk steering accelerator. Store current_edge /
+edge_progress / edge_speed on Simulated movers so interception coordinates can be
+reconstructed (review G4).

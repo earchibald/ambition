@@ -94,3 +94,49 @@ Diplomatic Immunity/Hostility:
 At high reputation, the player is granted the Trade status, allowing them to safely access deep-dungeon faction merchants.
 
 At War status, Tier 2 guards will attack the player on sight, and the LLM might dispatch specific "Bounty Hunter" squads (specialized Job Queue) to track the player across floors.
+
+6. Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md and
+docs/component_and_field_registry.md. The following resolve review findings B6, C7, D3,
+D4, D5, F3.
+
+Ownership representation (C7): item ownership is the OwnershipComponent{faction_id} — NOT a
+tag. Zone control uses ClaimTags on the zone entity (distinct from item ownership). The
+"[Owned_By_Faction: N]" tag phrasing elsewhere is void.
+
+Faction memory for Abstracted factions (B6): a leader's salient LLM context cannot depend on
+individual Tier-2 gossip, because Abstracted factions have no individuals. Therefore
+FactionCoreComponent carries its own faction_memory: Array[MemoryEvent]. Macro-level systems
+(GrayBox, war resolution, diplomacy, DAG edges) write MemoryEvents here directly, so a
+leader's context stays fresh even when its faction is Abstracted. Individual gossip still
+feeds Tier-2 MemoryComponents when Active/Simulated and is periodically summarized up into
+faction_memory.
+
+Memory weight & decay (F3): each MemoryEvent has weight:float and core:bool. weight =
+base_weight(event_type) * recency_falloff(age) + emotional_bonus(core). Salience selection
+(LLM) takes the top-3 by weight (Core Memories) plus the 3 most recent, per the LLM doc.
+Decay is applied on the Macro tick; core memories decay slowly, mundane ones quickly.
+
+Crime detection vs. gossip (D3): revoking [Guest_Status] is NOT an omniscient global flag.
+A [Crime] act only propagates reputation when a witness perceives it (a guard's vision cone,
+or a victim entity) — that witness gains a MemoryEvent and, via the gossip/Job_Chat pipeline,
+the village faction's reputation toward Faction 0 degrades and [Guest_Status] is revoked. An
+explicit "caught red-handed" fast path exists (a witnessing [Prof_Guard] reacts immediately),
+but an unwitnessed crime does not instantly alert the whole faction. This reconciles the
+world_bootstrap "revoked on [Crime]" rule with the emergent, non-hivemind reputation model.
+
+Bounded factions & diplomacy (D4, ADR-12): hard cap on simultaneous factions / Tier-3 LLM
+agents (default 24). When exceeded, the weakest are merged or abstracted into gray-box pools.
+DiplomacyComponent keeps only the top-K relationships (default 12) by |score|/recency;
+dropped relationships default to NEUTRAL. Schism splinters and gray-box migrations both
+respect this cap (a schism that would exceed it merges the weakest existing faction first).
+
+Runtime DAG compaction (D5): see the DAG doc — factions that leave no live descendants,
+artifacts, or physical ruins are pruned on a slow cadence and at each Interregnum so the
+diplomacy matrix and DAG do not grow without bound across death loops.
+
+Job-claim lifecycle: JobComponent carries status:JobStatus and claimed_by:EntityHandle. If a
+claimant dies or drops the job, the job returns to OPEN for re-claiming (no orphaned jobs).
+Squads are temporary sub-faction entities with a squad-leader handle; members steer toward
+the leader (cohesion) via the same local-steering path as any mover.

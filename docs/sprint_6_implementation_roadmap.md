@@ -69,3 +69,18 @@ Error: Network Timeout -> Action: Re-queue for next Macro Tick, maintain current
 Error: Invalid JSON -> Action: Default to FORTIFY, log error for dev.
 
 Error: Hallucinated Target ID -> Action: Strip target, default to GATHER_RESOURCES.
+
+Step 5: Integrated Corrections (ADR / Adversarial Review)
+
+Provider (ADR-5): OpenAI-compatible endpoints; response_format {"type":"json_object"} (or
+provider structured-output equivalent). api_key from env/user:// (never committed). Tests use
+NullLLMProvider. Cache by prompt hash; stagger to respect rate limits.
+
+Salience weight/decay (review F3): MemoryEvent.weight = base_weight(event_type) *
+recency_falloff(age) + emotional_bonus(core). Select top-3 by weight (Core Memories) + 3 most
+recent. Decay applied on the Macro tick; core memories decay slowly. Abstracted factions draw
+from FactionCoreComponent.faction_memory (review B6).
+
+Context source: compress from faction_memory + FactionCoreComponent ledger/diplomacy, using
+relative terms (Nearest Enemy: Player (Close)) and the canonical Faction-0 id for the player
+(ADR-14). FallbackMatrix handles timeout / invalid JSON / hallucinated target.

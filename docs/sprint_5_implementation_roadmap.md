@@ -78,3 +78,24 @@ Culture Dictionary: Map tags like [Militaristic] to specific baseline modifiers 
 Language Dictionary: Create mapping tables for the semantic translation UI.
 
 E.g., LANG_GOBLIN: { "food": "grub", "fight": "krump", "gold": "shine" }. When the LLM outputs "food," the UI scrambles it or uses "grub" based on the player's MindComponent.Insight.
+
+Step 5: Integrated Corrections (ADR / Adversarial Review)
+
+Authoritative note: governed by docs/architecture_decisions.md and
+docs/component_and_field_registry.md. All Sprint 5 data must conform to the registry.
+
+Material schema additions: alongside density_kg_per_cm3, base_value, innate_tags,
+acoustic_resonance, add heat_capacity (float) for the thermodynamics model (material §7) and
+melt/boil/freeze points where relevant. mass is derived (registry §5), never stored per item.
+
+Bestiary schema additions: add density (float) and structural toughness so combat's kinetic
+force model (Sprint 1 §10) resolves; include per-species base strength.
+
+Rune Lexicon: geometric_limits are enforced by the SpellCompiler hard caps (max_radius 15,
+max_speed). complexity_cost gates against MindComponent.insight.
+
+Stack split/merge data (review D7): define which items are quantity-stackable and their
+merge key (material_id + quality + tags). Currency: coin = 1 value unit (material §5/§6).
+
+Language/Culture dictionaries feed the SEMANTIC cipher (unknown word -> grammatical function),
+never letter-scrambling (ui_ux §8).
