@@ -46,44 +46,47 @@ res://
 
 
 
-2. GitHub Actions CI Pipeline (Anti-Hang Patch)
+2. GitHub Actions CI Pipeline — REQUIREMENTS (not a copyable YAML body)
 
-This file guarantees that broken simulation logic never merges. It includes the mandatory pre-import step to prevent Godot 4 headless hanging.
+The canonical workflow is the committed `.github/workflows/godot_ci.yml`. The illustrative YAML
+that used to live here was deleted: it had diverged from the committed file and invited
+copy-paste of steps that are now known to be broken.
 
-# .github/workflows/godot_ci.yml
-name: Godot ECS CI Pipeline
+The following requirements were VERIFIED EMPIRICALLY against `barichello/godot-ci:4.7.1` and
+Godot 4.7.1. Each exists because the naive version silently passes while doing nothing.
 
-on:
-  pull_request:
-    branches: [ "dev", "main" ]
-  push:
-    branches: [ "main" ]
+**R1 — The lint step must install pip itself, and must pass `--break-system-packages`.**
+The image contains NO `python3` and NO `pip3`. Its base is Ubuntu 24.04, which ships
+`/usr/lib/python3.12/EXTERNALLY-MANAGED`, so a bare `pip3 install` fails with
+`error: externally-managed-environment` (PEP 668). Verified both the failure and the fix.
 
-jobs:
-  test_and_lint:
-    runs-on: ubuntu-latest
-    container:
-      image: barichello/godot-ci:4.7.1 # ADR-15 (illustrative; the committed workflow is canonical)
-    
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+**R2 — Pin gdtoolkit to the version actually verified against the pinned engine.**
+Use `gdtoolkit==4.5.*` (gdlint 4.5.0). The old `4.3.*` pin predates Godot 4.5+ syntax and
+fails to parse `@abstract` with a parse error rather than a lint error.
 
-      - name: GDScript Linter
-        run: |
-          pip3 install "gdtoolkit==4.3.*"   # pinned
-          # Lint first-party dirs ONLY; never addons/ (third-party GUT is not gdlint-clean).
-          gdlint ecs singletons ui viewer tests
+**R3 — The "does this dir have .gd files" guard must not use `**`.**
+`ls "$d"/**/*.gd` does NOT work: bash `globstar` is off in Actions, so `**` degrades to `*`,
+and `ls` with any non-matching pattern returns non-zero, short-circuiting the `&&`. Verified:
+gdlint was skipped for `ecs` and `singletons` even though both contained `.gd` files.
+Use `[ -n "$(find "$d" -name '*.gd' -print -quit)" ]`.
 
-      - name: Pre-Import Assets (CRITICAL ANTI-HANG FIX)
-        run: |
-          # Forces Godot to build the .godot/ folder headlessly so GUT doesn't time out
-          godot --headless --editor --quit
+**R4 — Import before anything that needs `class_name`.**
+Verified: `class_name` globals and cross-file enums do NOT resolve until the project has been
+imported; `--script` on a fresh checkout dies with `Identifier "X" not declared`. Use
+`godot --headless --import`.
 
-      - name: Run ECS Unit Tests (Headless)
-        run: |
-          # Run GUT tests. Fail the pipeline if any ECS math fails.
-          godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests/ -gexit
+**R5 — GUT must be proven to have actually run tests.**
+GUT exits 0 while running ZERO tests via three separate paths: missing import, an empty test
+dir, and `-gdir` not recursing into subdirectories. All three verified. Therefore the CI must
+pass `-ginclude_subdirs`, emit `-gjunit_xml_file`, and then FAIL the job if the parsed test
+count is 0. A guard of "does gut_cmdln.gd exist" is not sufficient.
+
+**R6 — The boot smoke test must assert a sentinel.**
+Verified: a `Main.tscn` whose `_ready()` throws a hard runtime error still exits 0. The smoke
+step must grep the log for a `ECS_BOOT_OK` sentinel printed at the end of `Main._ready()`, and
+must fail on `SCRIPT ERROR` / `^ERROR:` in the output.
+
+**R7 — Pin the GUT version.** Use the tag `v9.7.1`, verified green on Godot 4.7.1.
 
 
 
@@ -108,11 +111,20 @@ jobs:
 [autoload]
 
 ; Order is critical. Events must exist before Manager. Manager before Loop.
+; All three MUST `extends Node` — Godot refuses to autoload a script that does not.
 ECSEvents="*res://singletons/ECSEvents.gd"
 ECSManager="*res://singletons/ECSManager.gd"
 GameLoopManager="*res://singletons/GameLoopManager.gd"
 [physics]
 common/physics_ticks_per_second=60 ; The engine heartbeat for the Micro Tick
+
+[input]
+; REQUIRED IN SPRINT 0. Sprint 1 Step 4 mandates Input.get_vector(), which pushes an error
+; every frame if these actions are unmapped. The Sprint 0 gate asserts InputMap.has_action()
+; for each of these names.
+;   move_left / move_right / move_forward / move_back  -> A / D / W / S
+;   interact -> E      attack -> Mouse Left      inspect -> Tab
+;   cancel   -> Escape
 
 
 

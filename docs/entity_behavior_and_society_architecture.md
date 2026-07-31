@@ -63,7 +63,8 @@ Engagement Rules: Automatically shifts to Combat_State if an entity with Relatio
 
 The Soldier / Raider ([Prof_Soldier]):
 
-Behavior: Kept in reserve (training in barracks) until the Tier 3 LLM Leader issues a RAID or CONQUER objective.
+Behavior: Kept in reserve (training in barracks) until the Tier 3 LLM Leader issues a
+RAID_FACTION objective (registry §3 `Objective`).
 
 Mechanic: They form a Squad (a temporary sub-faction entity) that moves as a cohesive unit, following a Squad Leader to the target zone.
 
@@ -83,7 +84,8 @@ The Tier 3 Leader (LLM) does not assign these professions manually.
 
 The Workforce Ratio: The LLM manages ratios, not individuals.
 
-Example: If the LLM reasons, "We are under attack, we need more defense," it outputs an objective to MILITARIZE.
+Example: If the LLM reasons, "We are under attack, we need more defense," it outputs the
+FORTIFY objective (registry §3 `Objective`), whose JobTemplate includes ReassignToGuard(ratio).
 
 The Engine Planner receives this, and forcibly reassigns 20% of [Prof_Hauler] entities to [Prof_Guard], directing them to the armory to equip weapons. The sudden lack of Haulers means crops might rot in the fields, leading to starvation a week later—a systemic consequence of the LLM's decision.
 

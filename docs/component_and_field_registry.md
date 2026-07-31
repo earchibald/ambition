@@ -25,7 +25,8 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 | `PhysicalPropertyComponent` | `quantity:int`, `mass_kg:float` (derived cache — see §5), `volume_cm3:float`, `temperature:float`, `heat_capacity:float`, `phase:Phase(enum)` |
 | `MaterialCompositionComponent` | `materials:Dictionary{MaterialID:float}` (percentages, sum≈1.0) |
 | `ChemistryComponent` | `active_tags:Array[StringName]` |
-| `QualityComponent` | `condition:Quality(enum)` |
+| `QualityComponent` | `wear:float` (0.0 pristine → 100.0 destroyed, the authoritative value), `condition:Quality(enum)` (DERIVED band — see §5) |
+| `BoundsComponent` | `half_extents:Vector3` (metres, ADR-18). Required by CollisionResolveSystem and the SpatialHash; any entity that collides or is picked must have one. |
 | `MaterializationComponent` | `policy:MaterializationPolicy(enum)`, `item_class:StringName`, `manifest_id:int` |
 | `NeedsComponent` | `hunger:float`, `energy:float`, `morale:float` |
 | `BodyComponent` | `max_health:float`, `health:float`, `stamina:float`, `strength:float`, `mutations:Array[StringName]`, `skills:Dictionary{StringName:float}`, `exposure:Dictionary{StringName:float}` |
@@ -71,16 +72,32 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 
 ## 5. Derived values (single source of truth)
 - **mass_kg** is a cache: `mass_kg = volume_cm3 * Σ(materials[m] * density[m])` using
-  `density_kg_per_cm3` from the Sprint 5 material dictionary. Recompute on composition/volume
-  change. Never edit independently. (review C5)
+  `density_kg_per_cm3` from the SEED material dictionary in
+  `material_crafting_and_economy_architecture.md` §2 (authoritative from Sprint 1; Sprint 5
+  expands it). Recompute on composition/volume change. Never edit independently. (review C5)
+- **condition** is a derived band over `wear` — never set independently:
+  `wear < 25 → PRISTINE`, `< 50 → CHIPPED`, `< 85 → RUINED`, else `SCRAP`.
+  Degradation always writes `wear` (a float, on a Simulation-tick cadence), because an enum
+  cannot be decremented "by 1 point per tick" or multiplied by a percentage.
 - **item value** derives from composition base_values × quality modifier; prices apply the
   scarcity formula (material/economy doc).
 
 ## 6. Chunk & world data
 - `ChunkData` = `chunk_id:Vector3i`, `state:LoD`, `biome_tag:StringName`,
-  `tile_map:PackedInt32Array`, `height_map:PackedFloat32Array` (2.5D), `volume_pools:Dictionary`,
+  `tile_map:PackedInt32Array`, `height_map:PackedFloat32Array` (2.5D, metres),
+  `ambient_temperature_c:float`, `volume_pools:Dictionary`,
   `swarm_population:int`, `wealth_materialized:bool`, `tile_map_dirty:bool`,
-  `topology_dirty:bool`, `nav_region_dirty:bool`.
+  `topology_dirty:bool`, `nav_region_dirty:bool`,
+  and the **cellular-automata fluid buffers** (these had no owner before):
+  `volume_map:PackedInt32Array` (read buffer), `next_volume_map:PackedInt32Array` (write
+  buffer), `material_map:PackedInt32Array`, `dirty_cells:Dictionary` (used as a sparse set of
+  cell indices — this is the ADR-10 "active cell" set), `flood_buffer:Dictionary`
+  ({cell_index: pending_volume}).
+  All grids are `CHUNK_TILES * CHUNK_TILES` = 4096 entries, row-major: `index = y * 64 + x`.
+- There is **no** separate `FluidGridComponent`. Chunks are not entities; the fluid grid is
+  chunk data. (Sprint 1 scaffolding's `FluidGridComponent` is superseded by these fields.)
+- `ChunkData` ownership: Sprint 1 hand-authors a single test-arena chunk; Sprint 2's
+  `WorldGrid` generator becomes the real producer. The consumer contract does not change.
 - Tier-1 swarms are **integers** (`ChunkData.swarm_population` / zone `ZonePopulationComponent`),
   not individual entities, until materialized on Active.
 - Zone-level population uses the same integer abstraction as chunks; if modeled as data rather
@@ -89,7 +106,9 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 ## 7. Tag vocabulary conventions
 - Tags are `StringName` in `ChemistryComponent.active_tags` (state/chemistry) — e.g.
   `&"Burning"`, `&"Wet"`, `&"Toxic"`, `&"Filth"`, `&"Kinetic_Ephemeral"`, `&"Guest_Status"`,
-  `&"Reaction_Cooldown"`, `&"Muffled"`, `&"Bursting"`.
+  `&"Reaction_Cooldown"`, `&"Muffled"`, `&"Bursting"`, `&"Slippery"`, `&"Rupture_Cooldown"`.
+- **Phase is NOT a tag.** `Solid`/`Liquid`/`Gas` are `Phase` enum values on
+  `PhysicalPropertyComponent.phase`. Never write `&"Solid"` into `active_tags`.
 - **Ownership is NOT a tag** — use `OwnershipComponent`. Zone control uses `ClaimTags` on the
   zone entity, which is distinct from item ownership.
 - **Profession is NOT an ad-hoc tag** in implementation docs — use `ProfessionComponent`;

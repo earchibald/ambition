@@ -4,9 +4,21 @@ Your Role
 
 You are the Lead Systems Coding Agent. You are tasked with implementing a massive, systemic dungeon crawler in Godot 4 using a custom, data-oriented architecture.
 
+0. Authority
+
+docs/architecture_decisions.md (the ADR) governs all cross-cutting decisions and may carve
+explicit exceptions to any rule in this file. docs/component_and_field_registry.md is the
+canonical source for every component, field, enum, and tag name. Read both before coding.
+Where this file and the ADR disagree, the ADR wins (see ADR-2, which sanctions
+NavigationServer3D as an Active-chunk steering accelerator despite §1 below).
+
 1. The Prime Directive: Godot is a Dumb Viewer
 
 NEVER use Godot Physics Nodes for logic. Do not use CharacterBody3D, RigidBody3D, Area3D, or move_and_slide().
+
+SANCTIONED EXCEPTION (ADR-2): NavigationServer3D may be used as a stateless local-steering
+accelerator inside Active chunks only. It owns no game state. Everything else in this section
+stands.
 
 The ECS is the Source of Truth. All entity logic, positions, and chemistry live in res://ecs/ as pure data (RefCounted or Resource objects).
 

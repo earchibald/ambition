@@ -34,7 +34,8 @@ The Lineage Journal: The player clicks the journal. Godot reads the local journa
 Phase 2: The Village Loop (Economic Prep)
 
 The Scene: The player walks out into the [Plaza_Zone]. The ECS Pre-Warm has finished.
-System State: The MetabolismSystem is ticking. NPCs are executing their RoutineComponent -> Work_Block.
+System State: The MetabolismSystem is ticking. NPCs are executing their ScheduleComponent
+Work block (registry §2 — there is no `RoutineComponent`).
 
 Physical Barter (The Math): The player approaches a [Prof_Merchant] in the [Zone_Smithy]. They inspect an Iron Shield (Entity 905).
 

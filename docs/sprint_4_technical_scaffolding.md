@@ -56,8 +56,11 @@ func compile_runes(rune_array: Array) -> CompiledSpell:
             rune.radius = 15.0 # Force override
         
     # ANTI-CRASH: Max Strain Check
-    var player_insight = ECSManager.mind_components[0].insight_level
-    if total_complexity > (player_insight * 1.5):
+    # MindComponent.insight is Dictionary{StringName:int} (registry §2). Spell compilation is
+    # gated on the Rune_Stability key specifically, NOT on the Dictionary itself.
+    var mind = ECSManager.minds[ECSManager.player_handle()]
+    var player_insight: int = mind.insight.get(&"Rune_Stability", 0)
+    if total_complexity > (float(player_insight) * 1.5):
         print("Spell Compilation Failed: Exceeds cognitive limits.")
         return null 
         

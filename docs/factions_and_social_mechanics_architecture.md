@@ -75,7 +75,8 @@ These brawls generate grievances in FactionCoreComponent.diplomacy.
 
 Total War:
 
-When grievances mount, or if the LLM Reasoner explicitly sets an objective to CONQUER, the diplomatic status shifts to War.
+When grievances mount, or if the LLM Reasoner explicitly sets the RAID_FACTION objective
+(registry §3 `Objective`), the diplomatic status shifts to War.
 
 The Engine Planner stops generating civilian jobs (mining, farming) near the border and generates Raid, Patrol, and Siege jobs.
 

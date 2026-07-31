@@ -59,7 +59,8 @@ For Adventurer 0 (who has an empty Lineage Journal), the world is a black box. T
 
 A. The Gossip System (Taverns & Plazas)
 
-Tier 2 entities have a MindComponent with Known_History.
+Tier 2 entities record what they know in MemoryComponent.events (Array[MemoryEvent], registry
+§2/§4). There is no `Known_History` field.
 
 When idle in a [Social_Zone], they run a Job_Chat intent.
 
@@ -73,7 +74,8 @@ B. The Bounty Board (Structured Quests)
 
 The Village Elder (Tier 3 LLM) periodically generates bounties based on their faction needs.
 
-If the village's [Stockpile] is critically low on MAT_COAL, the LLM Reasoner creates a Request_Resource objective.
+If the village's [Stockpile] is critically low on MAT_COAL, the LLM Reasoner sets the
+GATHER_RESOURCES objective (registry §3 `Objective`).
 
 The Engine Planner translates this into a physical [Paper] entity pinned to the [Bounty_Board] in the plaza: "Contract: 50kg Coal. Reward: 100 Gold."
 

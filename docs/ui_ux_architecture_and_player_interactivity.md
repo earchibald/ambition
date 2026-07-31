@@ -15,11 +15,16 @@ Intent Generation: Clicking "Drink Potion" does not increase health. It construc
 
 The world is a web of chemical tags, temperatures, and LLM objectives. Floating text above every object would ruin the atmosphere and cause extreme visual clutter.
 
-Activation (Toggle-to-Think): Pressing the "Inspect" key (e.g., 'Tab') acts as a toggle by default, severely dilating the Micro Tick (bullet-time) and overlaying ECS data onto the 3D world. The player can safely mouse over entities to read them at their own pace, then press the key again to exit. (A "Hold-to-Inspect" option is available in the accessibility settings).
+Activation (Toggle-to-Think): Pressing the "Inspect" key (e.g., 'Tab') acts as a toggle by
+default, applying a simulation `time_scale` multiplier (bullet-time) and overlaying ECS data
+onto the 3D world. NOTE (ADR-9): the Micro tick rate stays fixed at 60Hz. Bullet-time scales
+the per-tick `delta` used for integration/velocity, never the tick frequency itself. The player can safely mouse over entities to read them at their own pace, then press the key again to exit. (A "Hold-to-Inspect" option is available in the accessibility settings).
 
 Passive Integration (Rewarding Mastery): The player shouldn't have to pause to understand the world once they learn it. As Insight increases, the universal color/shape language passively bleeds into the standard view (e.g., subtle auras, specific sound effects). An expert player won't need the Tactical Lens to know an enemy is poisoned; they will see the passive Neon Purple particle effect and act instantly in real-time.
 
-The Gating Mechanism (Crucial): The UI queries the player's MindComponent.insight_level[Target_Tag]. It does not show raw data unless the player has earned it.
+The Gating Mechanism (Crucial): The UI queries the player's MindComponent.insight, a
+Dictionary{StringName:int} (registry §2) — e.g. `mind.insight.get(target_tag, 0)`. There is no
+`insight_level` field. It does not show raw data unless the player has earned it.
 
 Insight 0 (Novice): Looking at a puddle. UI says: "Liquid."
 
@@ -47,7 +52,8 @@ Target has [Crafting_Station] tag? 'E' opens CraftingUI.
 
 Target has [Prof_Merchant] tag? 'E' triggers ActionIntent_Trade.
 
-The Combat Radial (Slow-Mo Pivot): Pressing and holding 'Q' opens a contextual Radial Menu and severely dilates the Micro Tick. This allows the player to quickly select a spell or a quick-slot item using muscle memory (flick mouse up for heal, flick right for fireball) without moving their eyes off the center of the screen.
+The Combat Radial (Slow-Mo Pivot): Pressing and holding 'Q' opens a contextual Radial Menu and
+applies the same simulation `time_scale` multiplier (tick rate stays 60Hz — ADR-9). This allows the player to quickly select a spell or a quick-slot item using muscle memory (flick mouse up for heal, flick right for fireball) without moving their eyes off the center of the screen.
 
 4. Mnemonic Design (Building Instinct)
 

@@ -1,6 +1,6 @@
 The Living Delve - Master Architecture Index
 
-ATTENTION AI AGENTS: If you are reading this, you are operating within a strict Entity Component System (ECS) architecture. Do not write a single line of Godot code until you have read CLAUDE.md (or .cursorrules) in the root directory and parsed the relevant documentation below.
+ATTENTION AI AGENTS: If you are reading this, you are operating within a strict Entity Component System (ECS) architecture. Do not write a single line of Godot code until you have read CLAUDE.md in the root directory and parsed the relevant documentation below.
 
 0. Decisions & Review (Read Before Everything)
 
@@ -8,7 +8,13 @@ These two documents are authoritative and override any older spec they contradic
 
 docs/architecture_decisions.md - The Architecture Decision Record (ADR). Canonical cross-cutting decisions (physics model, world model, ticks, LLM, save, performance, identity). WINS over any conflicting spec.
 
-docs/ADVERSARIAL_REVIEW.md - Historical end-to-end adversarial review that produced the ADR. Read for the "why"; dated review docs are repair logs unless STATE.md says one is pending.
+docs/component_and_field_registry.md - The canonical component/field/enum/tag registry. Every
+component, field, enum value, and tag name in any doc or any line of code must match it.
+WINS over any conflicting spec on naming and typing.
+
+The three docs/ADVERSARIAL_REVIEW*.md files are HISTORICAL, NON-BINDING repair logs. Read them
+for the "why" behind a decision. They never override the ADR or the registry, and nothing in
+them is an open blocker unless STATE.md explicitly says so.
 
 1. Core Architecture (Read First)
 

@@ -162,7 +162,10 @@ The coding agent should implement these as isolated processors that iterate over
 
 FluidDynamicsSystem (Micro Tick): Processes Cellular Automata for spreading liquids in Active chunks and handles boundary transfers via the Flood Buffer.
 
-MetabolismSystem (Simulation Tick): Iterates NeedsComponent. Decreases energy/hunger based on recent actions.
+MetabolismSystem (Simulation Tick): Iterates NeedsComponent and BodyComponent. Hunger RISES
+toward 100; energy and morale FALL toward 0 (see sprint_1_technical_scaffolding §7 for rates
+and sign conventions). Also owns BodyComponent.stamina drain, including environmental exposure
+terms such as cold.
 
 JobResolutionSystem (Simulation Tick): Evaluates JobComponent.
 

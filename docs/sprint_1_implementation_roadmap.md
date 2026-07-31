@@ -45,7 +45,10 @@ Build the FluidDynamicsSystem (Cellular Automata on grid, utilizing the Flood Bu
 Scaffolding Validation:
 
 Reference: material_crafting_and_economy_architecture.md (Sections 1, 2 & 3).
-Success State: You can spawn a puddle of MAT_WATER in code, drop the ambient temperature to -5°C, and watch its tags shift to [Solid] and [Slippery].
+Success State: You can spawn a puddle of MAT_WATER in code, set the chunk's
+ambient_temperature_c to -5.0, and observe PhysicalPropertyComponent.phase become
+ECSEnums.Phase.SOLID while &"Slippery" is added to ChemistryComponent.active_tags.
+(Phase is an enum, never a tag string — ADR-13 / registry §3.)
 
 Step 3: The Godot "Viewer" (LoD Handshake)
 

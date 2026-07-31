@@ -98,7 +98,7 @@ func execute_interregnum():
         for mat in ledger.keys():
             ledger[mat] = int(ledger[mat] * 0.60) # 40% wealth entropy tax on the ledger
     # Residual physical-entity GC (clears any stray loose items / filth left Active):
-    var all_physical_items = ECSManager.get_all_entities_with_component("PhysicalPropertyComponent")
+    var all_physical_items = ECSManager.query(ECSManager.MASK_PHYSICAL) # archetype query (ADR-13)
     for item_id in all_physical_items:
         if ECSManager.has_tag(item_id, "Filth") or ECSManager.has_tag(item_id, "Scrap"):
             ECSManager.destroy_entity(item_id)

@@ -176,12 +176,26 @@ ECS System: Emits request_path(entity: EntityHandle, start_pos, target_pos). Ent
 
 NavBridge (Godot): Queues the requests. Processes max N (e.g., 5) per frame.
 
-NavBridge Query: Sprint 1 must verify the exact Godot 4.7.1 NavigationServer3D API before
-coding. Do NOT mandate a fictional async method. The architecture requirement is that
-NavBridge owns the asynchronous behavior: queue path requests, process a bounded number per
-frame with the pinned API's safe query shape, and fall back to tile_map grid A* if a region or
-API path is unavailable. Do NOT call an unbounded synchronous `map_get_path()` burst that can
-freeze the main thread.
+NavigationServer3D IS OUT OF SPRINT 1 SCOPE. It moves to Sprint 2. Reasons, verified against
+4.7.1:
+- Its bake path consumes mesh instances or static colliders. Sprint 1 has no chunk meshes, and
+  colliders are banned by the Prime Directive. The only legal route is hand-feeding
+  `NavigationMeshSourceGeometryData3D.add_faces()` from tiles — strictly more work than the
+  grid A* it is supposed to accelerate.
+- NavigationServer3D maps sync on physics frames. Under GUT (a `SceneTree` with no physics
+  steps) queries return empty paths, so the Sprint 1 gate cannot test it.
+
+Sprint 1 therefore ships NavBridge over ECS grid A* on `tile_map` ONLY. The asynchronous
+contract is unchanged and is the part that matters: queue path requests, process a bounded
+number per frame (N = 5), and never burst synchronously.
+
+For Sprint 2, the verified 4.7.1 API shapes are:
+- `NavigationServer3D.query_path(parameters: NavigationPathQueryParameters3D,
+  result: NavigationPathQueryResult3D, callback: Callable)` — the correct async query shape.
+- `NavigationServer3D.map_get_path(map, origin, destination, optimize, navigation_layers)` —
+  the synchronous burst to avoid.
+- `bake_from_source_geometry_data_async(navigation_mesh, source_geometry_data, callback)` —
+  async bake. `region_bake_navigation_mesh` is synchronous.
 
 Godot to ECS: Emits path_calculated(entity: EntityHandle, path_array). Entity shifts to Moving state.
 
@@ -189,19 +203,42 @@ Godot to ECS: Emits path_calculated(entity: EntityHandle, path_array). Entity sh
 
 Run this during the Simulation Tick for entities with a NeedsComponent and ScheduleComponent.
 
+SIGN CONVENTIONS (were undefined; both directions appeared in different docs):
+- `hunger` RISES 0 -> 100. 100 = starving. MetabolismSystem INCREASES it.
+- `energy` FALLS 100 -> 0. 0 = exhausted. MetabolismSystem DECREASES it.
+- `morale` FALLS 100 -> 0.
+Rates (per Simulation tick, 2Hz): `hunger += 0.05` (=> ~17 real minutes 0->100),
+`energy -= 0.03`. MetabolismSystem ALSO owns `BodyComponent.stamina` drain, including the
+cold-exposure term in the_first_hour Phase 4; stamina is not a separate system's concern.
+
+HYSTERESIS is required. Without it an entity flips between Eat and Work every tick once it
+sits exactly on a threshold. Each interrupt has an enter threshold and a lower exit threshold,
+and a chosen action is held until its exit threshold is crossed.
+
 # Pseudo-code inside JobResolutionSystem
-func evaluate_needs(entity: EntityHandle) -> StringName:
-    var needs = ECSManager.needs[entity]
-    
-    var hunger_urgency = (needs.hunger / 100.0) * 2.0 # Weight multiplier
-    var energy_urgency = (1.0 - (needs.energy / 100.0)) * 1.5
-    
-    if hunger_urgency > 1.5:
-        return "ActionIntent_Consume"
-    elif energy_urgency > 1.2:
-        return "ActionIntent_Sleep"
+const HUNGER_ENTER := 80.0
+const HUNGER_EXIT := 30.0
+const ENERGY_ENTER := 20.0   # energy BELOW this triggers sleep
+const ENERGY_EXIT := 80.0
+
+func evaluate_needs(handle: int, current: StringName) -> StringName:
+    var needs = ECSManager.needs[handle]
+
+    # Sustain an in-progress interrupt until its exit threshold (anti-thrash).
+    if current == &"ActionIntent_Consume" and needs.hunger > HUNGER_EXIT:
+        return current
+    if current == &"ActionIntent_Sleep" and needs.energy < ENERGY_EXIT:
+        return current
+
+    if needs.hunger >= HUNGER_ENTER:
+        return &"ActionIntent_Consume"
+    elif needs.energy <= ENERGY_ENTER:
+        return &"ActionIntent_Sleep"
     else:
-        return "ActionIntent_Work" # Fallback to Routine block
+        return &"ActionIntent_Work" # Fallback to the ScheduleComponent block
+
+Note: the roadmap's "hunger > 80" and this threshold are now the SAME number (80). The old
+`(hunger/100)*2.0 > 1.5` weighting fired at 75 and contradicted the roadmap.
 
 
 

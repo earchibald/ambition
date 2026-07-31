@@ -112,11 +112,19 @@ Use for build-level gates:
 ## 4. Sprint gates
 
 ### Sprint 0 gate
-- Headless import works.
-- CI runs lint on first-party directories only.
-- GUT installed or guarded as pre-bootstrap.
-- Main scene smoke guarded until scene exists.
-- Agent instruction files resolve.
+- Headless import works (`godot --headless --import`).
+- CI runs lint on first-party directories only, and the lint step is PROVEN to execute —
+  a dir-guard that silently skips every directory is a gate failure, not a pass.
+- GUT installed at a pinned tag, and CI FAILS if the parsed test count is 0. "gut_cmdln.gd
+  exists" is not sufficient: GUT exits 0 with zero tests run via three separate paths.
+- GUT runs with `-ginclude_subdirs`; `-gdir` alone does not recurse.
+- Main scene boots and prints the `ECS_BOOT_OK` sentinel; CI fails on `SCRIPT ERROR` in the
+  boot log. A boot step that cannot fail is not a smoke test.
+- `InputMap.has_action()` is true for move_left/move_right/move_forward/move_back/interact/
+  attack/inspect/cancel.
+- Agent instruction files resolve, and `CLAUDE.md` / `.claude/CLAUDE.md` are byte-identical.
+- All authoritative docs are TRACKED IN GIT. An untracked doc does not exist for anyone else,
+  and README links to it will dangle on a fresh clone.
 
 ### Sprint 1 gate
 - ECS identity/lifecycle tests pass.

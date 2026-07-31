@@ -257,6 +257,33 @@ new product-decision blocker. Its engineering clarifications are accepted into t
 - **Registry coverage expands.** Containers, heat sources, professions, perception, sensory
   emitters, materialization policy, and witness events are canonical registry concepts.
 
+## ADR-18 — World scale and units (resolves the "no tile size" gap)
+**Decision:** The project had metre-denominated constants everywhere (`sight_range_m: 20`,
+30 m noise cap, 15 m spell radius, 3 m fall threshold) and a 64×64 *tile* chunk, but never
+stated how long a tile is. Collision, picking, perception, and the spatial hash cannot be
+written without it. Canonical:
+
+| Constant | Value | Notes |
+|---|---|---|
+| `TILE_SIZE_M` | **1.0 m** | 1 tile = 1 metre. Makes every existing metre constant coherent. |
+| `CHUNK_TILES` | 64 | So one chunk = 64 m × 64 m; the Active 3×3 = 192 m across. |
+| `SPATIAL_HASH_CELL_M` | 4.0 | 16×16 cells per chunk; ~1 cell per melee/interaction query. |
+| `MICRO_TICK_HZ` | 60 | ADR-9. `delta` = 1/60 exactly in `_physics_process`. |
+
+`exact_pos: Vector3` is in **metres**, not tiles. Tile index = `floor(exact_pos.x / TILE_SIZE_M)`.
+The 2.5D `height_map` is per-tile elevation in **metres**.
+
+**Entity bounds are a component, not a constant.** Collision "sweeps the entity's AABB" but no
+component carried one. Add `BoundsComponent { half_extents: Vector3 }` to the registry.
+Seed values: humanoid `Vector3(0.3, 0.9, 0.3)`, rat `Vector3(0.125, 0.125, 0.25)`.
+
+Movement law (was asserted by two docs but never defined):
+`BASE_SPEED_MPS = 4.0`; `carry_capacity_kg = 10.0 + strength * 2.0`;
+`speed = BASE_SPEED_MPS / (1.0 + max(0.0, carried_kg - 0.5 * capacity) / capacity)`.
+
+Step/drop rule (2.5D): a mover may step up `STEP_UP_MAX_M = 0.5` freely; a drop greater than
+`FALL_DAMAGE_M = 3.0` applies kinetic damage (inventory spec §1A already assumes this number).
+
 ## ADR-17 — Control surfaces: invariants, observability, and content validation
 **Decision:** The project treats control surfaces as first-class architecture, not optional
 tooling. Three specs are authoritative:

@@ -17,95 +17,37 @@ QualityComponent: Condition (Pristine, Chipped, Ruined, Scrap). Modifies baselin
 
 2. Expanded Base Material Data Dictionary
 
-Material ID
+This table is the SEED material dictionary and is authoritative from Sprint 1 onward. Sprint 5
+expands it with more materials; it does not re-originate these values. Every field required by
+`content_authoring_and_schema_validation.md` §4 (Materials) is present, because Sprint 1's mass
+derivation (registry §5) and thermodynamics (§7 below) cannot run without them.
 
-Category
+Units: `density_kg_per_cm3` in kg/cm3. `heat_capacity` in J/(kg*K). Phase points in Celsius.
+`base_value` is a scalar value-units-per-unit-mass figure (never a range — a range is not a
+valid schema value). `acoustic_resonance` is 0..1 (inventory spec §1C).
 
-Innate Tags
+| Material ID | Category | density_kg_per_cm3 | heat_capacity | melt_c | boil_c | acoustic_resonance | base_value | Innate Tags | Specific Mechanics |
+|---|---|---|---|---|---|---|---|---|---|
+| MAT_IRON | Metal | 0.00787 | 450 | 1538 | 2862 | 0.7 | 5 | [Conductive, Magnetic] | Rusts if [Wet] for > 1 Macro Tick. |
+| MAT_COPPER | Metal | 0.00896 | 385 | 1085 | 2562 | 0.6 | 3 | [High_Conductivity, Soft] | Basic wiring / Rune circuitry. |
+| MAT_TIN | Metal | 0.00729 | 227 | 232 | 2602 | 0.5 | 2 | [Low_Melting_Point] | Catalyst material. |
+| MAT_SULFUR | Mineral | 0.00207 | 710 | 115 | 445 | 0.3 | 10 | [Volatile, Toxic] | Catalyst for Fire Magic. |
+| MAT_SILICA | Mineral | 0.00265 | 703 | 1700 | 2230 | 0.8 | 1 | [Brittle, Transparent] | Melts into MAT_GLASS at T > 1700C. |
+| MAT_GLASS | Mineral | 0.00250 | 840 | 1400 | 2230 | 0.9 | 2 | [Brittle, Transparent] | Refined MAT_SILICA. Shatters on impact. |
+| MAT_CLOTH | Organic | 0.00030 | 1300 | — | — | 0.1 | 1 | [Flammable, Insulating] | Wrapping/lining; applies [Muffled]. |
+| MAT_BIOMASS | Organic | 0.00106 | 3500 | — | — | 0.2 | 1 | [Rot, Edible_Scavenger] | Converts to Filth on Spoilage Timer. |
+| MAT_WATER | Liquid | 0.00100 | 4186 | 0 | 100 | 0.4 | 1 | [Wet, Extinguishing] | Required for life. Universal solvent. |
+| MAT_GOLD | Metal | 0.01932 | 129 | 1064 | 2856 | 0.6 | 50 | [Heavy, Noble, Soft] | Universal currency base. Does not tarnish. |
 
-Base Value
-
-Specific Mechanics
-
-MAT_IRON
-
-Metal
-
-[Conductive, Magnetic]
-
-5
-
-Rusts if [Wet] for > 1 Macro Tick.
-
-MAT_COPPER
-
-Metal
-
-[High_Conductivity, Soft]
-
-3
-
-Used for basic wiring/Rune circuitry.
-
-MAT_TIN
-
-Metal
-
-[Low_Melting_Point]
-
-2
-
-Catalyst material.
-
-MAT_SULFUR
-
-Mineral
-
-[Volatile, Toxic]
-
-10
-
-Catalyst for Fire Magic.
-
-MAT_SILICA
-
-Mineral
-
-[Brittle, Transparent]
-
-1
-
-Melts into Glass at T > 1700C.
-
-MAT_BIOMASS
-
-Organic
-
-[Rot, Edible_Scavenger]
-
-0
-
-Converts to Filth on Spoilage Timer.
-
-MAT_WATER
-
-Liquid
-
-[Wet, Extinguishing]
-
-0-10
-
-Required for life. Acts as universal solvent.
-
-MAT_GOLD
-
-Metal
-
-[Heavy, Noble, Soft]
-
-50
-
-Universal currency base. Does not tarnish.
+Notes:
+- MAT_GLASS and MAT_CLOTH are promoted into the dictionary because the acoustic-encumbrance
+  system (inventory spec §1C) and the material soundboard (ui_ux §4) already reference them by
+  ID, and unknown material references are a hard content-validation blocker.
+- MAT_WATER and MAT_BIOMASS carry base_value 1, not 0. A 0 base value makes
+  `Price = V_base * (...) * Quality` identically 0, which would make food and water permanently
+  free and silently disable the famine/scarcity economy the LLM reasons over.
+- `melt_c`/`boil_c` of "—" means the material chars/decomposes rather than melting cleanly;
+  phase-change logic must not fire on it.
 
 3. Thermodynamics, States, & Fluids
 
@@ -169,7 +111,10 @@ Because gold has the [Heavy] tag, carrying 10,000 gold coins will physically enc
 
 Wear & Tear: Weapons lose Condition based on the hardness of what they hit (striking MAT_BASALT degrades an Iron Sword rapidly).
 
-Spoilage: MAT_BIOMASS has a timer. When it hits 0, it transforms into a Filth entity.
+Spoilage: MAT_BIOMASS has a timer of SPOILAGE_MACRO_TICKS = 72 (72 in-game hours = 3 in-game
+days = 12 real minutes at the ADR-9 macro cadence). When it hits 0, the entity transforms into
+a Filth entity. Cold slows it: the timer decrements at `max(0.25, 1.0 - (20.0 - temp_c) * 0.05)`
+per macro tick, so refrigeration is a real preservation strategy.
 
 The Cleanup: Flowing water pushes Filth into stagnant pools, breeding Tier 1 Swarms (Rats/Slimes).
 
