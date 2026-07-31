@@ -99,6 +99,31 @@ Sprint 5: Content & Data (JSON Schemas, Dictionaries).
 
 Sprint 6: LLM Prompt Fine-Tuning.
 
+Sprint U (Interface & Accessibility): HUD edit mode, GridFocusManager, escape stack, radial
+menu, keybind remapping, colorblind filters, font scaling, shake toggle, cipher toggle.
+
+UNOWNED SPECIFICATION — VERIFIED GAPS (2026-07-31 gestalt review)
+
+A grep of every `docs/sprint_*.md` file returns ZERO hits for `scarcity`, `price`, `barter`,
+`merchant`, `recipe`, `forge`, `EconomySystem`, `ClimateSystem`, and `weather`, and no hits for
+`HUD`, `paper doll`, `quick-belt`, `radial`, or `focus manager` outside Sprint 0's folder tree.
+The following specified systems currently have NO implementing sprint. They are not cancelled;
+they are unscheduled, which is how they ambush a project later:
+
+- **The entire economy.** Scarcity_Index, the price formula, barter resolution, coin
+  change-making, merchant Trade_State, crafting stations, forges, alloys, recipes.
+  `material_crafting_and_economy_architecture.md` §5 and the Day-0 walkthrough (which is
+  literally a shopping trip) both depend on it. Proposed slot: **Sprint 2.75 "The Market."**
+- **Faction politics.** Loyalty, schism/mutiny, succession by prestige, ClaimTags, caravans,
+  grievance accumulation, war-time job generation, Job_Chat gossip propagation, profession
+  assignment. Sprint 3 only mentions these as triggers for ADR-12 cap enforcement. Without
+  them Sprint 3 ships an LLM that emits RAID_FACTION into a world with no soldiers, no
+  loyalty, and no succession. Proposed slot: **Sprint 3.5 "The Body Politic."**
+- **Climate/weather** (ClimateSystem), the **Bounty Board**, **encumbrance**, **smart
+  sub-containers**, and **muscle-memory skill growth**.
+- **All player-facing UI.** ~420 lines across the three UI specs. See Sprint U above and the
+  per-sprint allocation in `docs/scope_and_milestones.md`.
+
 Note: The Persistence/Serialization workstream (see ADR-6 and docs/persistence_and_save_architecture.md) is a first-class deliverable and should land before Sprint 3's death-loop implementation depends on it.
 
 Every sprint must preserve docs/invariants_and_test_strategy.md and expose the debug surfaces

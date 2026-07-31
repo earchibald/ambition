@@ -165,9 +165,23 @@ Reference hardware: mid-range desktop (≈ Apple M1 / Ryzen 5). Targets:
 - **Total individual entities** (Tier 2/3 across all LoD): soft target **≤ 10,000**;
   enforced by faction caps (ADR-12) + swarm caps. Tier 1 swarms are integers, not entities.
 - **CA fluids:** 2D-per-floor, per-chunk 64×64 grid. Simulate only **active (dirty) fluid
-  cells** via a sparse set — never full-grid scans. Budget **≤ 20,000 active fluid
-  cell-updates / Micro tick** across all Active chunks; overflow routes to
-  `VolumePool`/flood buffer.
+  cells** via a sparse set — never full-grid scans.
+  **BUDGET CORRECTED 2026-07-31 after measurement.** The original "≤ 20,000 cell-updates /
+  Micro tick" was never measured and does not fit. Measured on Godot 4.7.1 with a realistic
+  kernel (sparse dirty set + delta accumulator + heightmap gate): **0.364 µs/cell-update** on
+  an M5 Max, ≈**0.655 µs** on this ADR's own M1 reference. So 20,000 updates costs **7.3 ms /
+  13.1 ms** — 91% of the entire 8 ms Micro budget on a fast machine, **164% of it on the
+  reference machine**, before collision, perception, or action resolution run at all.
+  Canonical: fluids run on a **dedicated 15 Hz cadence** (every 4th Micro tick) with
+  **`CA_UPDATES_PER_FLUID_TICK = 12,000`** ⇒ ≈1.3 ms amortized per frame on M1. The
+  20,000-per-Micro-tick figure survives only as the **post-GDExtension target**, not as a
+  GDScript budget. Overflow routes to `VolumePool`/flood buffer.
+  (Context: a full 4096-cell `PackedInt32Array.duplicate()` costs 0.236 µs, so buffer copying
+  was never the cost worth optimizing — see the double-buffer defect in Sprint 1 §5.)
+- **Perception:** a DDA line-of-sight march costs ≈2.77 µs on the M1 reference. Naive
+  all-pairs sight at 1,500 active entities is **65 ms in a single Simulation tick**. Perception
+  must be tiered by awareness state, capped at `MAX_CANDIDATES_PER_OBSERVER = 8`, LoS-cached
+  per sorted handle pair, and amortized across Micro ticks. See Sprint 1 §11.
 - **Queries:** systems iterate an **archetype/query cache** (entities grouped by component
   mask), not linear `get_all_entities_with_component` scans (see ADR-13).
 
@@ -256,6 +270,78 @@ new product-decision blocker. Its engineering clarifications are accepted into t
   AbstractGraph edges, and Active NavServer regions; grid A* is the fallback while rebaking.
 - **Registry coverage expands.** Containers, heat sources, professions, perception, sensory
   emitters, materialization policy, and witness events are canonical registry concepts.
+
+## ADR-20 — Simulation systems never read wall-clock time; soak testing is a deliverable
+**Decision:** ADR-1 disclaims determinism and cites "wall-clock-influenced pacing" as a reason.
+That is acceptable for the shipped game and **fatal for automated long-horizon testing**. So:
+
+**Simulation code in `ecs/` must never read wall-clock time — only tick counts and GameClock.**
+Forbidden in `ecs/`: `Time.get_ticks_msec`, `Time.get_unix_time_from_system`, `OS.get_*time*`,
+`Engine.get_frames_drawn`. Enforced by CI grep alongside the forbidden-physics-API checks.
+This costs one line of CI now; retrofitting it after Sprint 4 costs an audit of every system.
+
+**Harness contract:** the simulation is *reproducible* given fixed RNGService stream seeds,
+`NullLLMProvider`, and no wall-clock coupling — even though it is not *deterministic across
+platforms* (ADR-1). Those two statements are compatible and both are required.
+
+**Rationale.** This project's real failure modes are long-horizon and invisible to every test
+style currently specified (unit / property / integration / smoke are all short-horizon):
+- a faction ledger reaching 10⁷ gold by in-game day 40;
+- rat populations saturating every chunk because filth generation outruns the swarm tax;
+- every faction converging to WAR because grievances accumulate and never decay;
+- fluid dirty-cell count growing monotonically because evaporation lags inflow;
+- job queues growing without bound because abort rate exceeds completion rate.
+No human playtest of realistic length finds these either. A soak harness is the only feedback
+loop that scales with what the design actually bets on.
+
+**Deliverable (Sprint 1):** a `--soak scenario=<name> ticks=<N>` headless entry point sharing
+the debug boot path, dumping one CSV per run: per-faction ledgers by material, abstract
+populations, entity counts by archetype, fluid dirty cells, job-queue depths by status, memory
+and witness event counts, and tick durations. CI runs a fixed scenario set nightly. **The gate
+is not "did it crash" — it is "did any metric leave its band or change slope by more than X%
+against the committed baseline."** Baselines are committed and updated as a reviewed act.
+
+## ADR-19 — EntityHandle is a packed 64-bit int, not an object
+**Decision (foundational — supersedes the `{index, generation}` object in ADR-7/registry §1).**
+**Verified empirically on Godot 4.7.1.** A `RefCounted` handle **cannot be used as a Dictionary
+key**, which is exactly how every component registry in the specs was written
+(`positions: Dictionary # { EntityHandle: PositionComponent }`, `action_queues`,
+`PerceptionComponent.last_known_targets`, ViewManager's `visual_dictionary`):
+
+    d[HandleRC.new(5,1)] = "A"
+    d.has(HandleRC.new(5,1))  -> false      # RefCounted hashes by object IDENTITY
+    d.size()                  -> 2          # a second key was created
+    a == b                    -> false
+
+So every registry lookup silently misses whenever a handle is rebuilt from a signal, a save
+file, or a fresh `.new()`. `EntityHandle.invalid()` is equally broken: it allocates a new object
+each call, so `intent.target == EntityHandle.invalid()` is **always false**, breaking every
+"has a target?" check. This would have poisoned all of Sprint 1.
+
+**Canonical representation — a plain `int`:**
+
+    class_name EH
+    const INVALID: int = -1
+    static func make(index: int, generation: int) -> int:
+        return (generation << 32) | (index & 0xFFFFFFFF)
+    static func index_of(h: int) -> int: return h & 0xFFFFFFFF
+    static func gen_of(h: int) -> int:   return h >> 32
+
+Generations start at **1**, so a live handle is never `0` and an uninitialised int is detectable.
+Verified: packed-int keys hash by value (`d.has(make(5,1))` → true, size 1); `PackedInt64Array`
+stores them; typed signal params accept them.
+
+**Why int and not `Vector2i`:** `Vector2i` also hashes by value (verified) but stringifies to
+`"(5, 1)"` and does not parse back, so it cannot round-trip through JSON saves.
+
+**Consequences:**
+- Registry §1 and every `EntityHandle`-typed field/signal/array become `int` /
+  `PackedInt64Array`. This also removes the `ECSEvents → EntityHandle` script dependency.
+- Saves still serialize as `{"index": i, "generation": g}` per the persistence spec §3 — the
+  packing is an in-memory representation, not a file format. No conflict.
+- Satisfies ADR-10's `Packed*Array` hot-data goal directly.
+- Columnar stores key on **index** with a parallel `generations: PackedInt32Array` for
+  validation; the packed handle is the public reference type.
 
 ## ADR-18 — World scale and units (resolves the "no tile size" gap)
 **Decision:** The project had metre-denominated constants everywhere (`sight_range_m: 20`,
