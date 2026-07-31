@@ -1,0 +1,55 @@
+name: Godot ECS CI Pipeline
+
+on:
+  pull_request:
+    branches: [ "dev", "main" ]
+  push:
+    branches: [ "dev", "main" ]
+
+jobs:
+  test_and_lint:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.2.1 
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive # CRITICAL for GUT framework
+
+      - name: GDScript Linter
+        run: |
+          apt-get update && apt-get install -y python3-pip
+          # Pin gdtoolkit so lint rules don't change under us and break CI nondeterministically.
+          pip3 install "gdtoolkit==4.3.*"
+          # Lint FIRST-PARTY code only. Never lint addons/ (third-party GUT is not gdlint-clean).
+          # Guard each dir so CI passes before the Sprint 0 folders exist.
+          for d in ecs singletons ui viewer tests; do
+            if [ -d "$d" ] && ls "$d"/**/*.gd "$d"/*.gd >/dev/null 2>&1; then
+              gdlint "$d"
+            fi
+          done
+
+      - name: Pre-Import Assets (CRITICAL ANTI-HANG FIX)
+        run: |
+          godot --headless --editor --quit
+
+      - name: Boot Smoke Test (main scene loads headlessly)
+        run: |
+          # "main must always run flawlessly" — verify the project actually boots.
+          # Guarded until Sprint 0 creates the main scene, so CI is green pre-bootstrap.
+          if [ -f viewer/Main.tscn ]; then
+            timeout 30 godot --headless --quit-after 120 res://viewer/Main.tscn
+          else
+            echo "viewer/Main.tscn not present yet; skipping boot smoke (pre-Sprint-0)."
+          fi
+
+      - name: Run ECS Unit Tests (Headless)
+        run: |
+          # Guard until GUT + tests exist so CI passes before bootstrap.
+          if [ -f addons/gut/gut_cmdln.gd ]; then
+            godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests/ -gexit
+          else
+            echo "GUT not installed yet; skipping unit tests (pre-Sprint-0)."
+          fi

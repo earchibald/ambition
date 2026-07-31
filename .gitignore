@@ -1,0 +1,16 @@
+# Godot-specific ignores
+.godot/
+*.translation
+*.import
+export.cfg
+export_presets.cfg
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# Secrets — LLM API key must never be committed (ADR-5)
+*.secret
+llm_secrets.cfg
+.env
