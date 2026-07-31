@@ -12,6 +12,9 @@ const REQUIRED_ACTIONS: Array[StringName] = [
 	&"interact",
 	&"attack",
 	&"inspect",
+	&"slow_time",
+	&"overlay_text_bigger",
+	&"overlay_text_smaller",
 	&"cancel",
 ]
 

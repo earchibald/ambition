@@ -1,5 +1,9 @@
 The Living Delve - Master Architecture Index
 
+HOW TO RUN AND TEST IT: see RUNNING.md. It covers the exact commands, the controls, what every
+object in the test arena exists to test, how to read the debug overlay, and how to capture
+rendered frames without a display session. Read it before reading any architecture document.
+
 ATTENTION AI AGENTS: If you are reading this, you are operating within a strict Entity Component System (ECS) architecture. Do not write a single line of Godot code until you have read CLAUDE.md in the root directory and parsed the relevant documentation below.
 
 0. Decisions & Review (Read Before Everything)

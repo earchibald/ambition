@@ -14,12 +14,23 @@ const TRACE_DIR: String = "user://debug_traces"
 ## Ring-buffer capacity for the structured event trace (debugging spec §3).
 const DEFAULT_TRACE_CAPACITY: int = 4096
 
+## Overlay text size in points at the 1280x720 reference resolution. The window stretch mode is
+## `canvas_items`, so the drawn size scales with the window on top of this.
+##
+## Readability is not a preference to be defaulted to the smallest legible value. 13 pt was
+## chosen by an agent that never had to read it on a real monitor.
+const DEFAULT_OVERLAY_FONT_SIZE: int = 20
+const MIN_OVERLAY_FONT_SIZE: int = 10
+const MAX_OVERLAY_FONT_SIZE: int = 64
+
 static var event_trace_enabled: bool = false
 static var perception_overlay_enabled: bool = false
 static var fluid_overlay_enabled: bool = false
 static var tick_counters_enabled: bool = true
 static var hard_fail_on_invariant_violation: bool = true
 static var trace_capacity: int = DEFAULT_TRACE_CAPACITY
+
+static var overlay_font_size: int = DEFAULT_OVERLAY_FONT_SIZE
 
 static var _loaded: bool = false
 
@@ -64,6 +75,11 @@ static func _load_config() -> void:
 		parsed.get("hard_fail_on_invariant_violation", hard_fail_on_invariant_violation)
 	)
 	trace_capacity = int(parsed.get("trace_capacity", trace_capacity))
+	overlay_font_size = clampi(
+		int(parsed.get("overlay_font_size", overlay_font_size)),
+		MIN_OVERLAY_FONT_SIZE,
+		MAX_OVERLAY_FONT_SIZE
+	)
 
 
 static func snapshot() -> Dictionary:
@@ -74,4 +90,15 @@ static func snapshot() -> Dictionary:
 		"tick_counters_enabled": tick_counters_enabled,
 		"hard_fail_on_invariant_violation": hard_fail_on_invariant_violation,
 		"trace_capacity": trace_capacity,
+		"overlay_font_size": overlay_font_size,
 	}
+
+
+## Persists the current flags, so a size chosen at runtime survives a restart. Writing the file
+## by hand to change one number is a chore nobody does twice.
+static func save_config() -> void:
+	var file: FileAccess = FileAccess.open(CONFIG_PATH, FileAccess.WRITE)
+	if file == null:
+		push_warning("could not write %s; overlay settings will not persist" % CONFIG_PATH)
+		return
+	file.store_string(JSON.stringify(snapshot(), "\t"))

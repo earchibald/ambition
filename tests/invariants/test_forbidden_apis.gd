@@ -98,8 +98,21 @@ func _gd_files(root: String) -> Array[String]:
 	return found
 
 
+## Returns the file with COMMENTS STRIPPED. Scanning raw text would flag this project's own
+## documentation, which deliberately names the banned APIs in order to explain why they are
+## banned. Only real code is checked.
 func _read(path: String) -> String:
 	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
 	if file == null:
 		return ""
-	return file.get_as_text()
+	var out: PackedStringArray = PackedStringArray()
+	for line in file.get_as_text().split("\n"):
+		var stripped: String = line.strip_edges()
+		if stripped.begins_with("#"):
+			continue
+		var hash_at: int = line.find("#")
+		if hash_at >= 0:
+			out.append(line.substr(0, hash_at))
+		else:
+			out.append(line)
+	return "\n".join(out)

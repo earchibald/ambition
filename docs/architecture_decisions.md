@@ -87,20 +87,55 @@ the same `objective → jobs` interface if emergent planning is needed.
 - Keep the boundary clean: the planner exposes `plan(objective, faction) → jobs`; the
   implementation (templates vs GOAP) is swappable.
 
-## ADR-5 — LLM: OpenAI-compatible endpoints; no offline gameplay mode required
-**Decision:** Support **OpenAI-compatible chat/completions endpoints**. Required setup =
-`{ endpoint_url, api_key, model }`. A fully-playable offline/mock mode is **not** required.
+## ADR-5 — LLM: OpenAI-compatible endpoints; the LLM is an OPTIONAL layer
+**Status:** AMENDED 2026-07-31 by the human owner. The original decision — "a fully-playable
+offline/mock mode is **not** required" — is **superseded**. See the amendment below.
 
-**Consequences:**
+**Decision:** Support **OpenAI-compatible chat/completions endpoints**. Configuration is
+`{ endpoint_url, api_key, model }`. The LLM is an **optional enhancement layer**: the game is
+fully playable, start to finish, with no endpoint configured and no network access.
+
+### Amendment — why the LLM was demoted from required to optional
+
+This was raised by a competing neutral review panel and ruled on by the human owner.
+
+The panel's argument is that the demotion adds **no new engineering work**, because ADR-5 as
+originally written already obliged all of it:
+
+1. The **Validation Gate** must reject any malformed or out-of-schema LLM response.
+2. The **Fallback Matrix** must define correct behaviour for every rejection.
+3. Timeouts, rate limits, and the per-session request budget must each have a defined fallback.
+
+A system that must behave correctly when *every* LLM call fails is, by construction, a system
+with a complete heuristic path. The original ADR therefore required building that path while
+forbidding anyone from shipping it as a supported mode. That is strictly worse than shipping it:
+the heuristic path exists either way, but goes untested as a whole.
+
+**Consequences of the amendment:**
+- The heuristic path is a **first-class, tested product mode**, not a degraded fallback. It is
+  the CI default, so it is exercised on every commit rather than only when a provider misbehaves.
+- `NullLLMProvider` is **promoted** from a test double to a shipped provider. It is selected
+  automatically when no endpoint is configured, and it must produce play-viable behaviour, not
+  a canned `FORTIFY` payload. Its outputs come from the same utility-AI scoring that drives
+  Tier 2 NPCs.
+- **No gameplay system may make LLM output a precondition.** Any behaviour reachable only via a
+  live endpoint is a defect. Sprint 3 owns the enforcement test.
+- Sprint 3 acceptance changes: it must demonstrate a **complete play session with the endpoint
+  unset**, in addition to a session with it configured.
+- The LLM's remit narrows to what it is uniquely good at: narrative voice, naming, dialogue
+  flavour, and long-horizon faction intent. It is removed from anything on a correctness path.
+- **Risk retired:** the project no longer has a hard external dependency on a paid third-party
+  service for basic playability, and contributors do not need an API key to work on it.
+
+**Consequences (unchanged from the original decision):**
 - `LLMProvider` interface with one production impl: OpenAI-compatible HTTP via
   `HTTPRequest`, using `response_format: {"type":"json_object"}` (or the provider's
   structured-output equivalent) + the strict schema.
 - **Config & secrets:** `endpoint`/`model` live in a committed config file with an env-var
   override; **`api_key` is read from an environment variable or `user://` config and is
   NEVER committed**. Add the config path to `.gitignore` if it can contain a key.
-- **Tests/CI:** a lightweight **`NullLLMProvider` stub** (returns a canned valid-JSON
-  `FORTIFY` payload) is injected in headless tests so CI never makes network calls. This is
-  a *test double*, not a shipped gameplay mode.
+- **Tests/CI:** `NullLLMProvider` is used in headless tests so CI never makes network calls.
+  Per the amendment above it is now a *shipped provider* as well as the test default.
 - **Cost control:** cache responses by prompt hash within a run; keep the staggered queue +
   a per-session request budget.
 
