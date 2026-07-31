@@ -19,11 +19,21 @@ extends RefCounted
 ## Humanoids are 0.3; this leaves headroom without inflating the search radius.
 const MAX_OTHER_EXTENT_M: float = 0.6
 
+## How far a mover's feet may sit above the floor and still count as standing on it. Slack is
+## needed because the step/drop snap and the gravity integration meet at slightly different
+## values; without it a walking creature flickers between grounded and airborne every frame.
+const GROUNDED_EPSILON_M: float = 0.02
+
+## Landings drained by GameLoopManager each Micro tick: [{row, speed}]. This system does not
+## apply damage — ActionResolutionSystem owns the energy model for both falls and melee.
+var landings: Array = []
+
 # --- Observability ---
 var movers_processed: int = 0
 var substeps_run: int = 0
 var tile_collisions: int = 0
 var entity_collisions: int = 0
+var airborne_movers: int = 0
 
 
 ## Integrates velocity into position for every mover, then resolves. Columns are fetched once,
@@ -33,6 +43,8 @@ func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
 	substeps_run = 0
 	tile_collisions = 0
 	entity_collisions = 0
+	airborne_movers = 0
+	landings.clear()
 
 	var rows: PackedInt32Array = ECSManager.query(ComponentMask.MOVER)
 	var px: PackedFloat32Array = ECSManager.col_pos_x
@@ -50,10 +62,26 @@ func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
 
 		var bounds: BoundsComponent = ECSManager.bounds[row]
 		var velocity := Vector3(vx[row], vy[row], vz[row])
+		var start := Vector3(px[row], py[row], pz[row])
+		var was_airborne: bool = false
+		var impact_speed: float = 0.0
 
-		# Loose items fall; creatures are kept on the heightmap by the step/drop rule.
 		if loose != null:
 			velocity.y -= WorldConstants.GRAVITY_MPS2 * delta
+		else:
+			# CREATURES FALL TOO. Previously only loose items had gravity, so walking off the
+			# 2.5 m pit edge left the mover at its old height and the step/drop rule simply held
+			# it there — a drop was indistinguishable from a step, and `resolve_fall` had no
+			# caller anywhere. Gravity is what turns the pit back into a pit.
+			was_airborne = _is_airborne(start, bounds, chunk)
+			velocity = _apply_creature_gravity(delta, velocity, was_airborne)
+			impact_speed = maxf(0.0, -velocity.y)
+
+		# Persist the post-gravity velocity BEFORE the at-rest early-out below. Skipping this
+		# leaves stale downward speed in the column for a mover that has come to rest.
+		vx[row] = velocity.x
+		vy[row] = velocity.y
+		vz[row] = velocity.z
 
 		var speed: float = velocity.length()
 		if speed <= 0.0:
@@ -75,6 +103,14 @@ func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
 			position = outcome["position"]
 			velocity = outcome["velocity"]
 
+		# Detect the landing by the AIRBORNE -> GROUNDED transition across the whole frame, not
+		# by reading velocity next frame. The substep resolve legitimately zeroes vertical
+		# velocity when it snaps a mover onto the floor, so by the next frame the impact speed
+		# is already gone and the landing is invisible. The transition is the reliable signal.
+		if loose == null and was_airborne and not _is_airborne(position, bounds, chunk):
+			landings.append({"row": row, "speed": impact_speed})
+			velocity.y = 0.0
+
 		px[row] = position.x
 		py[row] = position.y
 		pz[row] = position.z
@@ -85,6 +121,31 @@ func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
 		if loose != null:
 			loose.update_rest(velocity.length())
 		movers_processed += 1
+
+
+## True when a creature's feet are clear of the floor beneath it.
+##
+## Slack is needed because the step/drop snap and the gravity integration meet at slightly
+## different values; without it a walking creature flickers grounded/airborne every frame.
+func _is_airborne(position: Vector3, bounds: BoundsComponent, chunk: ChunkData) -> bool:
+	var tile: Vector2i = chunk.world_to_tile(position)
+	if not chunk.in_bounds(tile.x, tile.y):
+		return false
+	var ground: float = chunk.height_at(tile.x, tile.y)
+	return position.y - bounds.half_extents.y > ground + GROUNDED_EPSILON_M
+
+
+## Accelerates a creature downward while airborne, and zeroes its descent once grounded.
+##
+## Grounding MUST zero `velocity.y`. Without it a creature standing still accumulates downward
+## speed forever, and the first 0.1 m step it takes reports as a fatal fall.
+func _apply_creature_gravity(delta: float, velocity: Vector3, airborne: bool) -> Vector3:
+	if airborne:
+		airborne_movers += 1
+		velocity.y -= WorldConstants.GRAVITY_MPS2 * delta
+	elif velocity.y < 0.0:
+		velocity.y = 0.0
+	return velocity
 
 
 ## One substep: axis-ordered tile resolve, then entity resolve, then depenetration.
@@ -129,9 +190,23 @@ func _resolve_substep(
 			velocity.z = 0.0
 			tile_collisions += 1
 
-	# 2.5D step/drop against the heightmap. Loose items are excluded: they fall under gravity
-	# rather than being snapped to the ground plane.
-	if not ECSManager.loose_items.has(row):
+	# VERTICAL INTEGRATION. The axis loop above resolves X and Z only. Without this line nothing
+	# ever moves on Y: a falling body accumulated downward velocity forever while its position
+	# stayed put, so the 2.5 m pit could not be entered and a dropped item hung in the air. The
+	# horizontal axes are resolved separately because they slide along walls; Y does not slide,
+	# it is caught by the heightmap below.
+	resolved.y = desired.y
+
+	# 2.5D step/drop against the heightmap. Loose items are excluded: they fall under gravity and
+	# come to rest on the floor rather than being snapped up onto ledges.
+	if ECSManager.loose_items.has(row):
+		var tile: Vector2i = chunk.world_to_tile(resolved)
+		if chunk.in_bounds(tile.x, tile.y):
+			var floor_y: float = chunk.height_at(tile.x, tile.y) + bounds.half_extents.y
+			if resolved.y <= floor_y:
+				resolved.y = floor_y
+				velocity.y = 0.0
+	else:
 		resolved = _apply_step_and_drop(resolved, position, bounds, chunk, velocity)
 
 	# REQUIRED: entity-vs-entity. Without this nothing can ever be hit.
@@ -221,4 +296,5 @@ func counters() -> Dictionary:
 		"substeps_run": substeps_run,
 		"tile_collisions": tile_collisions,
 		"entity_collisions": entity_collisions,
+		"airborne_movers": airborne_movers,
 	}

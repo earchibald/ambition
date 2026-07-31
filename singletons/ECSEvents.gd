@@ -18,6 +18,15 @@ signal clock_advanced(hour: int, day: int, season: int, year: int)
 ## Emitted once per tick class so debug overlays can read durations without polling.
 signal tick_completed(tick_class: StringName, duration_ms: float, entities_processed: int)
 
+## Outcome events. Sprint 1 resolved melee, falls, deaths and pickups correctly and reported
+## NONE of them, so from the player's seat a swing that hit and a swing that missed looked
+## identical, and a 2.5 m drop was indistinguishable from a step. A simulation with no outcome
+## feed cannot be play-tested — you can only read the source and hope.
+signal entity_damaged(entity: int, amount: float, remaining: float, cause: StringName)
+signal entity_died(entity: int, cause: StringName)
+signal item_taken(taker: int, item: int, reason: StringName)
+signal action_rejected(actor: int, action: StringName, reason: StringName)
+
 
 ## Tag arrays are `Array[StringName]`. Emitting an untyped array literal into a typed
 ## parameter fails at runtime and SILENTLY DROPS THE LISTENER, so build tags explicitly:

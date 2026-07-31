@@ -91,10 +91,12 @@ func resolve_melee(
 	# The impact makes NOISE regardless of whether anyone saw it. This is what lets an unseen
 	# hit produce INVESTIGATE rather than omniscient combat.
 	_emit_impact_noise(target_row, effective)
+	_report(target_row, damage, target.health, &"gib" if effective > threshold else &"melee")
 
 	if not target.is_alive():
 		kills += 1
 		_convert_to_corpse(target_row)
+		ECSEvents.entity_died.emit(ECSManager.handle_of(target_row), &"melee")
 	return damage
 
 
@@ -112,10 +114,19 @@ func resolve_fall(row: int, impact_speed_mps: float) -> float:
 	var damage: float = energy / WorldConstants.J_PER_HP
 	body.health = maxf(0.0, body.health - damage)
 	damage_dealt += damage
+	_report(row, damage, body.health, &"fall")
 	if not body.is_alive():
 		kills += 1
 		_convert_to_corpse(row)
+		ECSEvents.entity_died.emit(ECSManager.handle_of(row), &"fall")
 	return damage
+
+
+## Announces an outcome. Systems resolve; the bus reports. Nothing here reads back from the UI.
+func _report(row: int, amount: float, remaining: float, cause: StringName) -> void:
+	if amount <= 0.0:
+		return
+	ECSEvents.entity_damaged.emit(ECSManager.handle_of(row), amount, remaining, cause)
 
 
 func _emit_impact_noise(row: int, energy_j: float) -> void:

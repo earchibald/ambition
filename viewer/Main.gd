@@ -53,6 +53,7 @@ func _verify_boot_contract() -> void:
 		&"move_back",
 		&"interact",
 		&"attack",
+		&"attack_secondary",
 		&"inspect",
 		&"slow_time",
 		&"overlay_text_bigger",

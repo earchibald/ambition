@@ -14,9 +14,15 @@ const REFRESH_INTERVAL_S: float = 0.25
 const CURSOR_MAX_DIST_M: float = 60.0
 const CURSOR_STEP_M: float = 0.25
 
+## How many outcome events the feed keeps. Enough to see a fight, short enough to read.
+const FEED_CAPACITY: int = 8
+
 var _label: Label = null
 var _selected_row: int = -1
 var _accumulator: float = 0.0
+var _feed: Array[String] = []
+var _lmb_presses: int = 0
+var _rmb_presses: int = 0
 
 
 func _ready() -> void:
@@ -30,11 +36,24 @@ func _ready() -> void:
 	add_child(_label)
 	visible = DebugFlags.tick_counters_enabled
 
+	# Listen only. The overlay never writes ECS state (Prime Directive / invariants §2).
+	ECSEvents.entity_damaged.connect(_on_damaged)
+	ECSEvents.entity_died.connect(_on_died)
+	ECSEvents.item_taken.connect(_on_taken)
+	ECSEvents.action_rejected.connect(_on_rejected)
+
 
 ## Text size is adjustable at runtime, because "edit a JSON file in the user data directory and
 ## restart" is not a real answer to "I cannot read this".
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible or not event.is_pressed():
+		return
+	if event is InputEventMouseButton:
+		var button: InputEventMouseButton = event
+		if button.button_index == MOUSE_BUTTON_LEFT:
+			_lmb_presses += 1
+		elif button.button_index == MOUSE_BUTTON_RIGHT:
+			_rmb_presses += 1
 		return
 	var delta: int = 0
 	if event.is_action(&"overlay_text_bigger"):
@@ -75,6 +94,8 @@ func _compose() -> String:
 	lines.append("%s  |  scenario %s" % [counters["clock"], World.scenario])
 	lines.append(_player_location())
 	lines.append(_cursor_location())
+	lines.append(_vitals())
+	lines.append(_mouse_state())
 	lines.append(
 		"micro %.2fms / %.1fms budget%s   sim %.2fms   fluid %.2fms   spatial %.2fms" % [
 			counters["last_micro_ms"],
@@ -129,7 +150,86 @@ func _compose() -> String:
 	if _selected_row >= 0:
 		lines.append("")
 		lines.append(_inspect(_selected_row))
+	if not _feed.is_empty():
+		lines.append("")
+		lines.append("recent events (newest first):")
+		for entry in _feed:
+			lines.append("  " + entry)
 	return "\n".join(lines)
+
+
+## Health, stamina and airborne state. Fall damage was resolving correctly and reporting nowhere,
+## so a 2.5 m drop and a 0.4 m step looked identical from the player's seat.
+func _vitals() -> String:
+	var row: int = ECSManager.resolve(ECSManager.player_handle())
+	if row < 0:
+		return "vitals: <no player>"
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body == null:
+		return "vitals: <no body>"
+	var velocity: Vector3 = ECSManager.velocity_of(row)
+	var state: String = "grounded"
+	if velocity.y < -0.05:
+		state = "FALLING %.1f m/s" % -velocity.y
+	elif velocity.y > 0.05:
+		state = "rising"
+	return "vitals: health %.1f/%.1f   stamina %.1f   %s   (safe fall < %.0f m/s)" % [
+		body.health, body.max_health, body.stamina, state, WorldConstants.SAFE_FALL_MPS
+	]
+
+
+## Raw mouse-button state. Requested during play-testing, and immediately useful: it separates
+## "the click never registered" from "the click registered and the action was refused".
+func _mouse_state() -> String:
+	var left: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+	var right: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+	return "mouse: LMB %s  RMB %s   attack-presses %d  interact-presses %d" % [
+		"HELD" if left else "up",
+		"HELD" if right else "up",
+		_lmb_presses,
+		_rmb_presses,
+	]
+
+
+## Newest-first ring of outcome events. Bounded, so a long session cannot grow it without limit.
+func _remember(text: String) -> void:
+	_feed.push_front("%s  %s" % [GameClock.to_display_string(), text])
+	while _feed.size() > FEED_CAPACITY:
+		_feed.pop_back()
+
+
+func _on_damaged(entity: int, amount: float, remaining: float, cause: StringName) -> void:
+	_remember(
+		"%s took %.1f damage (%s), %.1f left"
+		% [_name_of(entity), amount, cause, remaining]
+	)
+
+
+func _on_died(entity: int, cause: StringName) -> void:
+	_remember("%s DIED (%s)" % [_name_of(entity), cause])
+
+
+func _on_taken(taker: int, item: int, _reason: StringName) -> void:
+	_remember("%s picked up %s" % [_name_of(taker), _name_of(item)])
+
+
+func _on_rejected(actor: int, action: StringName, reason: StringName) -> void:
+	_remember("%s: %s refused — %s" % [_name_of(actor), action, reason])
+
+
+## A handle is not a name. Without this the feed reads "entity 4294967296 took 3.2 damage".
+func _name_of(entity: int) -> String:
+	var row: int = ECSManager.resolve(entity)
+	if row < 0:
+		return "<gone>"
+	if row == 0:
+		return "you"
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
+	if chemistry != null and chemistry.active_tags.has(&"Corpse"):
+		return "corpse #%d" % row
+	if ECSManager.bodies.has(row):
+		return "creature #%d" % row
+	return "item #%d" % row
 
 
 ## Selects an entity for inspection. Called by the input bridge via PickSystem.
@@ -252,11 +352,11 @@ func _inspect(row: int) -> String:
 	var physical: PhysicalPropertyComponent = ECSManager.physicals.get(row)
 	if physical != null:
 		lines.append(
-			"mass %.3fkg  vol %.0fcm3  temp %.1fC  phase %d  qty %d" % [
+			"mass %.3fkg  vol %.0fcm3  temp %.1fC  phase %s  qty %d" % [
 				physical.mass_kg,
 				physical.volume_cm3,
 				physical.temperature_c(),
-				physical.phase,
+				_enum_name(ECSEnums.Phase, physical.phase),
 				physical.quantity,
 			]
 		)
@@ -266,13 +366,31 @@ func _inspect(row: int) -> String:
 	var perception: PerceptionComponent = ECSManager.perceptions.get(row)
 	if perception != null:
 		lines.append(
-			"awareness %d  known targets %d" % [
-				perception.awareness_state, perception.last_known_targets.size()
+			"awareness %s  known targets %d" % [
+				_enum_name(ECSEnums.AwarenessState, perception.awareness_state),
+				perception.last_known_targets.size(),
 			]
 		)
 	var job: JobComponent = ECSManager.jobs.get(row)
 	if job != null:
 		lines.append(
-			"job %s  status %d  score %.2f" % [job.current_action, job.status, job.score_at_claim]
+			"job %s  status %s  score %.2f" % [
+				job.current_action,
+				_enum_name(ECSEnums.JobStatus, job.status),
+				job.score_at_claim,
+			]
 		)
+	var lod: LoDComponent = ECSManager.lods.get(row)
+	if lod != null:
+		lines.append("LoD %s" % _enum_name(ECSEnums.LoD, lod.current_state))
 	return "\n".join(lines)
+
+
+## Enums printed as raw integers are unreadable, and worse, they invite guesses: `awareness 0`
+## was read during play-testing as the entity being asleep. It is UNAWARE, and there is no sleep
+## state in Sprint 1 at all.
+func _enum_name(enum_dict: Dictionary, value: int) -> String:
+	for key in enum_dict:
+		if enum_dict[key] == value:
+			return "%s(%d)" % [key, value]
+	return "UNKNOWN(%d)" % value

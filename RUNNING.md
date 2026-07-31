@@ -43,8 +43,9 @@ You spawn in a 64x64 stone arena. The debug overlay is on by default in the top-
 | Key | Action | What it does in the ECS |
 |---|---|---|
 | `W` `A` `S` `D` | Move | Pushes a `MOVE` **intent** onto entity 0's action queue. Camera-relative on the XZ plane. Pressing W does not move you; the ECS decides what W means. |
-| `Left mouse` | Attack | `PickSystem.melee_target` selects the nearest living entity inside a 2.0 m reach and a 120° arc, then pushes a `MELEE` intent. |
-| `E` | Interact / take | Casts a ray from the camera through `PickSystem`, and pushes a `TAKE` intent if it hits an entity within 2.5 m. |
+| `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
+| `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
+| `E` | Interact / take | Takes what is under the cursor, or failing that the nearest thing within 2.5 m **of you**. Reach is measured from the player, never from the camera. |
 | `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
 | `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
@@ -73,7 +74,9 @@ rule, so "walking around" is a real test pass:
 ```
 Spring 1 06:00  |  scenario test_arena
 you: tile (8, 32)   world (8.50, 0.90, 32.50)   open  elev +0.00m  fluid 0
-cursor (ground plane): tile (24, 30)   SOLID  elev +0.00m  fluid 0
+cursor: tile (24, 37)   SOLID  elev +0.00m  fluid 0
+vitals: health 100.0/100.0   stamina 99.8   grounded   (safe fall < 5 m/s)
+mouse: LMB up  RMB up   attack-presses 0  interact-presses 0
 micro 0.53ms / 8.0ms budget   sim 0.02ms   fluid 0.00ms   spatial 0.49ms
 entities alive 3 (active 3 / cap 3000)   rows 3   free 0
 movers 1  substeps 6  tile-hits 0  entity-hits 0
@@ -118,11 +121,39 @@ collision. Watch the `you:` line as you go.
 | the wall at x=24 | You stop, and slide along it rather than sticking |
 | the doorway at (24, 32-33) | You pass through |
 | the ledge at (40-49, 40-49) | You **step up** without jumping, and `you:` reports `elev +0.40m` |
-| the pit at (40-45, 12-17) | You **fall** rather than stepping down, and take fall damage |
+| the pit at (40-45, 12-17) | `vitals:` flips to `FALLING x.x m/s`, then the event feed reports the damage. A 2.5 m drop lands at ~5.4 m/s, just past the 5 m/s safe limit, so expect a small hit rather than a large one |
 | the diagonal pinch at (50, 20)/(51, 21) | You do **not** slip through the shared corner |
 | the puddle at (10, 10) | `fluid` drops in the cell you displace, and `CA updates` rises |
 
 `Tab` adds the selected entity's tile to the inspector block as well.
+
+### The event feed
+
+The last eight outcome events appear at the bottom, newest first, stamped with the in-game clock:
+
+```
+recent events (newest first):
+  Spring 1 06:00  creature #1 took 3.4 damage (melee), 4.6 left
+  Spring 1 06:00  you: attack refused — nothing in reach
+  Spring 1 06:00  you took 1.2 damage (fall), 98.8 left
+```
+
+This is how you tell a miss from a hit, and a step from a fall. **Refusals are reported too** —
+if an action does nothing, the feed says why rather than leaving you guessing.
+
+### Things that are deliberately missing in Sprint 1
+
+Not bugs, just not built yet. Listed so play-testing does not keep rediscovering them:
+
+* **The doorway is a gap, not a door.** There are no door entities, hinges, or openable fixtures.
+  Every opening in the arena is simply an absence of wall.
+* **The rat does not move or notice you.** It has Needs, Schedule, Perception and Memory, but no
+  job source and no Simulated-tier movement, so `perceived 0  witnesses 0` on a bare boot is
+  expected. NPC movement lands in Sprint 2. Its awareness reads `UNAWARE(0)` — that is *unaware*,
+  not asleep; Sprint 1 has no sleep state at all.
+* **There is no ceiling and no roof.** Floors are 2.5D planes (ADR-3), so "indoors" is not yet a
+  concept the renderer expresses.
+* **No inventory screen.** A successful `E` reports in the event feed and nowhere else.
 
 ### If the text is too small
 

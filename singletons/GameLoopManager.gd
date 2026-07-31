@@ -93,6 +93,10 @@ func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 	ECSManager.flush_structural_changes()
 	_apply_intents(scaled_delta)
 	collision.run(scaled_delta, chunk, spatial_hash)
+	# Geometry decides WHO landed and how fast; the energy model decides what that costs. Falls
+	# and melee therefore share one damage path instead of drifting into two.
+	for landing in collision.landings:
+		combat.resolve_fall(int(landing["row"]), float(landing["speed"]))
 
 	var spatial_start: int = Time.get_ticks_usec()
 	spatial_hash.set_origin(_active_origin(chunk))
@@ -143,7 +147,13 @@ func _apply_intent(row: int, intent: ActionIntent, _scaled_delta: float) -> void
 			if target_row >= 0:
 				combat.resolve_melee(row, target_row, intent.vector_data, 1.5)
 		ActionIntent.TAKE:
-			inventory.try_insert(row, intent.target)
+			# Report the outcome either way. A pickup that silently fails a volume or tag filter
+			# is indistinguishable from a pickup that was never attempted.
+			var actor: int = ECSManager.handle_of(row)
+			if inventory.try_insert(row, intent.target):
+				ECSEvents.item_taken.emit(actor, intent.target, &"taken")
+			else:
+				ECSEvents.action_rejected.emit(actor, &"take", &"it will not fit")
 		ActionIntent.CONSUME:
 			var need: NeedsComponent = ECSManager.needs.get(row)
 			if need != null:
