@@ -18,7 +18,10 @@ When Entity 0 (The Player) reaches 0 Health, the game does not end, and it does 
 
 The player's PlayerInputComponent is detached.
 
-The player entity is converted into a Corpse item. Its InventoryComponent spills into a localized [Loot_Pile] entity on that specific tile.
+Death creates a separate Corpse/remains entity at the player's final tile. The old Entity 0
+handle is then atomically destroyed/retired, its generation is bumped, and index 0 is reserved
+for the next adventurer. Its InventoryComponent spills into a localized [Loot_Pile] entity or
+corpse/container manifest before the old handle is invalidated.
 
 The game enters the Interregnum State.
 
@@ -26,7 +29,27 @@ The game enters the Interregnum State.
 
 To signify the arrival of a new adventurer on the annual cadence, the engine must simulate the passage of one year.
 
-The Macro-Tick Burst: The ECS engine suspends the Micro and Simulation ticks, and rapidly executes 12 "Monthly" Macro-Ticks.
+The Coarse Interregnum Burst: The ECS engine suspends the Micro and Simulation ticks, and
+rapidly executes 12 monthly coarse interregnum passes. These are not ordinary hourly Macro
+Ticks; they operate on ledgers, abstract populations, DAG edges, and manifests.
+
+REPUTATION DECAY TOWARD FACTION 0 (REQUIRED — fixes an unwinnable spawn, 2026-07-31).
+ADR-14 fixes Player = Entity 0 = Faction 0 permanently, and `FactionCoreComponent.diplomacy`
+toward Faction 0 is serialized across the Interregnum. So as specified, **hostility is a lineage
+property while competence is not**: if adventurer #3 murdered village guards, adventurer #4
+spawns in the Residence — inside village limits, at 06:00, as a physical novice with a rusted
+dagger — into a faction already at War with Faction 0. That state is unwinnable and reachable in
+a single run. Nothing in any doc bounded it.
+
+Therefore, on each Interregnum pass:
+- Decay every faction's `diplomacy` score toward Faction 0 by **60–75% toward neutral**.
+- Hard-clamp the **spawn faction** (the Surface Village) to a floor of `NEUTRAL` at re-entry.
+- Keep the grievances themselves as **DAG history** the player can read and NPCs can bark about.
+  The scar survives as memory and story; the mechanical hostility mostly does not.
+- Optionally preserve exactly one relationship intact past an extreme threshold, so the system
+  stays legible ("the Dwarves still remember").
+Diegetic justification is free: a year passed, the offender is dead, and the new adventurer is a
+different person who inherited the house.
 
 World Evolution: During this burst:
 
@@ -60,7 +83,8 @@ Chemistry & Crafting: If a previous adventurer successfully combined Fungal_Wood
 
 Spell Schematics: Successfully compiled and cast spell graphs (e.g., standardizing a "Fireball" layout in the GrimoireUI) are saved as templates.
 
-Biological Insight: The highest BestiaryComponent data achieved (monster weaknesses, species tags) is carried over.
+Biological Insight: The highest MindComponent.insight data achieved for monster weaknesses
+and species tags is carried over.
 
 B. Auto-Recorded History (The DAG Chronicle)
 
@@ -78,7 +102,9 @@ Suggested / Pinned Notes: By shift-clicking an entity or zone in the Tactical Le
 
 5. Re-Entry (The Next Generation)
 
-After the Interregnum State completes, the engine finalizes the spawn process for the new Entity 0.
+After the Interregnum State completes, the engine finalizes the spawn process for the new
+Entity 0 by reusing index 0 with generation + 1. Stale references to the previous adventurer
+must fail handle validation; the corpse/remains entity has its own non-player handle.
 
 Character Generation: The new Entity 0 spawns in the Residence with baseline BodyComponent and MindComponent stats. Muscle memory (e.g., Blade_Familiarity) is reset to zero. They are physically a novice.
 
@@ -88,6 +114,9 @@ World Impact: They walk out into a village that has organically reacted to the p
 
 6. Technical Implementation constraints
 
-Garbage Collection During Time Skip: The coder must ensure the Macro-Tick burst aggressively deletes insignificant entities (like singular dropped arrows or minor blood splatters) to prevent the ECS memory footprint from bloating infinitely over multiple deaths.
+Garbage Collection During Time Skip: The coder must ensure the coarse interregnum pass
+aggressively deletes insignificant entities (like singular dropped arrows or minor blood
+splatters) to prevent the ECS memory footprint from bloating infinitely over multiple deaths.
+Identity-bearing items follow MaterializationComponent policy and persistence manifests.
 
 Seed Continuity: The procedural noise seeds for the dungeon floors must not change. Floor 3 is still Floor 3. If a wall was mined out by the previous player, that wall remains missing (or is perhaps shored up with wooden scaffolding by a newly moved-in Goblin faction).

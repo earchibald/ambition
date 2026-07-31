@@ -69,7 +69,8 @@ Not everything needs an Entity ID. We use a tiered approach to save memory.
 
 Tier 1: Swarms & Environment (The Abstractions)
 
-Implementation: Not individual entities. The Chunk or Zone entity holds a PopulationComponent (e.g., RatCount: 120).
+Implementation: Not individual entities. The Chunk or Zone entity holds integer population
+data (`ChunkData.swarm_population` or `ZonePopulationComponent`, per the registry).
 
 System: A SwarmGrowthSystem runs on the Macro Tick. If LoD shifts to Active, the system consumes RatCount to spawn physical mobs.
 
@@ -77,9 +78,11 @@ Tier 2: Citizens & Workers (The Core Simulation)
 
 Implementation: Unique entities (ID: 4092, Name: "Snarl").
 
-Components: Needs, JobQueue, Inventory, FactionTag.
+Components: Needs, JobQueue, Inventory, SocialIdentityComponent, ProfessionComponent.
 
-System: Standard Utility AI / GOAP. Driven by the Simulation Tick.
+System: Schedule-aware Utility AI plus faction JobTemplate assignments. Driven by the
+Simulation Tick. A true search planner is a possible future implementation behind the same
+planner interface, not the current backbone.
 
 Tier 3: Leaders & Unique NPCs (The LLM Puppets)
 
@@ -95,29 +98,63 @@ Physical & Chemical State
 
 PositionComponent -> floor_id: int, chunk_id: Vector3i (x, y, floor per ADR-3), exact_pos: Vector3, velocity: Vector3, current_node_id: int (for abstract pathing). NOTE: chunk_id is Vector3i everywhere (supersedes any `int` usage in older scaffolding).
 
-PhysicalPropertyComponent -> quantity: int, mass_kg: float, volume_cm3: float, temperature: float, phase: enum (Solid, Liquid, Gas — use a GDScript enum, not a string). (Note: Quantity is mandatory for item stacking to prevent memory fragmentation. Per ADR/C5, mass_kg is a derived cache: authoritative mass = volume_cm3 * sum(composition_pct * material_density); recompute on composition/volume change.)
+PhysicalPropertyComponent -> quantity: int, mass_kg: float, volume_cm3: float, temperature: float, heat_capacity: float, phase: enum (Solid, Liquid, Gas — use a GDScript enum, not a string). (Note: Quantity is mandatory for item stacking to prevent memory fragmentation. Per ADR/C5, mass_kg is a derived cache: authoritative mass = volume_cm3 * sum(composition_pct * material_density); recompute on composition/volume change.)
 
 MaterialCompositionComponent -> materials: Dict[MaterialID, float] (e.g., {MAT_IRON: 0.9, MAT_WATER: 0.1}).
 
-ChemistryComponent -> active_tags: List[String] (e.g., ["Burning", "Toxic"]).
+ChemistryComponent -> active_tags: Array[StringName] (e.g., [&"Burning", &"Toxic"]).
+
+QualityComponent -> condition: enum (Pristine, Chipped, Ruined, Scrap).
+
+MaterializationComponent -> policy: enum (MaterializationPolicy.LEDGERIZE,
+MaterializationPolicy.PRESERVE_ENTITY, MaterializationPolicy.CONTAINER_MANIFEST,
+MaterializationPolicy.CARAVAN_MANIFEST, MaterializationPolicy.GC_ELIGIBLE), item_class:
+StringName, manifest_id: int. This controls LoD
+dematerialization so fungible commodity stacks can become ledgers while equipped, unique,
+container, stash, and caravan items keep identity.
 
 Biology & Cognition
 
 NeedsComponent -> hunger: float, energy: float, morale: float.
 
-BodyComponent -> max_health: float, stamina: float, mutations: List[Tag], skills: Dict[String, float] (e.g., Blade_Familiarity: 15.5).
+BodyComponent -> max_health: float, health: float, stamina: float, strength: float,
+mutations: Array[StringName], skills: Dict[StringName, float] (e.g., Blade_Familiarity: 15.5),
+exposure: Dictionary[StringName, float].
 
-MindComponent -> known_runes: List[RuneID], insight: Dict[EntityTag, int] (for the Tactical Lens), faction_reputations: Dict[FactionID, float].
+MindComponent -> known_runes: Array[RuneID], insight: Dict[StringName, int] (for the Tactical Lens), faction_reputations: Dict[FactionID, float], language_fluency: Dict[StringName, int].
+
+PerceptionComponent -> sight_range_m: float, fov_degrees: float, hearing_sensitivity: float,
+awareness_state: enum (Unaware, Suspicious, Investigating, Combat), last_known_targets:
+Dict[EntityHandle, Vector3].
+
+SensoryEmitterComponent -> noise_radius_m: float, visibility_modifier: float, scent_tags:
+Array[StringName]. Transient impacts/noises may instead be EphemeralComponent payloads with
+the same fields.
 
 AI & Logistics
 
 LoDComponent -> current_state: Enum (Active, Simulated, Abstracted).
 
-InventoryComponent -> held_items: List[EntityID], total_volume_used: float.
+InventoryComponent -> held_items: List[EntityHandle], total_volume_used: float, sub_containers: List[EntityHandle].
 
-JobComponent -> current_action: Enum, target_entity_id: int, target_location: Vector3.
+ContainerComponent -> capacity_cm3: float, accepts_tags: Array[StringName], rejects_tags:
+Array[StringName], allow_nested_container: bool.
 
-FactionCoreComponent (For abstract Faction Entities) -> faction_id: int, culture_tags: List[String], diplomacy_states: Dict[FactionID, RelationshipState], abstract_wealth_ledger: Dictionary.
+JobComponent -> current_action: StringName, target_entity: EntityHandle, target_location:
+Vector3, claimed_by: EntityHandle, status: JobStatus enum.
+
+ProfessionComponent -> profession: StringName (legacy prose like `[Prof_Hauler]` is shorthand
+for this value).
+
+SocialIdentityComponent -> faction_id: int, loyalty: float, prestige: float.
+
+OwnershipComponent -> faction_id: int (the only item ownership representation).
+
+HeatSourceComponent -> stored_energy: float, max_temperature: float, fuel_materials:
+Array[MaterialID]. Stations/forges use this with the material heat model; there is no
+separate ad-hoc station-energy component.
+
+FactionCoreComponent (For abstract Faction Entities) -> faction_id: int, culture_tags: List[StringName], diplomacy: Dict[FactionID, RelationshipState] (top-K only), abstract_wealth_ledger: Dictionary, abstract_population: int, faction_memory: Array[MemoryEvent].
 
 6. Core Systems (Logic Loops)
 
@@ -125,17 +162,29 @@ The coding agent should implement these as isolated processors that iterate over
 
 FluidDynamicsSystem (Micro Tick): Processes Cellular Automata for spreading liquids in Active chunks and handles boundary transfers via the Flood Buffer.
 
-MetabolismSystem (Simulation Tick): Iterates NeedsComponent. Decreases energy/hunger based on recent actions.
+MetabolismSystem (Simulation Tick): Iterates NeedsComponent and BodyComponent. Hunger RISES
+toward 100; energy and morale FALL toward 0 (see sprint_1_technical_scaffolding §7 for rates
+and sign conventions). Also owns BodyComponent.stamina drain, including environmental exposure
+terms such as cold.
 
 JobResolutionSystem (Simulation Tick): Evaluates JobComponent.
 
-If Active: Pushes physical ActionIntents to the entity's queue (e.g., playing a swing animation and triggering a physics raycast).
+If Active: Pushes physical ActionIntents to the entity's queue. Targeting comes from
+PickSystem / SpatialHash overlap, not physics raycasts.
 
 If Simulated (The Resolver Fix): Aborts all physical ActionIntents. Calculates pure math (e.g., reducing MAT_COPPER from the chunk and adding it to the entity's inventory after N ticks without physics checks).
 
 EconomySystem (Macro Tick): Calculates Scarcity_Index for zones.
 
 GrayBoxSystem (Crucial): Runs on Macro Tick. Monitors the total wealth/resources of edge nodes (Village, Deepest Floor). Spawns new entities (immigrants/traders) or deletes resources (taxes/spoilage) to prevent infinite loops and death spirals. Updates abstract_wealth_ledger directly for non-Active chunks.
+
+PerceptionSystem (Simulation Tick, with Micro queries for Active combat): Resolves sight,
+hearing, stealth, and witness events without omniscience. Sight uses a cone plus DDA line of
+sight through `tile_map` and temporary blockers such as steam/smoke. Hearing consumes
+SensoryEmitter / Ephemeral noise payloads, applies wall/material attenuation, and creates
+`Investigating` awareness with a last-known location. A crime only becomes reputation data
+when a WitnessEvent is generated by a perceiving guard/victim and then propagated through the
+memory/gossip pipeline.
 
 7. Physics, Spatial, & Pathfinding Systems (ADR-2)
 
@@ -171,6 +220,19 @@ Pathfinding (two tiers):
     into a Simulated chunk converts the remaining route to AbstractGraph edges (and back on
     promotion).
 
+Topology invalidation (mutable world): Any system that changes tile solidity, elevation, or
+traversal hazard (mining, collapse, barricade, explosion, flood damage) must mark the owning
+ChunkData `tile_map_dirty`, `topology_dirty`, and, if Active, `nav_region_dirty`. Collision
+uses the current tile_map immediately. AbstractGraph edges crossing dirty tiles are rejected
+or hazard-penalized until rebuilt. Active NavigationServer3D regions are rebaked
+asynchronously; while dirty or unavailable, local steering falls back to grid A* on tile_map.
+
+LoD materialization policy: Dematerialization ledgerizes only fungible commodity stacks with
+MaterializationPolicy.LEDGERIZE. Equipped gear, named artifacts, quest items, containers,
+Residence stash contents, and caravan cargo preserve identity as serialized manifests and are
+reconstructed on promotion. Unowned junk/filth follows entropy/GC policy. This prevents the
+D1 anti-dupe fix from erasing identity-bearing items.
+
 8. Entity Lifecycle, Registries, RNG & Serialization (ADR-7 / ADR-8 / ADR-6)
 
 Canonical Registries & Atomic Destroy: ECSManager maintains a single canonical list of all
@@ -180,7 +242,7 @@ operation. (Prefer a columnar/archetype store so destroy is a single op.)
 
 Generational Handles: Entity references are { index, generation }. Reusing an index bumps
 its generation, invalidating stale references so dangling reads are detectable. This
-replaces the monotonic next_entity_id scheme and prevents id exhaustion across death loops.
+replaces any monotonic-id-counter scheme and prevents id exhaustion across death loops.
 
 Archetype / Query Cache (ADR-13): Systems iterate an archetype index (entities grouped by
 component mask), NOT linear get_all_entities_with_component scans.
@@ -196,7 +258,8 @@ authoritative and captures: all component registries; the DAG (incl. runtime edg
 WorldGrid (chunk states, tile_maps, ledgers, volume_pools, per-floor lazy-gen status);
 master seed + RNG stream states; and the Lineage Journal. Unvisited lazy floors save only
 their seed + gen-status (regenerated on load); visited/mutated state is saved explicitly.
-A schema_version field enables forward migration.
+A schema_version field enables forward migration. The concrete save schema and workstream
+are defined in `docs/persistence_and_save_architecture.md`.
 
 9. Canonical Player Identity (ADR-14)
 

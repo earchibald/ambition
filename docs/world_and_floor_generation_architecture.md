@@ -243,3 +243,10 @@ centroids/portals/stairs) is the ECS-owned source of truth for Simulated/Abstrac
 NavigationServer3D is only an Active-chunk steering accelerator. Store current_edge /
 edge_progress / edge_speed on Simulated movers so interception coordinates can be
 reconstructed (review G4).
+
+Mutable topology invalidation (2026-07-31 review): the graph is generated here but not
+immutable. Mining, collapses, barricades, explosions, and other tile/elevation changes mark
+the affected ChunkData `tile_map_dirty`, `topology_dirty`, and (if Active) `nav_region_dirty`.
+The AbstractGraph rebuilds or rejects/penalizes dirty edges on a safe cadence. Active
+NavigationServer3D regions rebake asynchronously, and local steering falls back to grid A*
+until the region is current.

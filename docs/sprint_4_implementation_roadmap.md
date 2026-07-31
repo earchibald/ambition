@@ -23,7 +23,9 @@ Required Implementation:
 
 Build the SpellCompilerSystem. It accepts an array of Rune IDs.
 
-CRITICAL - The Complexity Cap: Implement a Strain_Cost calculation. If a spell's complexity exceeds the player's MindComponent.insight, compilation fails.
+CRITICAL - The Complexity Cap: Implement a Strain_Cost calculation. If a spell's complexity
+exceeds `MindComponent.insight.get(&"Rune_Stability", 0) * 1.5`, compilation fails.
+(`insight` is a Dictionary{StringName:int} — registry §2 — never a bare scalar.)
 
 CRITICAL - The Geometric Cap: Enforce absolute maximums on shape variables (e.g., max projectile speed, max aura radius = 15m) to prevent CPU-wiping "Map Nuke" spells.
 
@@ -38,7 +40,8 @@ Update ActionResolutionSystem to handle ActionIntent_Cast.
 
 When executed, spawn an [EphemeralEntity] into the ECS. This entity has a strict TTL (Time-To-Live).
 
-The EphemeralEntity moves via physics or expands, applying its Catalyst tags to any entity it collides with.
+The EphemeralEntity moves via the ECS movement/collision systems or expands as an ECS aura,
+applying Catalyst tags to entities found via SpatialHash overlap.
 
 Success State: The player casts "Fireball." A glowing Node3D moves through the world. It hits a Goblin, applies the [Burning] tag, and deletes itself.
 

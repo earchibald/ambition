@@ -10,7 +10,7 @@ Required Implementation:
 
 Build the LLMBridge (Godot HTTPRequest node wrapper).
 
-Implement the ReasoningQueue. Tier 3 entities must register their entity_id here. The queue dispatches a maximum of 1 request at a time.
+Implement the ReasoningQueue. Tier 3 entities must register their EntityHandle here. The queue dispatches a maximum of 1 request at a time.
 
 CRITICAL - Lazy Prompt Generation: The queue MUST NOT store the prompt string. It only stores the ID. The prompt is built at the exact millisecond the request is fired to ensure the LLM receives real-time reality.
 Scaffolding Validation: Reference sprint_3_technical_scaffolding.md (Section 1).
@@ -23,9 +23,11 @@ Required Implementation:
 
 Build PromptBuilderSystem.
 
-When a request is pulled from the queue, query FactionCoreComponent, DiplomacyComponent, and MemoryComponent.
+When a request is pulled from the queue, query FactionCoreComponent.diplomacy,
+FactionCoreComponent.faction_memory, and any relevant active MemoryComponents.
 
-CRITICAL - The Salience Filter: Truncate the MemoryComponent to the 5 most recent events and 3 highest-weight "Core Memories". Do not send the entire history.
+CRITICAL - The Salience Filter: send only the top 3 memories by decayed weight plus the 3
+most recent events. Do not send the entire history.
 
 CRITICAL - Valid Target Enumeration: The context string MUST explicitly list integer IDs of known neighboring factions.
 Success State: Dynamic output: "You are Ug. Pop: 45. Memory: [Player killed 2 guards]. Valid Targets: [12: Gnomes, Faction-0: Player]." (Player is Faction 0 per ADR-14.)
@@ -43,7 +45,7 @@ Check ECSManager.is_alive(LLM_Entity_ID).
 
 If the LLM returned a target_faction_id, verify it exists in the active DAG list. If it hallucinates an invalid ID, override the objective to FORTIFY.
 
-Map valid JSON Objective (e.g., RAID) to GOAP Job_Queue insertions for the faction's Tier 2 entities.
+Map valid JSON Objective (e.g., RAID) through the JobTemplate planner to Job_Queue insertions for the faction's Tier 2 entities.
 Success State: The LLM decides to attack the Spiders (Target 15). 10 seconds later, 5 Tier 2 Goblins equip swords and pathfind toward the spider cavern.
 
 Step 4: The Death Event & Corpse Generation
@@ -53,9 +55,12 @@ Required Implementation:
 
 When Entity 0 Health <= 0, instantly detach the PlayerInputComponent.
 
-Convert Entity 0 to a [Corpse] item.
+Create a separate [Corpse] / remains entity at Entity 0's final tile. Do not keep the corpse
+on player index 0.
 
-Spill InventoryComponent contents into a localized [Loot_Pile].
+Spill InventoryComponent contents into a localized [Loot_Pile] or corpse/container manifest,
+then atomically destroy/retire the old player handle and bump Entity 0's generation so stale
+references fail.
 Success State: The player dies, the camera detaches, and they watch their killer physically pick up their dropped Iron Sword.
 
 Step 5: The Interregnum (1-Year Macro-Skip) & The Dual Taxes
@@ -65,9 +70,13 @@ Required Implementation:
 
 Suspend the Micro Tick and Simulation Tick.
 
-Fire the Bootstrapper.execute_interregnum() loop (12 Macro-Ticks).
+Fire the dedicated Bootstrapper.execute_interregnum() loop (12 coarse monthly passes). Do not
+run 12 ordinary hourly Macro ticks.
 
-CRITICAL - The Entropy Tax: Run garbage collection. Destroy 100% of [Filth], 100% of [Ephemeral_Noise], and randomly delete 40% of standard faction wealth.
+CRITICAL - The Entropy Tax: operate on ledgers and abstract populations during the
+Interregnum (ADR-11). Apply the 40% wealth entropy tax to FactionCore ledgers, clear
+insignificant residual physical entities such as [Filth] and expired [Ephemeral_Noise], and
+use RNGService streams for any random deletion.
 
 CRITICAL - The Swarm Tax (Carrying Capacity): Forcefully cap all Tier 1 Swarm populations (Rats, Spiders) to a maximum of 10 per chunk to prevent exponential biological crashes.
 
@@ -83,4 +92,5 @@ Build the LineageJournal local JSON save system.
 
 Before the Interregnum starts, serialize the player's MindComponent.insight and known_runes.
 
-After Interregnum, spawn a new Entity 0 at the Adventurer's Residence, and populate their MindComponent from the JSON.
+After Interregnum, reuse index 0 with generation + 1 for the new adventurer at the
+Adventurer's Residence, and populate their MindComponent from the JSON.

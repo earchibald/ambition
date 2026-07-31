@@ -1,7 +1,7 @@
 Implementation Roadmap: Sprint 6 (LLM Prompt Fine-Tuning)
 
 Target Audience: Lead Coding Agent / AI Prompt Engineer
-Objective: Finalize the pipeline that translates ECS game state into LLM context, and strictly validate the LLM's JSON response back into GOAP actionables. This sprint focuses on token efficiency and hallucination prevention.
+Objective: Finalize the pipeline that translates ECS game state into LLM context, and strictly validate the LLM's JSON response back into JobTemplate-driven actionables. This sprint focuses on token efficiency and hallucination prevention.
 
 Step 1: The Context Compressor (Token Economy)
 
@@ -68,7 +68,7 @@ Error: Network Timeout -> Action: Re-queue for next Macro Tick, maintain current
 
 Error: Invalid JSON -> Action: Default to FORTIFY, log error for dev.
 
-Error: Hallucinated Target ID -> Action: Strip target, default to GATHER_RESOURCES.
+Error: Hallucinated Target ID -> Action: Strip target, default to FORTIFY.
 
 Step 5: Integrated Corrections (ADR / Adversarial Review)
 
@@ -83,4 +83,6 @@ from FactionCoreComponent.faction_memory (review B6).
 
 Context source: compress from faction_memory + FactionCoreComponent ledger/diplomacy, using
 relative terms (Nearest Enemy: Player (Close)) and the canonical Faction-0 id for the player
-(ADR-14). FallbackMatrix handles timeout / invalid JSON / hallucinated target.
+(ADR-14). FallbackMatrix handles timeout / invalid JSON / hallucinated target consistently
+with the LLM doc: timeout maintains current objective, invalid JSON and hallucinated targets
+default to FORTIFY.

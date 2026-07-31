@@ -22,7 +22,8 @@ res://
 ├── ecs/                          # PURE DATA (No Godot Canvas/Physics Nodes)
 │   ├── components/               # RefCounted Data Structs (e.g., PositionComponent.gd)
 │   ├── systems/                  # Logic loops (e.g., FluidDynamicsSystem.gd)
-│   └── data_models/              # JSON Schemas and Enum definitions
+│   ├── data_models/              # JSON Schemas and Enum definitions
+│   └── persistence/              # Save/load schema + migration logic (Sprint P / ADR-6)
 ├── viewer/                       # GODOT NODES (The Dumb Viewer)
 │   ├── actors/                   # MeshInstance3D scenes for entities
 │   ├── environment/              # Voxel/GridMesh rendering for chunks
@@ -38,49 +39,54 @@ res://
 ├── addons/                       
 │   └── gut/                      # Must be installed via script/submodule, not UI
 ├── assets/                       # Raw textures, audio, fonts
-├── CLAUDE.md                     # Agent System Prompt & Rules
+├── CLAUDE.md                     # Root canonical agent System Prompt & Rules
+├── .claude/
+│   └── CLAUDE.md                 # Optional tool-specific mirror of root CLAUDE.md
 └── STATE.md                      # The Agent Handoff / Memory File
 
 
 
-2. GitHub Actions CI Pipeline (Anti-Hang Patch)
+2. GitHub Actions CI Pipeline — REQUIREMENTS (not a copyable YAML body)
 
-This file guarantees that broken simulation logic never merges. It includes the mandatory pre-import step to prevent Godot 4 headless hanging.
+The canonical workflow is the committed `.github/workflows/godot_ci.yml`. The illustrative YAML
+that used to live here was deleted: it had diverged from the committed file and invited
+copy-paste of steps that are now known to be broken.
 
-# .github/workflows/godot_ci.yml
-name: Godot ECS CI Pipeline
+The following requirements were VERIFIED EMPIRICALLY against `barichello/godot-ci:4.7.1` and
+Godot 4.7.1. Each exists because the naive version silently passes while doing nothing.
 
-on:
-  pull_request:
-    branches: [ "dev", "main" ]
-  push:
-    branches: [ "main" ]
+**R1 — The lint step must install pip itself, and must pass `--break-system-packages`.**
+The image contains NO `python3` and NO `pip3`. Its base is Ubuntu 24.04, which ships
+`/usr/lib/python3.12/EXTERNALLY-MANAGED`, so a bare `pip3 install` fails with
+`error: externally-managed-environment` (PEP 668). Verified both the failure and the fix.
 
-jobs:
-  test_and_lint:
-    runs-on: ubuntu-latest
-    container:
-      image: barichello/godot-ci:4.7.1 # ADR-15 (illustrative; the committed workflow is canonical)
-    
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
+**R2 — Pin gdtoolkit to the version actually verified against the pinned engine.**
+Use `gdtoolkit==4.5.*` (gdlint 4.5.0). The old `4.3.*` pin predates Godot 4.5+ syntax and
+fails to parse `@abstract` with a parse error rather than a lint error.
 
-      - name: GDScript Linter
-        run: |
-          pip3 install "gdtoolkit==4.3.*"   # pinned
-          # Lint first-party dirs ONLY; never addons/ (third-party GUT is not gdlint-clean).
-          gdlint ecs singletons ui viewer tests
+**R3 — The "does this dir have .gd files" guard must not use `**`.**
+`ls "$d"/**/*.gd` does NOT work: bash `globstar` is off in Actions, so `**` degrades to `*`,
+and `ls` with any non-matching pattern returns non-zero, short-circuiting the `&&`. Verified:
+gdlint was skipped for `ecs` and `singletons` even though both contained `.gd` files.
+Use `[ -n "$(find "$d" -name '*.gd' -print -quit)" ]`.
 
-      - name: Pre-Import Assets (CRITICAL ANTI-HANG FIX)
-        run: |
-          # Forces Godot to build the .godot/ folder headlessly so GUT doesn't time out
-          godot --headless --editor --quit
+**R4 — Import before anything that needs `class_name`.**
+Verified: `class_name` globals and cross-file enums do NOT resolve until the project has been
+imported; `--script` on a fresh checkout dies with `Identifier "X" not declared`. Use
+`godot --headless --import`.
 
-      - name: Run ECS Unit Tests (Headless)
-        run: |
-          # Run GUT tests. Fail the pipeline if any ECS math fails.
-          godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests/ -gexit
+**R5 — GUT must be proven to have actually run tests.**
+GUT exits 0 while running ZERO tests via three separate paths: missing import, an empty test
+dir, and `-gdir` not recursing into subdirectories. All three verified. Therefore the CI must
+pass `-ginclude_subdirs`, emit `-gjunit_xml_file`, and then FAIL the job if the parsed test
+count is 0. A guard of "does gut_cmdln.gd exist" is not sufficient.
+
+**R6 — The boot smoke test must assert a sentinel.**
+Verified: a `Main.tscn` whose `_ready()` throws a hard runtime error still exits 0. The smoke
+step must grep the log for a `ECS_BOOT_OK` sentinel printed at the end of `Main._ready()`, and
+must fail on `SCRIPT ERROR` / `^ERROR:` in the output.
+
+**R7 — Pin the GUT version.** Use the tag `v9.7.1`, verified green on Godot 4.7.1.
 
 
 
@@ -105,54 +111,29 @@ jobs:
 [autoload]
 
 ; Order is critical. Events must exist before Manager. Manager before Loop.
+; All three MUST `extends Node` — Godot refuses to autoload a script that does not.
 ECSEvents="*res://singletons/ECSEvents.gd"
 ECSManager="*res://singletons/ECSManager.gd"
-GameLoopManager="*res://singletons/GameLoopManager.gd
-"
+GameLoopManager="*res://singletons/GameLoopManager.gd"
 [physics]
 common/physics_ticks_per_second=60 ; The engine heartbeat for the Micro Tick
+
+[input]
+; REQUIRED IN SPRINT 0. Sprint 1 Step 4 mandates Input.get_vector(), which pushes an error
+; every frame if these actions are unmapped. The Sprint 0 gate asserts InputMap.has_action()
+; for each of these names.
+;   move_left / move_right / move_forward / move_back  -> A / D / W / S
+;   interact -> E      attack -> Mouse Left      inspect -> Tab
+;   cancel   -> Escape
 
 
 
 5. The Agent Instruction File (CLAUDE.md)
 
-Place this file at the root.
+Place the canonical file at the repository root as `CLAUDE.md`. Tool-specific mirrors such as
+`.claude/CLAUDE.md` and `copilot-instructions.md` must either point to that file or be kept
+byte-for-byte equivalent so onboarding instructions never dangle.
 
-# Agent Instructions: "The Living Delve"
-
-## Your Role
-You are the Lead Systems Coding Agent. You are tasked with implementing a massive, systemic dungeon crawler in Godot 4 using a custom, data-oriented architecture.
-
-## 1. Git Workflow & SDL (MANDATORY).
-*   **`main`**: The Stable Release. **NEVER push directly to `main`.**
-*   **`dev`**: The Integration Branch. All features merge here first. It may contain bugs, but it must compile.
-*   **`feature/*` or `fix/*`**: Your working branches. Always create a new branch off `dev` before writing code (e.g., `git checkout -b feature/sprint1-ecs-core`).
-*   **Pull Requests:** When a feature is done, create a PR targeting the `dev` branch. CI tests will run. Once `dev` is stable and a milestone is reached, we will merge `dev` into `main`.
-
-## 2. State Tracking (The Handoff Protocol)
-You are part of an ephemeral swarm. Your session may end at any time, and another agent will take your place. To prevent context loss, you MUST maintain a file named `STATE.md` in the root directory.
-*   Before ending any response, opening a PR, or switching tasks, update `STATE.md` with:
-    *   **Current Branch:** (e.g., `feature/sprint1-movement`)
-    *   **Active Goal:** What we are trying to achieve right now.
-    *   **Last Completed:** The specific file/logic just finished.
-    *   **Known Blockers/Bugs:** What is currently broken.
-    *   **Next Immediate Steps:** The exact next thing the incoming agent should do.
-
-## 3. The Prime Directive: Godot is a Dumb Viewer
-1. **NEVER use Godot Physics Nodes for logic.** Do not use `CharacterBody3D`, `RigidBody3D`, `Area3D`, or `move_and_slide()`.
-2. **The ECS is the Source of Truth.** All entity logic, positions, and chemistry live in `res://ecs/` as pure data (`RefCounted` or `Resource` objects).
-3. **Strict Decoupling.** Visual nodes (`res://viewer/`) are only spawned to represent ECS data visually. They interpolate to the ECS `PositionComponent` values. The UI only ever listens to `ECSEvents` signals; it never modifies state directly.
-4. **Data Arrays over Nodes:** Whenever possible, use `PackedFloat32Array` or typed arrays for massive loops (like Cellular Automata or Micro Tick updates) instead of nested Dictionaries.
-
-## 4. Your Immediate Tasks (Before Writing Code)
-Before you implement a single system, you must understand the gestalt of the architecture. You have access to a suite of documents (Sprints 0-4 Roadmaps and Scaffolding).
-
-**Task 1: Full Architecture Review**
-Read all architectural specifications and provide a critical review of the overall project structure. Identify any remaining paradoxes or missing data pipelines in the ECS-to-Viewer handshake.
-
-**Task 2: Sprint-by-Sprint Review**
-Provide a step-by-step technical critique of Sprints 1, 2, 3, and 4. Tell me exactly what files you intend to create first for Sprint 1, how you will structure the `ECSManager`, and flag any constraints you feel are missing.
-
-Do not write implementation code until we have completed this review dialogue.
-
-
+Do not duplicate the body of `CLAUDE.md` in this scaffold. The root file is the single
+source of truth; if it changes, update mirrors/symlinks rather than copying stale prompt text
+into sprint docs.

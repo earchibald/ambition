@@ -3,6 +3,11 @@ Implementation Roadmap: Sprint 5 (Content & Data Population)
 Target Audience: Lead Coding Agent / Systems Designer
 Objective: Establish the scalable data frameworks for the game's content. This sprint defines the JSON schemas and GDScript dictionaries that the ECS will ingest to populate the world with materials, spells, creatures, and cultures.
 
+Authoritative content contract: all schemas, IDs, cross-reference checks, migrations, and
+failure policy must follow docs/content_authoring_and_schema_validation.md.
+Use docs/archetypal_content_catalog.md for the initial pure-content object families; prioritize
+its starter content set before adding bespoke legendary items or quest chains.
+
 Step 1: The Universal Material Dictionary
 
 The Objective: Create the master lookup table for all physical matter in the game, dictating density, value, and inherent chemistry.
@@ -77,7 +82,10 @@ Culture Dictionary: Map tags like [Militaristic] to specific baseline modifiers 
 
 Language Dictionary: Create mapping tables for the semantic translation UI.
 
-E.g., LANG_GOBLIN: { "food": "grub", "fight": "krump", "gold": "shine" }. When the LLM outputs "food," the UI scrambles it or uses "grub" based on the player's MindComponent.Insight.
+E.g., LANG_GOBLIN: { "food": "grub", "fight": "krump", "gold": "shine" }. When the LLM
+outputs "food," the UI uses the known cultural word ("grub") or semantic replacement
+("noun?") based on the player's MindComponent.language_fluency. It never obfuscates text
+with random letters or symbols.
 
 Step 5: Integrated Corrections (ADR / Adversarial Review)
 
@@ -97,5 +105,14 @@ max_speed). complexity_cost gates against MindComponent.insight.
 Stack split/merge data (review D7): define which items are quantity-stackable and their
 merge key (material_id + quality + tags). Currency: coin = 1 value unit (material §5/§6).
 
+Materialization policy data (review 2026-07-31 A3): item/archetype schemas must declare
+whether the item is a fungible commodity stack (LEDGERIZE), equipped/unique identity item
+(PRESERVE_ENTITY), container/stash manifest (CONTAINER_MANIFEST), caravan cargo
+(CARAVAN_MANIFEST), or cleanup-eligible junk (GC_ELIGIBLE). LoD sync uses this field instead
+of flattening all owned matter into ledgers.
+
+Container data: container archetypes declare capacity_cm3, accept/reject tag filters, and
+allow_nested_container. Sub-container sorting uses ContainerComponent filters directly.
+
 Language/Culture dictionaries feed the SEMANTIC cipher (unknown word -> grammatical function),
-never letter-scrambling (ui_ux §8).
+never symbol/letter obfuscation (ui_ux §8).
