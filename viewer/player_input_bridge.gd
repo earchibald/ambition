@@ -68,22 +68,28 @@ func _physics_process(_delta: float) -> void:
 ## The swing arc is +/-60 degrees around this vector. Taking it from the movement keys meant a
 ## standing player swung along a hard-coded +Z, so a rat standing due east sat 90 degrees outside
 ## the arc and clicking on it did nothing — with no message explaining why.
+## Aim comes from `PickSystem.aim_direction`, which is continuous everywhere. It replaced a
+## terrain march that fell back to a hard-coded `+Z` whenever the march found nothing — which is
+## most of the upper half of the screen, since those rays reach the horizon or outrun the march
+## budget. Sweeping the cursor past the player therefore made the aim SNAP to a fixed direction
+## instead of continuing to rotate.
 func _aim_direction(row: int, movement: Vector3) -> Vector3:
-	if _camera != null and World.active_chunk != null:
+	if _camera != null:
 		var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
-		var hit: Dictionary = GameLoopManager.picking.ground_hit(
-			_camera.project_ray_origin(mouse),
-			_camera.project_ray_normal(mouse),
-			World.active_chunk
+		var feet: Vector3 = ECSManager.position_of(row)
+		var bounds: BoundsComponent = ECSManager.bounds.get(row)
+		if bounds != null:
+			feet.y -= bounds.half_extents.y
+		var aim: Vector3 = PickSystem.aim_direction(
+			feet, _camera.project_ray_origin(mouse), _camera.project_ray_normal(mouse)
 		)
-		if hit["hit"]:
-			var to_cursor: Vector3 = hit["point"] - ECSManager.position_of(row)
-			var flat := Vector3(to_cursor.x, 0.0, to_cursor.z)
-			if flat.length() > 0.05:
-				return flat.normalized()
+		if aim.length() > 0.01:
+			return aim
 	if movement.length() > 0.01:
 		return movement.normalized()
-	return Vector3(0.0, 0.0, 1.0)
+	# Genuinely undefined only when the cursor sits on the actor and nobody is moving. Holding the
+	# previous aim beats snapping to a constant.
+	return last_aim
 
 
 ## Targeting goes through the ECS PickSystem, never a Godot raycast.

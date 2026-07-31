@@ -16,6 +16,7 @@ script = ExtResource("6_terrain")
 
 [node name="ViewManager" type="Node3D" parent="."]
 script = ExtResource("2_view")
+aim_source_path = NodePath("../PlayerInputBridge")
 
 [node name="CameraRig" type="Node3D" parent="."]
 script = ExtResource("3_cam")

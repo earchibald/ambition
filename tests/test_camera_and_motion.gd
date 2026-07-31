@@ -97,6 +97,106 @@ func test_visual_position_has_no_steady_state_lag() -> void:
 	)
 
 
+## THE AIM SNAP. Sweeping the cursor past the player made the aim jump to a fixed direction,
+## because the old terrain march fell back to a hard-coded +Z whenever it found nothing — which
+## is most of the upper half of the screen, where rays reach the horizon or outrun the march.
+##
+## Swept through a full circle, the aim must rotate CONTINUOUSLY. A snap shows up as one large
+## angular step between neighbouring samples.
+func test_aim_never_snaps_while_the_cursor_sweeps_around_the_player() -> void:
+	var feet := Vector3(20.0, 0.0, 20.0)
+	# A fixed camera above and behind, matching CameraRig.FOLLOW_OFFSET.
+	var eye: Vector3 = feet + CameraRig.FOLLOW_OFFSET
+	var previous: Vector3 = Vector3.ZERO
+	var worst_step_deg: float = 0.0
+
+	var samples: int = 720
+	for i in samples:
+		var angle: float = TAU * float(i) / float(samples)
+		# A point on a wide circle around the player, converted into a ray from the camera.
+		var aim_at: Vector3 = feet + Vector3(cos(angle), 0.0, sin(angle)) * 12.0
+		var aim: Vector3 = PickSystem.aim_direction(feet, eye, (aim_at - eye).normalized())
+		assert_gt(aim.length(), 0.9, "the aim is always defined at sample %d" % i)
+		if previous != Vector3.ZERO:
+			worst_step_deg = maxf(worst_step_deg, rad_to_deg(previous.angle_to(aim)))
+		previous = aim
+	# 720 samples around a circle is 0.5 degrees each. Anything near 90 or 180 is a snap.
+	assert_lt(worst_step_deg, 5.0, "no discontinuity anywhere in the sweep")
+
+
+## Crossing the player's own X axis is the case that was reported. Sampled either side of it, the
+## aim must differ by a hair rather than flipping.
+func test_aim_is_continuous_across_the_players_x_axis() -> void:
+	var feet := Vector3(20.0, 0.0, 20.0)
+	var eye: Vector3 = feet + CameraRig.FOLLOW_OFFSET
+	var just_before: Vector3 = PickSystem.aim_direction(
+		feet, eye, ((feet + Vector3(12.0, 0.0, 0.05)) - eye).normalized()
+	)
+	var just_after: Vector3 = PickSystem.aim_direction(
+		feet, eye, ((feet + Vector3(12.0, 0.0, -0.05)) - eye).normalized()
+	)
+	assert_lt(
+		rad_to_deg(just_before.angle_to(just_after)),
+		2.0,
+		"the aim does not snap as the cursor crosses the player's X axis"
+	)
+
+
+## A ray at or above the horizon has NO ground intersection. Rather than snapping to a constant,
+## it must keep the direction the cursor implies — which is also the exact limit the intersection
+## approaches as the ray flattens, so the two cases meet without a seam.
+func test_a_level_ray_keeps_the_direction_the_cursor_implies() -> void:
+	var feet := Vector3.ZERO
+	var eye := Vector3(0.0, 11.0, 9.0)
+	var level: Vector3 = PickSystem.aim_direction(feet, eye, Vector3(-1.0, 0.0, 0.0).normalized())
+	assert_almost_eq(level.x, -1.0, 0.001, "a level ray aimed west still aims west")
+
+	# Approach the horizon from below; the answer must converge on the level-ray answer.
+	var nearly_level: Vector3 = PickSystem.aim_direction(
+		feet, eye, Vector3(-1.0, -0.0005, 0.0).normalized()
+	)
+	assert_lt(
+		rad_to_deg(level.angle_to(nearly_level)),
+		1.0,
+		"the descending and level cases agree in the limit — no seam at the horizon"
+	)
+
+
+## Straight down onto the actor is the one genuinely undefined case, and it must SAY so rather
+## than inventing a direction. The caller holds its previous aim.
+func test_a_vertical_ray_reports_that_it_is_undefined() -> void:
+	assert_eq(
+		PickSystem.aim_direction(Vector3.ZERO, Vector3(0.0, 10.0, 0.0), Vector3.DOWN),
+		Vector3.ZERO,
+		"a ray straight down has no horizontal answer to give"
+	)
+
+
+## A cube looks identical from all four sides, so rotating one communicates nothing. Heading was
+## real and enforced by the melee arc, and shown nowhere on the character — the only way to learn
+## which way you faced was to infer it from what you could hit.
+func test_the_player_visual_carries_a_heading_marker() -> void:
+	var view: ViewManager = ViewManager.new()
+	add_child_autofree(view)
+	view._on_entity_created(EH.make(0, 1), [&"Player"] as Array[StringName], Vector3.ZERO)
+	var body: Node3D = view._visuals[0]
+	assert_not_null(
+		body.get_node_or_null(ViewManager.NOSE_NAME), "the player body has a visible front"
+	)
+
+
+## Items and creatures must not keep a nose handed down from a pooled player visual.
+func test_a_pooled_visual_does_not_inherit_a_heading_marker() -> void:
+	var view: ViewManager = ViewManager.new()
+	add_child_autofree(view)
+	view._on_entity_created(EH.make(0, 1), [&"Player"] as Array[StringName], Vector3.ZERO)
+	var body: Node3D = view._visuals[0]
+	view._style(body, [&"Item"] as Array[StringName])
+	assert_null(
+		body.get_node_or_null(ViewManager.NOSE_NAME), "the nose is stripped when reused as an item"
+	)
+
+
 ## An entity must not fly in from the world origin on its first frame.
 func test_a_new_visual_does_not_interpolate_from_the_origin() -> void:
 	var view: ViewManager = ViewManager.new()

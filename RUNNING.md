@@ -65,12 +65,17 @@ so a gizmo cannot disagree with the rule it depicts:
 | Gizmo | Colour | Source of truth |
 |---|---|---|
 | Facing arrow | yellow | The live aim vector, recomputed each frame from your cursor |
+| The player's **nose** | yellow, on the body | Same aim vector. Drawn on the character itself, not just the floor, so heading is readable with gizmos off |
 | Melee wedge | red | `PickSystem.MELEE_REACH_M` (2.0 m) and the ±60° arc test |
 | Interact ring | cyan | `PickSystem.INTERACT_DIST_M` (2.5 m) |
 | Sight ring | violet | `PerceptionComponent.sight_range_m` (12 m), drawn only if the entity has the component |
 
 The wedge is what you aim; if a target is not inside it, the swing will be refused and the event
 feed will say so.
+
+Aim rotates **continuously** everywhere, including behind you and above the horizon. A camera ray
+that never meets the ground keeps the heading the cursor implies, which is exactly the limit the
+ground intersection approaches as the ray flattens — so the two cases meet without a seam.
 
 ### What is in the arena, and what each thing is there to test
 

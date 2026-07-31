@@ -16,6 +16,14 @@ const GROUND_MARCH_STEP_M: float = 0.25
 ## `viewer/` — the dependency only ever points the other way.
 const WALL_TOP_M: float = 2.4
 
+## Below this vertical component a ray is treated as level: it meets the ground plane either
+## never, or so far away that the intersection is numerically worthless.
+const HORIZON_EPSILON: float = 0.0001
+
+## Inside this radius the cursor is effectively on top of the actor, and the direction between
+## them is numerically meaningless.
+const MIN_AIM_RADIUS_M: float = 0.05
+
 var picks_attempted: int = 0
 var picks_hit_entity: int = 0
 var picks_hit_tile: int = 0
@@ -116,6 +124,42 @@ func nearest_within_reach(actor_row: int, actor_position: Vector3, hash: Spatial
 	if best_row < 0:
 		return EH.INVALID
 	return ECSManager.handle_of(best_row)
+
+
+## The flat direction a camera ray implies, from `from`. Always defined, and CONTINUOUS across
+## every case — which is the entire point.
+##
+## The previous version marched the terrain and, whenever the march found nothing, fell back to a
+## hard-coded `+Z`. The march fails for every ray that reaches the horizon or outruns its 30 m
+## budget, which is most of the upper half of the screen, so sweeping the cursor past the player
+## made the aim SNAP to a fixed direction instead of continuing to rotate.
+##
+## Two cases, and they meet exactly:
+##   * A descending ray meets the horizontal plane through `from` analytically. No marching, no
+##     distance cap, no terrain dependency.
+##   * A level or rising ray has no intersection at all. Its horizontal HEADING is used instead,
+##     which is precisely the limit the intersection point approaches as the ray nears the
+##     horizon — so the two cases agree in the limit and there is no discontinuity anywhere.
+##
+## Returns `Vector3.ZERO` only when the answer is genuinely undefined: a ray straight down onto
+## the actor itself. Callers hold their previous aim rather than inventing one.
+static func aim_direction(from: Vector3, origin: Vector3, direction: Vector3) -> Vector3:
+	var heading := Vector3(direction.x, 0.0, direction.z)
+	if heading.length() < HORIZON_EPSILON:
+		# Straight down. There is no horizontal component to fall back on.
+		return Vector3.ZERO
+	heading = heading.normalized()
+
+	if direction.y < -HORIZON_EPSILON:
+		var distance: float = (from.y - origin.y) / direction.y
+		if distance > 0.0:
+			var point: Vector3 = origin + direction * distance
+			var flat := Vector3(point.x - from.x, 0.0, point.z - from.z)
+			# Under the cursor-on-top-of-the-actor radius the direction is numerically
+			# meaningless and would jitter wildly; the ray's heading is the stable answer.
+			if flat.length() > MIN_AIM_RADIUS_M:
+				return flat.normalized()
+	return heading
 
 
 ## Marches the camera ray until it meets terrain — the side of a solid tile, or the floor surface
