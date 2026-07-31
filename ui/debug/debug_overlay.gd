@@ -36,6 +36,8 @@ func _compose() -> String:
 	var counters: Dictionary = GameLoopManager.counters()
 	var lines: Array[String] = []
 	lines.append("%s  |  scenario %s" % [counters["clock"], World.scenario])
+	lines.append(_player_location())
+	lines.append(_cursor_location())
 	lines.append(
 		"micro %.2fms / %.1fms budget%s   sim %.2fms   fluid %.2fms   spatial %.2fms" % [
 			counters["last_micro_ms"],
@@ -98,6 +100,75 @@ func select_row(row: int) -> void:
 	_selected_row = row
 
 
+## Where the player is, in BOTH coordinate systems. Every arena feature is specified in tile
+## coordinates (`ecs/world/test_arena.gd`, and the table in RUNNING.md), but the ECS stores
+## metres — so without this line neither number can be checked against the other, and "walk to
+## the ledge and confirm the step rule" is not a runnable instruction.
+func _player_location() -> String:
+	var row: int = ECSManager.resolve(ECSManager.player_handle())
+	if row < 0:
+		return "you: <no player entity>"
+	var pos: Vector3 = ECSManager.position_of(row)
+	var chunk: ChunkData = World.active_chunk
+	if chunk == null:
+		return "you: world (%.2f, %.2f, %.2f)   <no active chunk>" % [pos.x, pos.y, pos.z]
+	var tile: Vector2i = chunk.world_to_tile(pos)
+	return "you: tile %s   world (%.2f, %.2f, %.2f)   %s" % [
+		_format_tile(tile), pos.x, pos.y, pos.z, _tile_readout(chunk, tile)
+	]
+
+
+## The tile under the mouse, so the arena map can be checked without walking the whole grid.
+##
+## Derived from the camera ray against the y=0 GROUND PLANE, not from PickSystem: the DDA march
+## only registers a hit on SOLID tiles, so over open floor it correctly returns no tile at all.
+## On the raised ledge and in the pit this therefore reads one tile or two off — labelled below
+## rather than silently wrong.
+func _cursor_location() -> String:
+	var chunk: ChunkData = World.active_chunk
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if chunk == null or camera == null:
+		return "cursor: <no camera>"
+	var mouse: Vector2 = get_viewport().get_mouse_position()
+	var origin: Vector3 = camera.project_ray_origin(mouse)
+	var direction: Vector3 = camera.project_ray_normal(mouse)
+	if absf(direction.y) < 0.0001:
+		return "cursor: <ray parallel to ground>"
+	var distance: float = -origin.y / direction.y
+	if distance < 0.0:
+		return "cursor: <pointing at the sky>"
+	var tile: Vector2i = chunk.world_to_tile(origin + direction * distance)
+	return "cursor (ground plane): tile %s   %s" % [
+		_format_tile(tile), _tile_readout(chunk, tile)
+	]
+
+
+## Kind, elevation and fluid for one tile. Elevation is what the step-up and drop rules read,
+## and fluid is what the CA moves, so these are the two numbers worth seeing while walking.
+func _tile_readout(chunk: ChunkData, tile: Vector2i) -> String:
+	if not _in_chunk(tile):
+		return "<outside chunk>"
+	var units: int = chunk.fluid_at(tile.x, tile.y)
+	return "%s  elev %+.2fm  fluid %d" % [
+		"SOLID" if chunk.is_solid(tile.x, tile.y) else "open",
+		chunk.height_at(tile.x, tile.y),
+		units,
+	]
+
+
+func _in_chunk(tile: Vector2i) -> bool:
+	return (
+		tile.x >= 0
+		and tile.y >= 0
+		and tile.x < WorldConstants.CHUNK_TILES
+		and tile.y < WorldConstants.CHUNK_TILES
+	)
+
+
+func _format_tile(tile: Vector2i) -> String:
+	return "(%d, %d)" % [tile.x, tile.y]
+
+
 ## "Why did this entity do that?" — the explainability record.
 func _inspect(row: int) -> String:
 	var handle: int = ECSManager.handle_of(row)
@@ -106,7 +177,12 @@ func _inspect(row: int) -> String:
 	var lines: Array[String] = []
 	lines.append("--- %s ---" % EH.to_debug_string(handle))
 	lines.append("components: %s" % ComponentMask.describe(ECSManager.mask_of(row)))
-	lines.append("pos %v   vel %v" % [ECSManager.position_of(row), ECSManager.velocity_of(row)])
+	var pos: Vector3 = ECSManager.position_of(row)
+	var chunk: ChunkData = World.active_chunk
+	var tile_text: String = ""
+	if chunk != null:
+		tile_text = "  tile %s" % _format_tile(chunk.world_to_tile(pos))
+	lines.append("pos %v%s   vel %v" % [pos, tile_text, ECSManager.velocity_of(row)])
 
 	var body: BodyComponent = ECSManager.bodies.get(row)
 	if body != null:

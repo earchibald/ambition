@@ -71,6 +71,8 @@ rule, so "walking around" is a real test pass:
 
 ```
 Spring 1 06:00  |  scenario test_arena
+you: tile (8, 32)   world (8.50, 0.90, 32.50)   open  elev +0.00m  fluid 0
+cursor (ground plane): tile (24, 30)   SOLID  elev +0.00m  fluid 0
 micro 0.53ms / 8.0ms budget   sim 0.02ms   fluid 0.00ms   spatial 0.49ms
 entities alive 3 (active 3 / cap 3000)   rows 3   free 0
 movers 1  substeps 6  tile-hits 0  entity-hits 0
@@ -78,6 +80,34 @@ CA updates 0  dirty 0   pumped 0
 LoS marches 0 (cache 0, fail 0)  perceived 0  witnesses 0
 stale-handle rejections 0   destroys 0   query rebuilds 13
 ```
+
+### Checking your position against the arena table
+
+The `you:` line is how you verify anything in the table above. Every arena feature is authored in
+**tile** coordinates, but the ECS stores **metres**, so the overlay prints both:
+
+* `tile (8, 32)` — grid coordinate. This is what the table in §3 uses. On boot it is
+  `TestArena.SPAWN_TILE`, and a test asserts those two agree.
+* `world (8.50, 0.90, 32.50)` — metres. Tiles are 1 m and the reported point is the tile centre,
+  so world X and Z are always tile + 0.5. Y is the entity centre, which for the player sits
+  0.9 m above the floor (half of its 1.8 m height).
+* `open` / `SOLID`, `elev`, `fluid` — the three tile facts the simulation actually reads.
+  `elev` is the number the step-up and drop rules compare; `fluid` is what the CA moves.
+
+So to check the arena is what §3 claims, walk east and watch the numbers:
+
+| Walk to | Expect |
+|---|---|
+| tile x=24 (except y=32-33) | You stop. The cursor readout over it says `SOLID`. |
+| tile (24, 32) or (24, 33) | You pass through — that is the doorway. |
+| tiles (40-49, 40-49) | `elev +0.40m`, and you climbed it without jumping. That is the step rule. |
+| tiles (40-45, 12-17) | `elev -2.50m`, and you fell rather than stepped down. |
+| tile (10, 10) | `fluid` above zero. That is the puddle. |
+
+The `cursor` line reports the tile under your mouse, so you can survey the map without walking
+it. It is derived from the camera ray against the **y=0 ground plane**, so over the raised ledge
+and inside the pit it reads a tile or two off. It is exact on flat ground, which is most of the
+arena. `Tab` also adds the selected entity's tile to the inspector block.
 
 The two lines worth watching:
 

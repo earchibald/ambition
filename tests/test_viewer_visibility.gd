@@ -78,6 +78,60 @@ func test_the_entity_inspector_has_a_caller() -> void:
 	assert_gt(callers, 0, "something actually calls DebugOverlay.select_row")
 
 
+## The overlay must report the player in TILE coordinates, because every arena feature is
+## specified in tiles while the ECS stores metres. Without the readout, "walk to the ledge at
+## (40-49, 40-49) and confirm the step rule" is not something a human can actually carry out.
+func test_overlay_reports_player_tile_and_world_position() -> void:
+	var overlay: DebugOverlay = DebugOverlay.new()
+	add_child_autofree(overlay)
+	World.boot_scenario(World.SCENARIO_TEST_ARENA, 1)
+
+	var text: String = overlay._player_location()
+	assert_string_contains(text, "tile", "the overlay names a tile coordinate")
+	assert_string_contains(text, "world", "the overlay names a world coordinate")
+	# The player spawns on TestArena.SPAWN_TILE. If these ever disagree, one of the two
+	# coordinate systems has drifted and the arena table in RUNNING.md is lying.
+	assert_string_contains(
+		text,
+		"(%d, %d)" % [TestArena.SPAWN_TILE.x, TestArena.SPAWN_TILE.y],
+		"the reported tile is the spawn tile the arena actually authored"
+	)
+
+
+## Elevation and fluid are the two numbers the step/drop rules and the CA operate on, so the
+## readout has to agree with the arena that was built, not with a hard-coded guess.
+func test_tile_readout_matches_the_authored_arena() -> void:
+	var overlay: DebugOverlay = DebugOverlay.new()
+	add_child_autofree(overlay)
+	var chunk: ChunkData = World.active_chunk
+
+	assert_string_contains(
+		overlay._tile_readout(chunk, Vector2i(45, 45)),
+		"elev +0.40m",
+		"the ledge reports its authored 0.4 m elevation"
+	)
+	assert_string_contains(
+		overlay._tile_readout(chunk, Vector2i(42, 14)),
+		"elev -2.50m",
+		"the pit reports its authored depth"
+	)
+	assert_string_contains(
+		overlay._tile_readout(chunk, Vector2i(24, 10)),
+		"SOLID",
+		"the interior wall at x=24 reads as solid"
+	)
+	assert_string_contains(
+		overlay._tile_readout(chunk, Vector2i(24, TestArena.DOORWAY_Y)),
+		"open",
+		"the doorway in that same wall reads as open"
+	)
+	assert_string_contains(
+		overlay._tile_readout(chunk, Vector2i(-1, 0)),
+		"outside chunk",
+		"a tile off the grid says so instead of reading out of bounds"
+	)
+
+
 ## Bullet-time and the inspector shared one key, which is why the inspector was unreachable.
 func test_inspect_and_slow_time_are_separate_actions() -> void:
 	assert_true(InputMap.has_action(&"inspect"), "inspect is mapped")
