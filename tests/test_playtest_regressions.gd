@@ -184,6 +184,114 @@ func test_a_refused_action_is_announced() -> void:
 	assert_eq(rejections, [&"attack"] as Array[StringName], "the bus carries refusals too")
 
 
+## PICKING SOMETHING UP MUST REMOVE IT FROM THE WORLD.
+##
+## It used to keep POSITION, so it stayed drawn, stayed in the spatial hash, and stayed in reach.
+## Taking it a second time then found it again — and `_try_merge` merged the item INTO ITSELF,
+## because it was already in `held_items` and matched its own key perfectly. It doubled its own
+## quantity and was then destroyed, leaving a dead handle in the inventory. Reported from play as
+## "you picked up Item #2 / you picked up <gone>".
+func test_a_taken_item_leaves_the_world() -> void:
+	var player_position: Vector3 = ECSManager.position_of(_player_row)
+	var item: int = World.spawn_item(
+		player_position + Vector3(1.0, 0.0, 0.0), MaterialLibrary.MAT_COPPER, 112.0, 5
+	)
+	var item_row: int = ECSManager.resolve(item)
+	assert_true(GameLoopManager.inventory.try_insert(_player_row, item), "the pickup succeeds")
+
+	assert_false(
+		ECSManager.has_components(item_row, ComponentMask.POSITION),
+		"a carried item has no position, so it leaves the hash and the renderer"
+	)
+	assert_false(
+		ECSManager.query(ComponentMask.POSITION).has(item_row),
+		"and it no longer appears in world queries"
+	)
+
+
+func test_taking_the_same_item_twice_cannot_duplicate_it() -> void:
+	var player_position: Vector3 = ECSManager.position_of(_player_row)
+	var item: int = World.spawn_item(
+		player_position + Vector3(1.0, 0.0, 0.0), MaterialLibrary.MAT_COPPER, 112.0, 5
+	)
+	var item_row: int = ECSManager.resolve(item)
+	GameLoopManager.inventory.try_insert(_player_row, item)
+	GameLoopManager.inventory.try_insert(_player_row, item)
+
+	var physical: PhysicalPropertyComponent = ECSManager.physicals.get(item_row)
+	assert_eq(physical.quantity, 5, "the stack did not absorb its own quantity")
+	assert_true(ECSManager.is_alive(item), "and the entity was not destroyed out from under us")
+	var inventory: InventoryComponent = ECSManager.inventories.get(_player_row)
+	assert_eq(inventory.held_items.size(), 1, "it is held exactly once")
+
+
+## Death must be announced BEFORE the body becomes a corpse, or every listener resolves the
+## entity after the Corpse tag lands and the log reads "corpse #1 DIED" — the aftermath, not the
+## event.
+func test_death_is_announced_before_the_body_becomes_a_corpse() -> void:
+	var player_position: Vector3 = ECSManager.position_of(_player_row)
+	var rat: int = World.spawn_creature(player_position + Vector3(1.0, 0.0, 0.0))
+	var rat_row: int = ECSManager.resolve(rat)
+
+	# Collected into an ARRAY on purpose. GDScript lambdas capture primitives BY VALUE, so
+	# assigning to a captured `bool` inside the probe changes only the closure's private copy and
+	# the test reads back its original value — a green-looking test that asserts nothing. Arrays
+	# and dictionaries are references, so mutating them does escape.
+	var corpse_at_death: Array[bool] = []
+	var probe := func(entity: int, _cause: StringName) -> void:
+		var chemistry: ChemistryComponent = ECSManager.chemistries.get(ECSManager.resolve(entity))
+		corpse_at_death.append(chemistry != null and chemistry.active_tags.has(&"Corpse"))
+	# Put it one point from death rather than guessing a swing count. The damage model is tested
+	# elsewhere; what is under test here is the ORDER of two side effects.
+	ECSManager.bodies.get(rat_row).health = 0.5
+	ECSEvents.entity_died.connect(probe)
+	GameLoopManager.combat.resolve_melee(_player_row, rat_row, Vector3.RIGHT, 1.5)
+	ECSEvents.entity_died.disconnect(probe)
+
+	assert_false(ECSManager.bodies.get(rat_row).is_alive(), "the rat actually died")
+	assert_eq(corpse_at_death.size(), 1, "the death was announced exactly once")
+	assert_eq(
+		corpse_at_death, [false] as Array[bool],
+		"the entity is still a creature at the moment it dies, not already a corpse"
+	)
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(rat_row)
+	assert_true(chemistry.active_tags.has(&"Corpse"), "and it IS a corpse immediately after")
+
+
+## Every landing above walking speed is reported, damaging or not. Silence on a survivable fall
+## is indistinguishable from a fall that was never detected.
+func test_a_survivable_landing_is_still_reported() -> void:
+	var landings: Array[float] = []
+	var probe := func(_e: int, speed: float, _damage: float) -> void:
+		landings.append(speed)
+	ECSEvents.entity_landed.connect(probe)
+	ECSEvents.entity_landed.emit(ECSManager.player_handle(), 3.0, 0.0)
+	ECSEvents.entity_landed.disconnect(probe)
+	assert_eq(landings.size(), 1, "an unhurt landing still reaches the feed")
+	assert_lt(
+		WorldConstants.REPORTABLE_LANDING_MPS,
+		WorldConstants.SAFE_FALL_MPS,
+		"the reporting threshold sits BELOW the damage threshold, or safe falls stay silent"
+	)
+
+
+## THE PIT WAS A TRAP. Its floor is 2.5 m down and the step limit is 0.5 m, so every wall was five
+## times too tall to climb and there is no jump. Correct physics, unusable arena.
+func test_the_pit_has_a_walkable_way_out() -> void:
+	var chunk: ChunkData = World.active_chunk
+	var previous: float = chunk.height_at(45, TestArena.RAMP_Y_MIN)
+	for x in range(46, 53):
+		var height: float = chunk.height_at(x, TestArena.RAMP_Y_MIN)
+		assert_false(chunk.is_solid(x, TestArena.RAMP_Y_MIN), "ramp tile %d is walkable" % x)
+		assert_lte(
+			height - previous,
+			WorldConstants.STEP_UP_MAX_M,
+			"tread at x=%d rises no more than the step limit" % x
+		)
+		previous = height
+	assert_almost_eq(previous, 0.0, 0.001, "the ramp arrives at the surrounding floor level")
+
+
 ## The ground march must agree with what TerrainView draws, or the cursor lies about walls.
 func test_ground_march_agrees_with_the_drawn_wall_height() -> void:
 	assert_eq(

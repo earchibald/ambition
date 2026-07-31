@@ -63,9 +63,24 @@ func try_insert(container_row: int, item_handle: int) -> bool:
 		return true
 
 	inventory.add(item_handle)
+	_leave_the_world(item_row)
 	recompute_totals(container_row)
 	_update_bursting(container_row, inventory, container)
 	return true
+
+
+## A carried item is no longer AT anywhere. Stripping POSITION removes it from the spatial hash,
+## from every world query, and from the renderer.
+##
+## Without this a picked-up item stayed on the floor: still drawn, still in the hash, still within
+## reach. Pressing take a second time then found it again and `_try_merge` merged the item INTO
+## ITSELF — the entity was already in `held_items`, so it matched its own merge key, doubled its
+## own quantity, and was then destroyed, leaving a dead handle in the inventory. A duplication bug
+## reported as "you picked up <gone>".
+func _leave_the_world(item_row: int) -> void:
+	ECSManager.remove_component_bit(item_row, ComponentMask.POSITION)
+	ECSManager.remove_component_bit(item_row, ComponentMask.LOOSE_ITEM)
+	ECSManager.loose_items.erase(item_row)
 
 
 ## Tag filters, nesting, phase, and the overstuff ceiling.
@@ -99,6 +114,11 @@ func _try_merge(
 	for i in inventory.held_items.size():
 		var existing_row: int = ECSManager.resolve(inventory.held_items[i])
 		if existing_row < 0:
+			continue
+		# Never merge an item with itself. It matches its own key perfectly, so without this the
+		# stack absorbs its own quantity and the entity is then destroyed out from under the
+		# inventory that holds it.
+		if existing_row == item_row:
 			continue
 		if merge_key(existing_row) != key:
 			continue

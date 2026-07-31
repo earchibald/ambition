@@ -145,11 +145,30 @@ collision. Watch the `you:` line as you go.
 | the wall at x=24 | You stop, and slide along it rather than sticking |
 | the doorway at (24, 32-33) | You pass through |
 | the ledge at (40-49, 40-49) | You **step up** without jumping, and `you:` reports `elev +0.40m` |
-| the pit at (40-45, 12-17) | `vitals:` flips to `FALLING x.x m/s`, then the event feed reports the damage. A 2.5 m drop lands at ~5.4 m/s, just past the 5 m/s safe limit, so expect a small hit rather than a large one |
+| the pit at (40-45, 12-17) | `vitals:` flips to `FALLING x.x m/s`, then the feed reports the landing. See the note below — this is a **small** hit by design |
+| the ramp at (46-51, 14-15) | You climb back out of the pit, 0.4 m per tread |
 | the diagonal pinch at (50, 20)/(51, 21) | You do **not** slip through the shared corner |
 | the puddle at (10, 10) | `fluid` drops in the cell you displace, and `CA updates` rises |
 
 `Tab` adds the selected entity's tile to the inspector block as well.
+
+### Why the 2.5 m pit barely hurts
+
+Measured, walking east off the rim: **lands at 5.40 m/s for 1.82 damage out of 100.**
+
+That is not a broken fall, it is three rules composing:
+
+* `AUTO_DROP_MAX_M` is 1.0 m, so the last metre is *snapped*, not fallen. A 2.5 m pit is only a
+  1.5 m free fall.
+* 1.5 m of free fall reaches 5.40 m/s.
+* `SAFE_FALL_MPS` is 5.0, so only the 0.40 m/s of excess does any damage at all.
+
+Anything under a **2.3 m** total drop is therefore completely free. The pit sits just past that
+line on purpose, so it demonstrates that the threshold exists.
+
+Be aware the curve past the threshold is **steep**: damage is `0.5·m·(v−5)²/J_PER_HP`, which for
+a 70 kg body is `11.7·(v−5)²`. A 4 m pit would deal ~83 damage and a 5 m pit would be fatal. If
+falls should be more survivable, the dial is `J_PER_HP` (currently 3.0), not the pit depth.
 
 ### The event feed
 

@@ -95,8 +95,11 @@ func resolve_melee(
 
 	if not target.is_alive():
 		kills += 1
-		_convert_to_corpse(target_row)
+		# Announce the death BEFORE the body becomes a corpse. Converting first means every
+		# listener resolves the entity after the Corpse tag is set, and the log reads
+		# "corpse #1 DIED" — which describes the aftermath, not the event.
 		ECSEvents.entity_died.emit(ECSManager.handle_of(target_row), &"melee")
+		_convert_to_corpse(target_row)
 	return damage
 
 
@@ -117,8 +120,8 @@ func resolve_fall(row: int, impact_speed_mps: float) -> float:
 	_report(row, damage, body.health, &"fall")
 	if not body.is_alive():
 		kills += 1
-		_convert_to_corpse(row)
 		ECSEvents.entity_died.emit(ECSManager.handle_of(row), &"fall")
+		_convert_to_corpse(row)
 	return damage
 
 

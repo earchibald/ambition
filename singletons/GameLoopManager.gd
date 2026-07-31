@@ -96,7 +96,13 @@ func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 	# Geometry decides WHO landed and how fast; the energy model decides what that costs. Falls
 	# and melee therefore share one damage path instead of drifting into two.
 	for landing in collision.landings:
-		combat.resolve_fall(int(landing["row"]), float(landing["speed"]))
+		var landed_row: int = int(landing["row"])
+		var speed: float = float(landing["speed"])
+		var hurt: float = combat.resolve_fall(landed_row, speed)
+		# Report anything faster than a walking stumble, damage or not. Ordinary steps land
+		# constantly and would drown the feed.
+		if speed >= WorldConstants.REPORTABLE_LANDING_MPS:
+			ECSEvents.entity_landed.emit(ECSManager.handle_of(landed_row), speed, hurt)
 
 	var spatial_start: int = Time.get_ticks_usec()
 	spatial_hash.set_origin(_active_origin(chunk))

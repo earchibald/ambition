@@ -21,6 +21,7 @@ var _label: Label = null
 var _selected_row: int = -1
 var _accumulator: float = 0.0
 var _feed: Array[String] = []
+var _remembered_names: Dictionary = {}
 var _lmb_presses: int = 0
 var _rmb_presses: int = 0
 
@@ -41,6 +42,7 @@ func _ready() -> void:
 	ECSEvents.entity_died.connect(_on_died)
 	ECSEvents.item_taken.connect(_on_taken)
 	ECSEvents.action_rejected.connect(_on_rejected)
+	ECSEvents.entity_landed.connect(_on_landed)
 
 
 ## Text size is adjustable at runtime, because "edit a JSON file in the user data directory and
@@ -199,9 +201,26 @@ func _remember(text: String) -> void:
 
 
 func _on_damaged(entity: int, amount: float, remaining: float, cause: StringName) -> void:
+	# Falls are reported by `_on_landed`, which knows the impact speed as well as the damage.
+	# Reporting both would print two lines for one event.
+	if cause == &"fall":
+		return
 	_remember(
 		"%s took %.1f damage (%s), %.1f left"
 		% [_name_of(entity), amount, cause, remaining]
+	)
+
+
+## A survivable fall is a RESULT, not an absence of one. Reporting only damaging landings made
+## "I fell and nothing happened" indistinguishable from "the fall was never detected" — which is
+## precisely how the fall system looked while it was genuinely broken.
+func _on_landed(entity: int, speed_mps: float, damage: float) -> void:
+	if damage > 0.0:
+		_remember("%s landed at %.1f m/s — %.1f damage" % [_name_of(entity), speed_mps, damage])
+		return
+	_remember(
+		"%s landed at %.1f m/s — unhurt (safe below %.0f)"
+		% [_name_of(entity), speed_mps, WorldConstants.SAFE_FALL_MPS]
 	)
 
 
@@ -218,10 +237,21 @@ func _on_rejected(actor: int, action: StringName, reason: StringName) -> void:
 
 
 ## A handle is not a name. Without this the feed reads "entity 4294967296 took 3.2 damage".
+##
+## Names are REMEMBERED, because the interesting events are exactly the ones that end an entity.
+## A stack that merges on pickup is destroyed inside the operation that reports it, so resolving
+## the handle afterwards yields nothing and the log read "you picked up <gone>". The last known
+## name is the honest answer.
 func _name_of(entity: int) -> String:
 	var row: int = ECSManager.resolve(entity)
 	if row < 0:
-		return "<gone>"
+		return _remembered_names.get(EH.index_of(entity), "<gone>")
+	var name: String = _describe(row)
+	_remembered_names[row] = name
+	return name
+
+
+func _describe(row: int) -> String:
 	if row == 0:
 		return "you"
 	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)

@@ -39,6 +39,7 @@ var _pool: Array[Node3D] = []
 func _ready() -> void:
 	ECSEvents.entity_created.connect(_on_entity_created)
 	ECSEvents.entity_destroyed.connect(_on_entity_destroyed)
+	ECSEvents.item_taken.connect(_on_item_taken)
 	if not aim_source_path.is_empty():
 		_aim_source = get_node_or_null(aim_source_path)
 
@@ -113,6 +114,13 @@ func _face_player() -> void:
 	if aim.length() < 0.01:
 		return
 	_visuals[row].global_rotation = Vector3(0.0, atan2(aim.x, aim.z), 0.0)
+
+
+## A carried item has no world presence, so it must stop being drawn. The ENTITY is still alive —
+## the inventory holds its handle — but `InventorySystem` has stripped its POSITION, so leaving
+## the visual behind would paint it on the floor forever at the spot it was collected from.
+func _on_item_taken(_taker: int, item: int, _reason: StringName) -> void:
+	_on_entity_destroyed(item)
 
 
 ## The position a visual is DRAWN at this frame. The camera reads this rather than raw ECS truth,
