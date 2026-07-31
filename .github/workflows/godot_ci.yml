@@ -24,6 +24,17 @@ jobs:
       # ADR-15. Keep in sync with project.godot config/features and README section 5.
       image: barichello/godot-ci:4.7.1
 
+    defaults:
+      run:
+        # R8: this image has NO bash. Actions silently falls back to `sh -e {0}`, which is dash,
+        # and dash rejects `set -o pipefail` with "Illegal option -o pipefail" — killing the very
+        # first step before it runs anything. Naming the shell makes that explicit rather than
+        # implicit, so nobody re-adds a bashism and rediscovers this.
+        #
+        # Consequences, both handled below: no `pipefail`, so never let a command that must fail
+        # the build sit on the left of a pipe; and no bash arrays or `[[ ]]`.
+        shell: sh
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -32,7 +43,7 @@ jobs:
 
       - name: GDScript Linter
         run: |
-          set -euo pipefail
+          set -eu
           # R1: this image ships NO python3 and NO pip3 at all, so install them first.
           apt-get update -qq
           apt-get install -y -qq python3-pip
@@ -56,7 +67,7 @@ jobs:
 
       - name: Import Project
         run: |
-          set -euo pipefail
+          set -eu
           # R4: `class_name` globals and cross-file enums do NOT resolve until the project has
           # been imported. Running a script on a fresh checkout dies with
           # `Identifier "X" not declared`. GUT's own error text names this exact flag.
@@ -64,10 +75,17 @@ jobs:
 
       - name: Boot Smoke Test
         run: |
-          set -euo pipefail
+          set -eu
           # R6: a Main.tscn whose _ready() throws a hard runtime error STILL EXITS 0, so a bare
           # invocation here cannot fail. Assert the sentinel and reject any error output.
-          timeout 60 godot --headless --quit-after 120 res://viewer/Main.tscn 2>&1 | tee boot.log
+          #
+          # Redirect rather than `| tee`: with no pipefail available (see R8 above) a pipe would
+          # silently discard godot's exit status. `|| true` is deliberate — the sentinel and
+          # error greps below are the real gate, and a non-zero exit here must still let them
+          # run so the log gets printed and the failure is diagnosable.
+          timeout 60 godot --headless --quit-after 120 res://viewer/Main.tscn > boot.log 2>&1 \
+            || true
+          cat boot.log
           if ! grep -q "ECS_BOOT_OK" boot.log; then
             echo "::error::boot sentinel ECS_BOOT_OK missing - Main.tscn did not finish _ready()"
             exit 1
@@ -80,7 +98,7 @@ jobs:
 
       - name: Run ECS Unit Tests (Headless)
         run: |
-          set -euo pipefail
+          set -eu
           # R5/R7: GUT exits 0 having run ZERO tests via three separate paths - missing import,
           # an empty test dir, and -gdir not recursing into subdirectories. All verified.
           # -ginclude_subdirs is REQUIRED: tests/invariants/ is invisible without it.
