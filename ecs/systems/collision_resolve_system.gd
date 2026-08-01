@@ -38,7 +38,7 @@ var airborne_movers: int = 0
 
 ## Integrates velocity into position for every mover, then resolves. Columns are fetched once,
 ## outside the loop, per the ADR-19 facade contract.
-func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
+func run(delta: float, sampler: TileSampler, hash: SpatialHash) -> void:
 	movers_processed = 0
 	substeps_run = 0
 	tile_collisions = 0
@@ -73,7 +73,7 @@ func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
 			# 2.5 m pit edge left the mover at its old height and the step/drop rule simply held
 			# it there — a drop was indistinguishable from a step, and `resolve_fall` had no
 			# caller anywhere. Gravity is what turns the pit back into a pit.
-			was_airborne = _is_airborne(start, bounds, chunk)
+			was_airborne = _is_airborne(start, bounds, sampler)
 			velocity = _apply_creature_gravity(delta, velocity, was_airborne)
 			impact_speed = maxf(0.0, -velocity.y)
 
@@ -98,7 +98,7 @@ func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
 		for _s in substeps:
 			substeps_run += 1
 			var outcome: Dictionary = _resolve_substep(
-				position, velocity, bounds, sub_delta, chunk, row, hash
+				position, velocity, bounds, sub_delta, sampler, row, hash
 			)
 			position = outcome["position"]
 			velocity = outcome["velocity"]
@@ -107,7 +107,7 @@ func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
 		# by reading velocity next frame. The substep resolve legitimately zeroes vertical
 		# velocity when it snaps a mover onto the floor, so by the next frame the impact speed
 		# is already gone and the landing is invisible. The transition is the reliable signal.
-		if loose == null and was_airborne and not _is_airborne(position, bounds, chunk):
+		if loose == null and was_airborne and not _is_airborne(position, bounds, sampler):
 			landings.append({"row": row, "speed": impact_speed})
 			velocity.y = 0.0
 
@@ -127,11 +127,10 @@ func run(delta: float, chunk: ChunkData, hash: SpatialHash) -> void:
 ##
 ## Slack is needed because the step/drop snap and the gravity integration meet at slightly
 ## different values; without it a walking creature flickers grounded/airborne every frame.
-func _is_airborne(position: Vector3, bounds: BoundsComponent, chunk: ChunkData) -> bool:
-	var tile: Vector2i = chunk.world_to_tile(position)
-	if not chunk.in_bounds(tile.x, tile.y):
+func _is_airborne(position: Vector3, bounds: BoundsComponent, sampler: TileSampler) -> bool:
+	if not sampler.contains_world(position):
 		return false
-	var ground: float = chunk.height_at(tile.x, tile.y)
+	var ground: float = sampler.height_at_world(position)
 	return position.y - bounds.half_extents.y > ground + GROUNDED_EPSILON_M
 
 
@@ -154,7 +153,7 @@ func _resolve_substep(
 	velocity: Vector3,
 	bounds: BoundsComponent,
 	delta: float,
-	chunk: ChunkData,
+	sampler: TileSampler,
 	row: int,
 	hash: SpatialHash
 ) -> Dictionary:
@@ -175,7 +174,7 @@ func _resolve_substep(
 	for axis in order:
 		var attempt: Vector3 = resolved
 		attempt[axis] = desired[axis]
-		if _blocked(attempt, bounds, chunk):
+		if _blocked(attempt, bounds, sampler):
 			velocity[axis] = 0.0
 			tile_collisions += 1
 		else:
@@ -185,7 +184,7 @@ func _resolve_substep(
 	# solid, an axis-separated resolve would have squeezed through the vertex.
 	if resolved.x != position.x and resolved.z != position.z:
 		var corner := Vector3(resolved.x, resolved.y, resolved.z)
-		if _diagonal_gap(position, corner, bounds, chunk):
+		if _diagonal_gap(position, corner, bounds, sampler):
 			resolved.z = position.z
 			velocity.z = 0.0
 			tile_collisions += 1
@@ -200,14 +199,13 @@ func _resolve_substep(
 	# 2.5D step/drop against the heightmap. Loose items are excluded: they fall under gravity and
 	# come to rest on the floor rather than being snapped up onto ledges.
 	if ECSManager.loose_items.has(row):
-		var tile: Vector2i = chunk.world_to_tile(resolved)
-		if chunk.in_bounds(tile.x, tile.y):
-			var floor_y: float = chunk.height_at(tile.x, tile.y) + bounds.half_extents.y
+		if sampler.contains_world(resolved):
+			var floor_y: float = sampler.height_at_world(resolved) + bounds.half_extents.y
 			if resolved.y <= floor_y:
 				resolved.y = floor_y
 				velocity.y = 0.0
 	else:
-		resolved = _apply_step_and_drop(resolved, position, bounds, chunk, velocity)
+		resolved = _apply_step_and_drop(resolved, position, bounds, sampler, velocity)
 
 	# REQUIRED: entity-vs-entity. Without this nothing can ever be hit.
 	if hash != null:
@@ -241,26 +239,40 @@ func _resolve_substep(
 
 
 ## True if the AABB footprint at `centre` overlaps any solid tile.
-func _blocked(centre: Vector3, bounds: BoundsComponent, chunk: ChunkData) -> bool:
-	var min_tile: Vector2i = chunk.world_to_tile(centre - bounds.half_extents)
-	var max_tile: Vector2i = chunk.world_to_tile(centre + bounds.half_extents)
-	for y in range(min_tile.y, max_tile.y + 1):
-		for x in range(min_tile.x, max_tile.x + 1):
-			if chunk.is_solid(x, y):
+func _blocked(centre: Vector3, bounds: BoundsComponent, sampler: TileSampler) -> bool:
+	# Sampled in WORLD space, stepping a tile at a time and always including the far corner.
+	# Tile-index loops cannot cross a chunk seam: the indices are chunk-local, so a footprint
+	# straddling two chunks produced out-of-range tiles that read as solid and walled the mover
+	# in at the boundary.
+	var low: Vector3 = centre - bounds.half_extents
+	var high: Vector3 = centre + bounds.half_extents
+	var x: float = low.x
+	while true:
+		var z: float = low.z
+		while true:
+			if sampler.solid_at_world(Vector3(x, centre.y, z)):
 				return true
+			if z >= high.z:
+				break
+			z = minf(z + WorldConstants.TILE_SIZE_M, high.z)
+		if x >= high.x:
+			break
+		x = minf(x + WorldConstants.TILE_SIZE_M, high.x)
 	return false
 
 
 ## Detects the pathological case of two diagonally-placed solids with open cells between them.
 func _diagonal_gap(
-	from: Vector3, to: Vector3, bounds: BoundsComponent, chunk: ChunkData
+	from: Vector3, to: Vector3, bounds: BoundsComponent, sampler: TileSampler
 ) -> bool:
-	var a: Vector2i = chunk.world_to_tile(Vector3(to.x, from.y, from.z))
-	var b: Vector2i = chunk.world_to_tile(Vector3(from.x, from.y, to.z))
-	if not chunk.in_bounds(a.x, a.y) or not chunk.in_bounds(b.x, b.y):
-		return false
+	var side_a := Vector3(to.x, from.y, from.z)
+	var side_b := Vector3(from.x, from.y, to.z)
 	# Both orthogonal neighbours solid while the target corner is open == a vertex squeeze.
-	return chunk.is_solid(a.x, a.y) and chunk.is_solid(b.x, b.y) and not _blocked(to, bounds, chunk)
+	return (
+		sampler.solid_at_world(side_a)
+		and sampler.solid_at_world(side_b)
+		and not _blocked(to, bounds, sampler)
+	)
 
 
 ## Steps up small ledges freely and snaps down small drops. Larger drops become a fall, which
@@ -269,13 +281,12 @@ func _apply_step_and_drop(
 	resolved: Vector3,
 	previous: Vector3,
 	bounds: BoundsComponent,
-	chunk: ChunkData,
+	sampler: TileSampler,
 	velocity: Vector3
 ) -> Vector3:
-	var tile: Vector2i = chunk.world_to_tile(resolved)
-	if not chunk.in_bounds(tile.x, tile.y):
+	if not sampler.contains_world(resolved):
 		return previous
-	var ground: float = chunk.height_at(tile.x, tile.y)
+	var ground: float = sampler.height_at_world(resolved)
 	var feet: float = resolved.y - bounds.half_extents.y
 	var rise: float = ground - feet
 

@@ -7,7 +7,7 @@
 ## probe at x=63 wraps to the next row and at index 4095 runs off the end entirely. Index every
 ## cell through WorldConstants.cell_index(x, y).
 class_name ChunkData
-extends RefCounted
+extends TileSampler
 
 const TILE_OPEN: int = 0
 const TILE_SOLID: int = 1
@@ -91,6 +91,33 @@ func is_solid(x: int, y: int) -> bool:
 
 func in_bounds(x: int, y: int) -> bool:
 	return x >= 0 and y >= 0 and x < WorldConstants.CHUNK_TILES and y < WorldConstants.CHUNK_TILES
+
+
+# --- Tile sampler contract -----------------------------------------------------------------
+#
+# `WorldGrid` implements these three identically but resolves the owning chunk first. Collision
+# and picking call only these, so the same code drives a single hand-authored room and a
+# streamed multi-chunk world without knowing which it has.
+
+
+## Outside this chunk reads as SOLID, deliberately. A lone chunk is a sealed room: better a mover
+## stops at the edge than walks into unallocated space. `WorldGrid` overrides this by generating
+## the neighbour instead.
+func solid_at_world(world: Vector3) -> bool:
+	var tile: Vector2i = world_to_tile(world)
+	if not in_bounds(tile.x, tile.y):
+		return true
+	return is_solid(tile.x, tile.y)
+
+
+func height_at_world(world: Vector3) -> float:
+	var tile: Vector2i = world_to_tile(world)
+	return height_at(tile.x, tile.y)
+
+
+func contains_world(world: Vector3) -> bool:
+	var tile: Vector2i = world_to_tile(world)
+	return in_bounds(tile.x, tile.y)
 
 
 func height_at(x: int, y: int) -> float:
