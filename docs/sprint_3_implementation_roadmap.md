@@ -29,6 +29,10 @@ FactionCoreComponent.faction_memory, and any relevant active MemoryComponents.
 CRITICAL - The Salience Filter: send only the top 3 memories by decayed weight plus the 3
 most recent events. Do not send the entire history.
 
+CLARIFIED 2026-08-01: the two sets overlap often, because a heavy memory is usually also a
+recent one. Deduplicate the combined list by event_id. The filter therefore sends BETWEEN 3
+AND 6 memories, not exactly 6. Sending a memory twice tells the reasoner it happened twice.
+
 CRITICAL - Valid Target Enumeration: The context string MUST explicitly list integer IDs of known neighboring factions.
 Success State: Dynamic output: "You are Ug. Pop: 45. Memory: [Player killed 2 guards]. Valid Targets: [12: Gnomes, Faction-0: Player]." (Player is Faction 0 per ADR-14.)
 
@@ -47,6 +51,13 @@ If the LLM returned a target_faction_id, verify it exists in the active DAG list
 
 Map valid JSON Objective (e.g., RAID) through the JobTemplate planner to Job_Queue insertions for the faction's Tier 2 entities.
 Success State: The LLM decides to attack the Spiders (Target 15). 10 seconds later, 5 Tier 2 Goblins equip swords and pathfind toward the spider cavern.
+
+CORRECTED 2026-08-01: as written this is not testable within Sprint 3, because it depends on
+equippable swords and a goblin faction that no Step in this sprint builds. The testable form,
+and the one the acceptance tests use: the reasoner sets current_objective to RAID_FACTION with
+a valid target_faction_id, the planner expands that objective into JobTemplate entries for the
+faction's Tier 2 members, and those members path toward the target's anchor chunk. Equipment is
+Sprint 4's.
 
 Step 4: The Death Event & Corpse Generation
 
@@ -94,3 +105,22 @@ Before the Interregnum starts, serialize the player's MindComponent.insight and 
 
 After Interregnum, reuse index 0 with generation + 1 for the new adventurer at the
 Adventurer's Residence, and populate their MindComponent from the JSON.
+
+ADDED 2026-08-01: Step 6 shipped without a Success State, so it had no acceptance criterion at
+all. It is: the player dies with a known rune and non-zero insight, presses R, and the new
+adventurer's MindComponent holds that same insight and rune while carrying none of the previous
+body's possessions. A corrupt journal starts a fresh one instead of refusing to boot; a journal
+written by a newer schema is refused instead of being misread.
+
+Step 7: Rewrite RUNNING.md (required by scope_and_milestones.md R6)
+
+The Objective: Someone who did not build this sprint can play it and know what they are
+looking at.
+Required Implementation:
+
+Rewrite - never append to - the "What to test right now" and "deliberately NOT built yet"
+sections of RUNNING.md, in the same commit as the code and before the PR opens. Every claim in
+it must be something the player has an interface to check.
+Success State: A reader who has not seen this roadmap can, from RUNNING.md alone, reach the
+stairwell, descend a floor, kill a villager in front of a witness, die, and restart - and can
+say what each of those proved.

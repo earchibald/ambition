@@ -288,9 +288,9 @@ Sprint 3.5's whole specification is one table row naming nine things. Here is ea
 | War-time job generation | **PARTIAL** | `JOB_TEMPLATES` has entries for hostile objectives and `HeuristicProvider` returns `FORTIFY` when attacked (C-P11). There is no distinct war*time* state, no mobilisation, no draft. |
 | Loyalty | **FIELD ONLY** | `SocialIdentityComponent.loyalty` is declared in the registry and set at spawn. **Nothing reads it.** |
 | Prestige | **FIELD ONLY** | `SocialIdentityComponent.prestige` — same. Declared, never read. |
-| Succession by prestige | **ABSENT** | No code path selects a new faction leader. Grep `succession` in `ecs/` returns nothing. A faction whose leader dies simply has no leader. |
-| ClaimTags | **ABSENT** | No `ClaimTag` component, tag, or field exists anywhere. |
-| Caravans | **NAME ONLY** | `caravan` appears solely as a `MaterializationPolicy` enum value from an earlier sprint. No caravan entity, route, or trade exists. |
+| Succession by prestige | **ABSENT, AND FULLY SPECIFIED** | No code path selects a new faction leader. Grep `succession` in `ecs/` returns nothing; a faction whose leader dies simply has no leader. Unlike the rest of this table, this one has a real spec — `factions_and_social_mechanics_architecture.md:50-56` gives the selection rule (highest `prestige` among Tier 2), the component grant (`LLMPromptComponent`), and the follow-on (queue a Reasoning Tick for the new agenda). "The spec was vague" is not available as an excuse here. Treat this as the most damning row in the table. |
+| ClaimTags | **ABSENT** | No `ClaimTag` component, tag, or field exists anywhere. Specified only as "factions exert influence over zones via ClaimTags" — no placement, validation, or challenge mechanics. |
+| Caravans | **NAME ONLY** | `caravan` appears solely as a `MaterializationPolicy` enum value from an earlier sprint. No caravan entity, route, or trade exists. The architecture doc does specify behaviour (form from Tier 2, load surplus from the `InventoryZone`, pathfind to the ally's zone, physically interceptable); the routing cadence is what is missing from the spec. |
 
 **My own verdict, stated so you can disagree with it on the record:** calling this "Sprint 3.5
 implemented" is **overstated**. Three of nine items are genuinely built, one is built under a

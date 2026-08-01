@@ -38,7 +38,8 @@ func request_reasoning(entity: EntityHandle):
 func _dispatch_next_request():
     is_request_in_flight = true
     var entity = request_queue.pop_front()
-    
+    current_flight_data = { "entity": entity }   # CORRECTION 2026-08-01, see note below
+
     # LAZY GENERATION: Build the prompt right now, not when queued.
     var real_time_prompt = PromptBuilderSystem.build_context(entity)
     _send_to_api(real_time_prompt)
@@ -62,13 +63,19 @@ The prompt MUST instruct the LLM to return this exact schema.
 
 # LLMResolutionSystem.gd
 func _on_request_completed(result, response_code, headers, body):
+    # CORRECTION 2026-08-01. THIS MUST BE THE FIRST LINE, before any early return below.
+    # As originally written this function never cleared the flag, so the queue deadlocked on
+    # its first request and Tier-3 reasoning stopped for the rest of the session.
+    is_request_in_flight = false
+
     var json = JSON.parse_string(body.get_string_from_utf8())
     var entity = current_flight_data.entity
-    
+
     # 1. Check if the Leader is still alive
     if not ECSManager.is_alive(entity):
         return
-        
+
+
     # 2. Anti-Hallucination & Reality Check
     var target_id = json.get("target_faction_id", -1)
     if target_id != -1 and not DAG.has_active_faction(target_id):
@@ -118,7 +125,12 @@ func execute_interregnum():
 #   func request(prompt: String, schema: Dictionary, on_done: Callable) -> void
 # OpenAICompatibleProvider: POST {endpoint}/chat/completions with
 #   response_format = {"type": "json_object"}, model = {model}, Authorization: Bearer {api_key}.
-# NullLLMProvider (tests/CI): immediately returns a canned valid {"objective":"FORTIFY",...}.
+# CORRECTION 2026-08-01: this line contradicted the ADR-5 amendment and is superseded.
+# The amendment promotes the local provider from a test stub to a SHIPPED product mode, and
+# requires it to decide from real faction state rather than return a canned payload. A canned
+# FORTIFY makes the no-endpoint build unplayable, which is the exact case the amendment exists
+# to protect. Implemented as `HeuristicProvider`, which scores starvation, threat and
+# opportunity from the same context Dictionary the remote provider receives.
 #
 # Config: endpoint + model in a committed config file with env-var overrides; api_key is read
 # from an env var or user:// and is NEVER committed (add the key file path to .gitignore).
