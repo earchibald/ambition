@@ -434,3 +434,23 @@ func test_the_inspector_says_what_a_thing_is() -> void:
 	assert_string_contains(label, "618", "the label counts the pile")
 	assert_string_contains(label, "MAT_IRON", "and names the material")
 	assert_eq(overlay._label_for(_player_row), "you", "and knows who you are")
+
+
+## Movement speed is a FEEL number, tuned by playing rather than by realism. 4.0 m/s is a real
+## brisk walk and read as a crawl from an 11 m overhead camera, because screen-space displacement
+## per metre is small and the village is 192 m across.
+func test_movement_is_fast_enough_to_cross_the_village() -> void:
+	var village_metres: float = WorldConstants.CHUNK_SIZE_M * 3.0
+	var seconds: float = village_metres / WorldConstants.BASE_SPEED_MPS
+	assert_lt(seconds, 30.0, "crossing the village takes %.0f s, which is not a hike" % seconds)
+
+
+## Precision mode is expressed as a SHORTER intent vector, not a second speed constant, so the
+## ECS keeps exactly one movement law.
+func test_precision_mode_is_slower_but_not_stationary() -> void:
+	assert_lt(WorldConstants.PRECISION_SPEED_SCALE, 1.0, "precision is slower than full speed")
+	assert_gt(WorldConstants.PRECISION_SPEED_SCALE, 0.1, "but is still usable for travel")
+	# The intent path normalises only vectors LONGER than 1, which is what makes a short vector
+	# mean "less speed" rather than being silently rescaled back to full.
+	var scaled: Vector3 = Vector3(0.0, 0.0, 1.0) * WorldConstants.PRECISION_SPEED_SCALE
+	assert_lt(scaled.length(), 1.0, "a precision intent is under unit length")

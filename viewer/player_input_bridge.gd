@@ -46,6 +46,11 @@ func _physics_process(_delta: float) -> void:
 		basis_right = Vector3(camera_basis.x.x, 0.0, camera_basis.x.z).normalized()
 
 	var direction: Vector3 = basis_right * raw.x + basis_forward * raw.y
+	# Precision mode is expressed as a SHORTER intent vector, not as a second speed constant.
+	# `_apply_intent` normalises only vectors longer than 1, so a 0.35-length direction is
+	# 35% speed — the ECS keeps one movement law and the viewer just asks for less of it.
+	if Input.is_action_pressed(&"precision_move"):
+		direction *= WorldConstants.PRECISION_SPEED_SCALE
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
 
