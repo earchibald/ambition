@@ -33,6 +33,10 @@ signal action_rejected(actor: int, action: StringName, reason: StringName)
 ## genuinely broken.
 signal entity_landed(entity: int, speed_mps: float, damage: float)
 
+## A faction changed its mind. Carries the DECLARATION so the feed can show what it said rather
+## than only what it decided — the difference between a log line and a world that talks.
+signal faction_decided(faction_id: int, objective: String, declaration: String)
+
 
 ## Tag arrays are `Array[StringName]`. Emitting an untyped array literal into a typed
 ## parameter fails at runtime and SILENTLY DROPS THE LISTENER, so build tags explicitly:

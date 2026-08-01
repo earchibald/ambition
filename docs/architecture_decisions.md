@@ -134,8 +134,14 @@ the heuristic path exists either way, but goes untested as a whole.
 - **Config & secrets:** `endpoint`/`model` live in a committed config file with an env-var
   override; **`api_key` is read from an environment variable or `user://` config and is
   NEVER committed**. Add the config path to `.gitignore` if it can contain a key.
-- **Tests/CI:** `NullLLMProvider` is used in headless tests so CI never makes network calls.
-  Per the amendment above it is now a *shipped provider* as well as the test default.
+- **Tests/CI:** the local reasoner is used in headless tests so CI never makes network calls.
+  Per the amendment above it is a *shipped provider* as well as the test default.
+- **AS IMPLEMENTED (Sprint 3C):** the local provider is `ecs/llm/heuristic_provider.gd`, and it
+  decides from real faction state rather than returning a canned payload — starvation outranks
+  everything, a recent attack outranks opportunity, and a raid needs a target it can actually
+  beat. `OpenAICompatibleProvider` is constructed ONLY when `DELVE_LLM_ENDPOINT` and a key are
+  both present; a half-configured remote is refused, because a provider that fails every call
+  is worse than none — it burns the queue and hides the working path.
 - **Cost control:** cache responses by prompt hash within a run; keep the staggered queue +
   a per-session request budget.
 

@@ -52,6 +52,17 @@ var streaming: ChunkStreamingSystem = ChunkStreamingSystem.new()
 var economy: GrayBoxSystem = GrayBoxSystem.new()
 var locomotion: LocomotionSystem = LocomotionSystem.new()
 var planner: FactionPlanner = FactionPlanner.new()
+var reasoning: ReasoningQueue = ReasoningQueue.new()
+var llm: LLMResolutionSystem = LLMResolutionSystem.new()
+
+
+func _ready() -> void:
+	# A remote reasoner ONLY when an endpoint is configured. Otherwise the heuristic one, which
+	# per the amended ADR-5 is a shipped mode rather than a fallback: it is what runs in CI, what
+	# runs for a contributor with no API key, and what runs for a player with no internet.
+	var remote: OpenAICompatibleProvider = OpenAICompatibleProvider.create_if_configured(self)
+	if remote != null:
+		reasoning.provider = remote
 
 
 func _physics_process(delta: float) -> void:
@@ -138,7 +149,22 @@ func _run_macro_tick(chunk: ChunkData) -> void:
 	spoilage.run(chunk)
 	# The off-screen economy. Ledger integers only — it may not create a single entity.
 	economy.run()
+	_think()
 	_replan_factions()
+
+
+## Leaders think, one at a time, on the Macro tick.
+##
+## Submitting every faction each hour is cheap: the queue de-duplicates, caps its own depth, and
+## dispatches exactly one request. A leader that does not get picked this hour simply thinks next
+## hour, which at an hour of in-game time is not a behaviour anyone can perceive.
+func _think() -> void:
+	var generator: DAGGenerator = null if World.boot_report == null else World.boot_report.generator
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		reasoning.submit(ECSManager.handle_of(row))
+	reasoning.pump(generator, func(handle: int, response: Dictionary) -> void:
+		llm.resolve(handle, response, generator)
+	)
 
 
 ## Every faction re-decides what its people are doing, once an in-game hour.

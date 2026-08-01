@@ -35,6 +35,9 @@ var current_objective: ECSEnums.Objective = ECSEnums.Objective.IDLE
 var current_emotion: ECSEnums.Emotion = ECSEnums.Emotion.CALM
 ## Last thing this faction said out loud, for the event feed and later for barks.
 var last_declaration: String = ""
+## Who the current objective is aimed at, or -1. Validated before it lands here: an unverified
+## target is how a faction marches on ground where nobody lives.
+var objective_target: int = -1
 
 
 static func from_dag_node(node: DAGNode) -> FactionCoreComponent:
