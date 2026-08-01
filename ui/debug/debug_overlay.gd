@@ -7,6 +7,10 @@
 class_name DebugOverlay
 extends CanvasLayer
 
+## Pages, cycled with F1. The live counters are page one because that is what you want while
+## moving; the rest answer questions you ask while standing still.
+enum Page { LIVE, HISTORY, FACTIONS, MAP }
+
 const REFRESH_INTERVAL_S: float = 0.25
 
 ## How far the cursor ray is marched, and how finely. 0.25 m is a quarter tile, which is well
@@ -22,6 +26,7 @@ var _selected_row: int = -1
 var _accumulator: float = 0.0
 var _feed: Array[String] = []
 var _remembered_names: Dictionary = {}
+var _page: Page = Page.LIVE
 var _lmb_presses: int = 0
 var _rmb_presses: int = 0
 
@@ -59,6 +64,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_rmb_presses += 1
 		return
 	var delta: int = 0
+	if event.is_action(&"cycle_debug_page"):
+		_page = ((_page + 1) % Page.size()) as Page
+		_accumulator = REFRESH_INTERVAL_S
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action(&"overlay_text_bigger"):
 		delta = 2
 	elif event.is_action(&"overlay_text_smaller"):
@@ -92,6 +102,21 @@ func _process(delta: float) -> void:
 
 
 func _compose() -> String:
+	var header: String = "[F1] %s   (%d of %d)\n" % [
+		Page.keys()[_page], int(_page) + 1, Page.size()
+	]
+	match _page:
+		Page.HISTORY:
+			return header + WorldInspector.history_text()
+		Page.FACTIONS:
+			return header + WorldInspector.factions_text()
+		Page.MAP:
+			return header + WorldInspector.map_text()
+		_:
+			return header + _compose_live()
+
+
+func _compose_live() -> String:
 	var counters: Dictionary = GameLoopManager.counters()
 	var lines: Array[String] = []
 	lines.append("%s  |  scenario %s" % [counters["clock"], World.scenario])

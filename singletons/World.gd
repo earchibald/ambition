@@ -35,6 +35,10 @@ func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) 
 	chunks.clear()
 	grid = null
 	boot_report = null
+	# The streaming system remembers which chunk ids were Active. Those ids are meaningless
+	# against a grid that is about to be replaced, and keeping them makes the new world's chunks
+	# look already-promoted.
+	GameLoopManager.streaming.reset()
 
 	var chunk: ChunkData
 	if name == SCENARIO_WORLD:

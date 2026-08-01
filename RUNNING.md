@@ -61,6 +61,7 @@ place the specific test features in §3 exist.
 | `E` | Interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
 | `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
+| `F1` | **Cycle overlay page** | LIVE counters -> CHRONICLE -> FACTIONS -> MAP. See below. |
 | `G` | Toggle debug gizmos | Wireframe facing arrow, melee arc, interact radius, sight radius. On by default. |
 | `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
 | `Esc` | Cancel | Mapped, not yet consumed. |
@@ -131,6 +132,29 @@ ground intersection approaches as the ray flattens — so the two cases meet wit
 | 2 | A generated world: 500 years of history, a nine-chunk village, factions placed by that history |
 | 3 | **Villagers walk** planned routes. **Factions decide and speak** once an in-game hour. **Death is a loop** — corpse, loot spill, control detached |
 
+### Inspecting the generated world (`F1`)
+
+The history, the factions and the chunk layout are the whole output of Sprint 2, and until now
+none of it was visible. Faction ledgers deliberately have **no position** — they are not objects
+in the world — so `Tab` can never reach them, because picking resolves through the spatial hash.
+
+Press `F1` to cycle four pages:
+
+| Page | What it answers |
+|---|---|
+| **LIVE** | The counters. What the engine is doing right now |
+| **CHRONICLE** | The 500 years that produced this world — who was founded, who conquered whom, in which year |
+| **FACTIONS** | Every living faction: name, population (abstract vs embodied), culture, current objective and mood, wealth, home chunk, and the last thing it said |
+| **MAP** | An ASCII chunk map of your floor. `@` you, `A` active, `s` simulated, `.` generated, `-` not generated yet, `F` a faction anchor |
+
+Two readings that look wrong and are not:
+
+- **`pop 121 abstract / 0 embodied`** — that faction lives on a floor you have never visited, so
+  it exists only as integers. Bodies appear when its chunk is promoted. That is the LoD design.
+- **`wealth 1155 units, materialized as stacks`** — an Active faction's ledger is *empty*,
+  because promotion spent it into physical piles. The inspector reports the total from whichever
+  side currently holds it, so a village you are standing in never reads as destitute.
+
 ### The Sprint 3 checks
 
 Boot the `world` scenario (the default) and watch the overlay:
@@ -142,6 +166,8 @@ Boot the `world` scenario (the default) and watch the overlay:
 | Factions think | Wait ~10 real seconds for a Macro tick. The feed prints `faction N -> OBJECTIVE: "..."` | The reasoner, the queue, and the validation gate |
 | It thinks with no API key | You did not set one. It still decides | ADR-5 as amended: the LLM is optional, and this is the shipped default |
 | Death is a loop | Take fatal damage. Control detaches, a corpse appears holding your gear | The handle discipline: row 0's generation bumps, the corpse is a separate entity |
+| The world has a history | `F1` to CHRONICLE. Read who conquered whom | The DAG really generated 500 years, and the factions you see came from it |
+| Factions are real places | `F1` to FACTIONS, then MAP. Anchors match the map | Spatial anchors: nobody spawned at the origin by accident |
 
 ### Still worth checking from earlier sprints
 
