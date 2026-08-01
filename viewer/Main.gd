@@ -12,10 +12,12 @@ const BOOT_SENTINEL: String = "ECS_BOOT_OK"
 func _ready() -> void:
 	DebugFlags.initialize()
 	_verify_boot_contract()
-	# Debug scenario boot path: no DAG generation, no worldgen, no pre-warm. Budget is under
-	# 2 seconds to controllable, because this is the loop paid ~50 times a day.
-	World.boot_scenario(World.SCENARIO_TEST_ARENA, 1)
-	_spawn_demo_contents()
+	# Sprint 2 boots the GENERATED world by default: history, village, factions at their anchors.
+	# `debug_config.json` can select `test_arena` instead, which is the fast path the scope doc
+	# budgets at under 2 seconds and the one to use while iterating on movement and combat.
+	World.boot_scenario(DebugFlags.boot_scenario, 1)
+	if World.scenario == World.SCENARIO_TEST_ARENA:
+		_spawn_demo_contents()
 	print("Godot %s" % Engine.get_version_info().get("string", "unknown"))
 	print("autoloads: ECSEvents=%s ECSManager=%s GameLoopManager=%s" % [
 		ECSEvents != null,

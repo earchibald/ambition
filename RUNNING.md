@@ -36,7 +36,19 @@ godot --headless --import
 godot res://viewer/Main.tscn
 ```
 
-You spawn in a 64x64 stone arena. The debug overlay is on by default in the top-left.
+You spawn in the **generated world**: 500 years of history, a nine-chunk surface village, and
+its inhabitants standing where the history put them. The debug overlay is on by default.
+
+### Two scenarios
+
+| Scenario | What it is | Boot cost |
+|---|---|---|
+| `world` (default) | The real thing. DAG history, generated village, factions at their anchors, Pre-Warm. | ~22 ms |
+| `test_arena` | The Sprint 1 hand-authored room: ledge, pit, doorway, diagonal pinch, puddle, one rat, one nugget. | ~2 ms |
+
+Switch with `"boot_scenario": "test_arena"` in `debug_config.json`. **Use the arena while
+iterating on movement and combat** — it is the loop you pay ~50 times a day, and it is the only
+place the specific test features in §3 exist.
 
 ### Controls
 
@@ -45,7 +57,7 @@ You spawn in a 64x64 stone arena. The debug overlay is on by default in the top-
 | `W` `A` `S` `D` | Move | Pushes a `MOVE` **intent** onto entity 0's action queue. Camera-relative on the XZ plane. Pressing W does not move you; the ECS decides what W means. |
 | `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
-| `E` | Interact / take | Takes what is under the cursor, or failing that the nearest thing within 2.5 m **of you**. Reach is measured from the player, never from the camera. |
+| `E` | Interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
 | `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
 | `G` | Toggle debug gizmos | Wireframe facing arrow, melee arc, interact radius, sight radius. On by default. |
@@ -76,6 +88,30 @@ feed will say so.
 Aim rotates **continuously** everywhere, including behind you and above the horizon. A camera ray
 that never meets the ground keeps the heading the cursor implies, which is exactly the limit the
 ground intersection approaches as the ray flattens — so the two cases meet without a seam.
+
+### What to test in the `world` scenario
+
+Honestly: **not much yet, and that is the shape of Sprint 2 rather than a bug.** Sprint 2
+delivered the world's GENERATION and its bookkeeping. Nothing in it moves or reacts — NPC
+behaviour is Sprint 3. Four things are worth checking, and everything else is scenery:
+
+| Check | How | What it proves |
+|---|---|---|
+| The village is a real place | Walk in any direction across a chunk seam | Chunk streaming and the tile sampler. Sprint 1's collision would have stopped you dead at the boundary |
+| It is the same world twice | Boot, note the building layout, restart | Chunks are a pure function of (seed, chunk_id) |
+| Villagers are people | Look: **tall and green**. Monsters are **small and red** | They used to be identical red boxes |
+| Killing has a consequence you can see | Hit a villager. It becomes a **flat grey slab** and the feed says so | The corpse conversion was correct and invisible |
+
+**For movement, combat, fall damage and fluids, use `test_arena` instead.** Those features have
+authored test geometry there and none of it exists in a generated village. Set
+`"boot_scenario": "test_arena"` in `debug_config.json`.
+
+### What Sprint 2 does NOT give you
+
+- **Nobody moves.** Citizens stand exactly where history placed them. No pathfinding, no jobs.
+- **Nobody reacts.** Killing a villager produces a corpse and no witness, alarm, or grudge.
+- **No stairs.** Dungeon floors generate on demand but nothing takes you down to them yet.
+- **Nothing to find.** Faction stockpiles materialize at anchors, but there is no loot placement.
 
 ### What is in the arena, and what each thing is there to test
 

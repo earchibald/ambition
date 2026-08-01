@@ -40,6 +40,7 @@ func _ready() -> void:
 	ECSEvents.entity_created.connect(_on_entity_created)
 	ECSEvents.entity_destroyed.connect(_on_entity_destroyed)
 	ECSEvents.item_taken.connect(_on_item_taken)
+	ECSEvents.entity_died.connect(_on_entity_died)
 	if not aim_source_path.is_empty():
 		_aim_source = get_node_or_null(aim_source_path)
 
@@ -116,6 +117,17 @@ func _face_player() -> void:
 	_visuals[row].global_rotation = Vector3(0.0, atan2(aim.x, aim.z), 0.0)
 
 
+## Death must be VISIBLE. The corpse conversion was already correct in the ECS and changed
+## nothing on screen, so from the player's seat killing something and missing it looked the same.
+func _on_entity_died(entity: int, _cause: StringName) -> void:
+	var row: int = EH.index_of(entity)
+	if not _visuals.has(row):
+		return
+	_style(_visuals[row], [&"Corpse"] as Array[StringName])
+	# A corpse lies on the ground rather than hovering at standing height.
+	_visuals[row].global_rotation = Vector3.ZERO
+
+
 ## A carried item has no world presence, so it must stop being drawn. The ENTITY is still alive —
 ## the inventory holds its handle — but `InventorySystem` has stripped its POSITION, so leaving
 ## the visual behind would paint it on the floor forever at the spot it was collected from.
@@ -162,9 +174,19 @@ func _style(node: Node3D, tags: Array) -> void:
 	var box := BoxMesh.new()
 	var colour: Color
 	var wears_a_nose: bool = false
-	if tags.has(&"Item"):
+	if tags.has(&"Corpse"):
+		# Flat, grey and unmistakable. A body that keeps standing looks alive, and "no apparent
+		# change when they die" was the exact play-test complaint.
+		box.size = Vector3(0.7, 0.25, 0.7)
+		colour = Color(0.30, 0.28, 0.30)
+	elif tags.has(&"Item"):
 		box.size = Vector3(0.2, 0.2, 0.2)
 		colour = Color(0.95, 0.72, 0.25)
+	elif tags.has(&"Citizen"):
+		# TALL AND GREEN. Villagers used the same red box as the corpse rat, so the only way to
+		# tell a neighbour from a monster was to hit it and find out.
+		box.size = Vector3(0.45, 1.6, 0.45)
+		colour = Color(0.45, 0.78, 0.42)
 	elif tags.has(&"Creature"):
 		box.size = Vector3(0.5, 0.5, 0.5)
 		colour = Color(0.80, 0.30, 0.28)

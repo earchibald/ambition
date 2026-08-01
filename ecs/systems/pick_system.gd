@@ -167,19 +167,16 @@ static func aim_direction(from: Vector3, origin: Vector3, direction: Vector3) ->
 ##
 ## Deliberately NOT `pick()`: the DDA registers a hit only on SOLID tiles, so over open floor it
 ## reports nothing, which is useless for "where on the ground am I pointing".
-func ground_hit(origin: Vector3, direction: Vector3, chunk: ChunkData) -> Dictionary:
-	var out: Dictionary = {"hit": false, "point": origin, "tile": Vector2i(-1, -1)}
+func ground_hit(origin: Vector3, direction: Vector3, sampler: TileSampler) -> Dictionary:
+	var out: Dictionary = {"hit": false, "point": origin}
 	var travelled: float = 0.0
 	while travelled < MAX_PICK_DIST_M:
 		var point: Vector3 = origin + direction * travelled
-		var tile: Vector2i = chunk.world_to_tile(point)
-		if chunk.in_bounds(tile.x, tile.y):
-			var solid: bool = chunk.is_solid(tile.x, tile.y)
-			var surface: float = (
-				WALL_TOP_M if solid else chunk.height_at(tile.x, tile.y)
-			)
+		if sampler.contains_world(point):
+			var solid: bool = sampler.solid_at_world(point)
+			var surface: float = WALL_TOP_M if solid else sampler.height_at_world(point)
 			if point.y <= surface:
-				return {"hit": true, "point": point, "tile": tile}
+				return {"hit": true, "point": point}
 		travelled += GROUND_MARCH_STEP_M
 	return out
 

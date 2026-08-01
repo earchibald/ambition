@@ -311,3 +311,126 @@ func test_enums_are_reported_by_name() -> void:
 		"UNAWARE",
 		"awareness reads as a name, not a bare integer"
 	)
+
+
+## PARTIAL PICKUP. A village stockpile is one stack of several hundred units — 400 iron at
+## 100 cm3 is 40 litres — against a 50 litre pack. Whole-stack-or-nothing meant that in a
+## generated world NOTHING could be picked up, and the only feedback was "it will not fit".
+func test_a_handful_can_be_taken_from_a_pile_too_big_to_carry() -> void:
+	var here: Vector3 = ECSManager.position_of(_player_row)
+	var pile: int = World.spawn_item(
+		here + Vector3(1.0, 0.0, 0.0), MaterialLibrary.MAT_IRON, 100.0, 900
+	)
+	var pile_row: int = ECSManager.resolve(pile)
+
+	assert_true(GameLoopManager.inventory.try_insert(_player_row, pile), "a handful is taken")
+	var inventory: InventoryComponent = ECSManager.inventories[_player_row]
+	assert_eq(inventory.held_items.size(), 1, "and it is in the pack")
+	var taken: int = ECSManager.physicals[ECSManager.resolve(inventory.held_items[0])].quantity
+	assert_gt(taken, 0, "a real number of units was taken")
+	assert_eq(
+		taken + ECSManager.physicals[pile_row].quantity,
+		900,
+		"and the pile lost exactly what the pack gained — nothing minted, nothing lost"
+	)
+
+
+## Scooping twice from the same pile grows one stack rather than filling the pack with fragments.
+func test_repeated_scoops_merge_into_one_stack() -> void:
+	var here: Vector3 = ECSManager.position_of(_player_row)
+	var pile: int = World.spawn_item(
+		here + Vector3(1.0, 0.0, 0.0), MaterialLibrary.MAT_IRON, 100.0, 900
+	)
+	GameLoopManager.inventory.try_insert(_player_row, pile)
+	GameLoopManager.inventory.try_insert(_player_row, pile)
+	assert_eq(
+		ECSManager.inventories[_player_row].held_items.size(), 1, "still one stack, not two"
+	)
+
+
+## When genuinely nothing fits, say WHY in units the player can act on.
+func test_a_refusal_names_the_actual_reason() -> void:
+	var here: Vector3 = ECSManager.position_of(_player_row)
+	# One indivisible object bigger than the whole pack: a corpse is 66 litres.
+	var boulder: int = World.spawn_item(
+		here + Vector3(1.0, 0.0, 0.0), MaterialLibrary.MAT_STONE, 90000.0, 1
+	)
+	assert_false(GameLoopManager.inventory.try_insert(_player_row, boulder), "it does not fit")
+	assert_string_contains(
+		String(GameLoopManager.inventory.last_rejection), "L free", "the refusal quotes volumes"
+	)
+
+
+## A scooped handful must keep its owner, or it launders itself out of the faction's books and
+## breaks the LoD conservation invariant.
+func test_a_partial_pickup_keeps_its_ownership() -> void:
+	var here: Vector3 = ECSManager.position_of(_player_row)
+	var pile: int = World.spawn_item(
+		here + Vector3(1.0, 0.0, 0.0), MaterialLibrary.MAT_IRON, 100.0, 900
+	)
+	var pile_row: int = ECSManager.resolve(pile)
+	ECSManager.ownerships[pile_row] = OwnershipComponent.new(77)
+	ECSManager.add_component_bit(pile_row, ComponentMask.OWNERSHIP)
+
+	GameLoopManager.inventory.try_insert(_player_row, pile)
+	var held_row: int = ECSManager.resolve(ECSManager.inventories[_player_row].held_items[0])
+	assert_eq(ECSManager.ownerships[held_row].faction_id, 77, "the handful is still faction 77's")
+
+
+## Villagers and monsters must not look identical. They did, so the only way to tell a neighbour
+## from a threat was to hit it and find out.
+func test_citizens_creatures_and_corpses_look_different() -> void:
+	var view: ViewManager = ViewManager.new()
+	add_child_autofree(view)
+	var sizes: Dictionary = {}
+	for kind in [&"Citizen", &"Creature", &"Corpse", &"Item"]:
+		var node := MeshInstance3D.new()
+		add_child_autofree(node)
+		view._style(node, [kind] as Array[StringName])
+		sizes[kind] = [node.mesh.size, node.mesh.material.albedo_color]
+	for a in sizes:
+		for b in sizes:
+			if a == b:
+				continue
+			assert_ne(sizes[a], sizes[b], "%s and %s are distinguishable" % [a, b])
+
+
+## THE TYPED-ARRAY TERNARY, AGAIN. `_passes_filters` built its tag list with
+## `[] if chemistry == null else chemistry.active_tags`, which yields an untyped Array and throws
+## on assignment to `Array[StringName]`. The throw aborted the function part-way, GDScript
+## reported that as `false`, and every item WITHOUT a ChemistryComponent was silently refused.
+## In the generated world that is every commodity stack: "take refused" on a pile of cloth.
+func test_an_item_with_no_chemistry_component_can_still_be_taken() -> void:
+	var here: Vector3 = ECSManager.position_of(_player_row)
+	var handle: int = ECSManager.allocate_entity()
+	var row: int = EH.index_of(handle)
+	ECSManager.set_position(row, here + Vector3(1.0, 0.0, 0.0))
+	ECSManager.add_component_bit(row, ComponentMask.POSITION)
+	var physical := PhysicalPropertyComponent.new()
+	physical.volume_cm3 = 100.0
+	physical.quantity = 3
+	ECSManager.physicals[row] = physical
+	ECSManager.add_component_bit(row, ComponentMask.PHYSICAL)
+	ECSManager.materials[row] = MaterialCompositionComponent.new({MaterialLibrary.MAT_CLOTH: 1.0})
+	ECSManager.add_component_bit(row, ComponentMask.MATERIAL)
+
+	assert_false(ECSManager.chemistries.has(row), "the item deliberately has no chemistry")
+	assert_true(
+		GameLoopManager.inventory.try_insert(_player_row, handle),
+		"a tagless item is accepted: %s" % GameLoopManager.inventory.last_rejection
+	)
+
+
+## An inspector whose first line is an opaque handle makes the player work the answer out some
+## other way. "e51:g1" was reported from play as literally unidentifiable.
+func test_the_inspector_says_what_a_thing_is() -> void:
+	var overlay: DebugOverlay = DebugOverlay.new()
+	add_child_autofree(overlay)
+	var here: Vector3 = ECSManager.position_of(_player_row)
+	var pile: int = World.spawn_item(
+		here + Vector3(1.0, 0.0, 0.0), MaterialLibrary.MAT_IRON, 100.0, 618
+	)
+	var label: String = overlay._label_for(ECSManager.resolve(pile))
+	assert_string_contains(label, "618", "the label counts the pile")
+	assert_string_contains(label, "MAT_IRON", "and names the material")
+	assert_eq(overlay._label_for(_player_row), "you", "and knows who you are")

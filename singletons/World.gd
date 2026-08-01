@@ -12,11 +12,20 @@ signal world_ready(chunk_id: Vector3i)
 ## is the loop paid ~50 times a day. It skips DAG generation, world generation, and pre-warm.
 const SCENARIO_TEST_ARENA: StringName = &"test_arena"
 
+## The real thing: 500 years of history, a generated village, factions at their anchors. Slower
+## than the arena by design — it is what Sprint 2 exists to produce.
+const SCENARIO_WORLD: StringName = &"world"
+
 var chunks: Dictionary = {}
 var active_chunk: ChunkData = null
 var player_chunk_id: Vector3i = Vector3i.ZERO
 var scenario: StringName = SCENARIO_TEST_ARENA
 var booted: bool = false
+
+## Present only in the generated-world scenario. The debug arena is deliberately a single chunk
+## with no grid, because that is what keeps it under the 2-second budget it exists to hold.
+var grid: WorldGrid = null
+var boot_report: Bootstrapper = null
 
 
 func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) -> void:
@@ -24,13 +33,72 @@ func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) 
 	RNGService.reseed_all(seed_value)
 	_clear_previous_world()
 	chunks.clear()
-	var chunk: ChunkData = TestArena.build(Vector3i.ZERO)
-	chunks[chunk.chunk_id] = chunk
+	grid = null
+	boot_report = null
+
+	var chunk: ChunkData
+	if name == SCENARIO_WORLD:
+		chunk = _boot_generated_world(seed_value)
+	else:
+		chunk = TestArena.build(Vector3i.ZERO)
+		chunks[chunk.chunk_id] = chunk
+
 	active_chunk = chunk
 	player_chunk_id = chunk.chunk_id
 	_spawn_player(chunk)
 	booted = true
 	world_ready.emit(chunk.chunk_id)
+
+
+## Runs the full Sprint 2 boot: history, grid, populate, optional interregnum, Pre-Warm.
+##
+## The player is spawned by the caller AFTER this returns, which is the roadmap's order: Entity 0
+## arrives last, into a world that is already running.
+func _boot_generated_world(seed_value: int) -> ChunkData:
+	boot_report = Bootstrapper.new()
+	boot_report.execute_boot_sequence(seed_value)
+	grid = boot_report.grid
+	chunks = grid.chunks
+	# The village centre is the player's chunk, and it is Active from the first frame.
+	var home: ChunkData = grid.chunk_at(Vector3i.ZERO)
+	GameLoopManager.streaming.update_chunk_states(Vector3i.ZERO, grid)
+	return home
+
+
+## Chunk that owns a world position, for callers that genuinely need tile coordinates.
+func chunk_containing(world: Vector3) -> ChunkData:
+	if grid == null:
+		return active_chunk
+	return grid.chunk_at(grid.chunk_id_for(world, player_chunk_id.z))
+
+
+## Somewhere solid ground with headroom, near the middle of a chunk.
+##
+## The Sprint 1 arena hard-codes its spawn tile; a GENERATED chunk has no such guarantee, and
+## spawning inside a wall reads as "the controls are broken" rather than as a spawn bug.
+static func spawn_position_in(chunk: ChunkData) -> Vector3:
+	var centre: int = WorldConstants.CHUNK_TILES / 2
+	for radius in range(0, centre):
+		for offset in range(-radius, radius + 1):
+			for candidate in [
+				Vector2i(centre + offset, centre - radius),
+				Vector2i(centre + offset, centre + radius),
+				Vector2i(centre - radius, centre + offset),
+				Vector2i(centre + radius, centre + offset),
+			]:
+				if not chunk.is_solid(candidate.x, candidate.y):
+					var ground: Vector3 = chunk.tile_to_world(candidate.x, candidate.y)
+					return Vector3(ground.x, ground.y + 0.9, ground.z)
+	# A chunk with no open tile at all is a generation failure, not a spawn failure.
+	push_error("chunk %s has no open tile to spawn in" % chunk.chunk_id)
+	return chunk.tile_to_world(centre, centre) + Vector3(0.0, 0.9, 0.0)
+
+
+## What collision and picking resolve terrain against. The grid when the world is streamed, the
+## single chunk when it is the debug arena — both satisfy the same TileSampler contract, so the
+## systems never branch on which one they have.
+func sampler() -> TileSampler:
+	return grid if grid != null else active_chunk
 
 
 ## Destroys everything the previous scenario left behind.
@@ -43,7 +111,11 @@ func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) 
 ## The player at row 0 is deliberately kept: it is the reserved handle (ADR-14) and `_spawn_player`
 ## re-dresses it in place.
 func _clear_previous_world() -> void:
-	for row in ECSManager.query(ComponentMask.POSITION):
+	# Mask 0 matches EVERY living row, positioned or not. Sweeping only POSITION missed the
+	# entities that have no place in the world by design — faction ledgers above all — so each
+	# boot stacked another set of faction cores on the last, and a lookup by faction id found a
+	# stale one from a previous world.
+	for row in ECSManager.query(0):
 		if row == 0:
 			continue
 		ECSManager.destroy_entity(ECSManager.handle_of(row))
@@ -60,7 +132,15 @@ func _spawn_player(chunk: ChunkData) -> void:
 	var handle: int = ECSManager.player_handle()
 	var row: int = EH.index_of(handle)
 
-	ECSManager.set_position(row, TestArena.spawn_position(chunk))
+	# The arena AUTHORS its spawn — west of the interior wall, so walking east exercises the
+	# doorway, the ledge and the pit in order. A generated chunk has no such intent, so one is
+	# searched for instead.
+	var spawn: Vector3 = (
+		TestArena.spawn_position(chunk)
+		if scenario == SCENARIO_TEST_ARENA
+		else spawn_position_in(chunk)
+	)
+	ECSManager.set_position(row, spawn)
 	ECSManager.set_velocity(row, Vector3.ZERO)
 	ECSManager.col_chunk_x[row] = chunk.chunk_id.x
 	ECSManager.col_chunk_y[row] = chunk.chunk_id.y

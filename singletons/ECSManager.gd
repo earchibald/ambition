@@ -70,6 +70,8 @@ var minds: Dictionary = {}
 var heat_sources: Dictionary = {}
 var loose_items: Dictionary = {}
 var player_inputs: Dictionary = {}
+## One per faction, on a macro-entity that owns no position. THE abstract wealth ledger.
+var faction_cores: Dictionary = {}
 
 ## Pending ActionIntents per row. Popped by the Micro tick.
 var action_queues: Dictionary = {}
@@ -123,6 +125,7 @@ func _register_all_registries() -> void:
 		heat_sources,
 		loose_items,
 		player_inputs,
+		faction_cores,
 		action_queues,
 	]:
 		_registries.append(registry)

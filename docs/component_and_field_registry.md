@@ -68,6 +68,10 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 - `Emotion { CALM, FEARFUL, AGGRESSIVE, DESPERATE }`
 - `AwarenessState { UNAWARE, SUSPICIOUS, INVESTIGATING, COMBAT }`
 - `MaterializationPolicy { LEDGERIZE, PRESERVE_ENTITY, CONTAINER_MANIFEST, CARAVAN_MANIFEST, GC_ELIGIBLE }`
+- `NodeType { FACTION, LEADER, LOCATION, ARTIFACT, EVENT_ABSTRACT }` (DAG history graph)
+- `NodeStatus { ACTIVE, DESTROYED, DORMANT }` — DESTROYED nodes are **retained, never deleted**:
+  a conquered faction is the reason its conqueror holds that territory.
+- `EdgeType { FOUNDED, DESTROYED, CONQUERED, MIGRATED_TO, FORGED, ALLIED_WITH }`
 
 ## 4. Shared record types
 - `RelationshipState` = `{ score:float(-100..100), status:RelationshipStatus, grievances:Array }`

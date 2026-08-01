@@ -25,10 +25,15 @@ const WATER_VISIBLE_MIN_UNITS: int = 8
 ## against this same height, so a wall you can see is a wall the cursor readout agrees about.
 const WALL_HEIGHT_M: float = 2.4
 
+## How far out from the player's chunk terrain is drawn. Matches the Active set radius, so the
+## visible world is exactly the simulated one.
+const RENDER_RADIUS_CHUNKS: int = 1
+
 var _floors: MultiMeshInstance3D = null
 var _walls: MultiMeshInstance3D = null
 var _water: MultiMeshInstance3D = null
 var _accumulator: float = 0.0
+var _drawn_chunks: int = 0
 
 
 func _ready() -> void:
@@ -37,7 +42,7 @@ func _ready() -> void:
 	_water = _make_layer(Vector3(1.0, 0.12, 1.0), Color(0.20, 0.45, 0.75, 0.65), true)
 	World.world_ready.connect(_on_world_ready)
 	if World.booted:
-		_on_world_ready(World.player_chunk_id)
+		rebuild()
 
 
 func _process(delta: float) -> void:
@@ -47,38 +52,77 @@ func _process(delta: float) -> void:
 	if _accumulator < WATER_REFRESH_S:
 		return
 	_accumulator = 0.0
-	_rebuild_water(World.active_chunk)
+	# The player can walk into a chunk that did not exist when the terrain was last built, so
+	# the visible set is re-checked rather than assumed fixed.
+	var chunks: Array[ChunkData] = visible_chunks()
+	if chunks.size() != _drawn_chunks:
+		_rebuild_tiles(chunks)
+	_rebuild_water_all(chunks)
 
 
 func _on_world_ready(_chunk_id: Vector3i) -> void:
-	var chunk: ChunkData = World.active_chunk
-	if chunk == null:
+	rebuild()
+
+
+## Every chunk worth drawing: the player's own, plus its neighbours out to the render radius.
+##
+## Rendering only `active_chunk` was correct while the world was one room and wrong the moment
+## there were neighbours — the village is nine chunks, and eight of them were invisible, so the
+## world ended in a cliff two steps from spawn.
+func visible_chunks() -> Array[ChunkData]:
+	var out: Array[ChunkData] = []
+	if World.grid == null:
+		if World.active_chunk != null:
+			out.append(World.active_chunk)
+		return out
+	var centre: Vector3i = World.player_chunk_id
+	for dy in range(-RENDER_RADIUS_CHUNKS, RENDER_RADIUS_CHUNKS + 1):
+		for dx in range(-RENDER_RADIUS_CHUNKS, RENDER_RADIUS_CHUNKS + 1):
+			var chunk_id := Vector3i(centre.x + dx, centre.y + dy, centre.z)
+			# Only chunks that already EXIST. Asking the grid would generate the whole
+			# neighbourhood just to draw it, which is the opposite of streaming.
+			if World.grid.has_chunk(chunk_id):
+				out.append(World.grid.chunk_at(chunk_id))
+	return out
+
+
+func rebuild() -> void:
+	var chunks: Array[ChunkData] = visible_chunks()
+	if chunks.is_empty():
 		return
-	_rebuild_tiles(chunk)
-	_rebuild_water(chunk)
+	_rebuild_tiles(chunks)
+	_rebuild_water_all(chunks)
 
 
 ## Floors sit at each tile's own elevation, so the ledge reads as raised and the pit as sunken
 ## without any extra authoring. That elevation IS the value the step/drop rule tests.
-func _rebuild_tiles(chunk: ChunkData) -> void:
+func _rebuild_tiles(chunks: Array[ChunkData]) -> void:
 	var floor_transforms: Array[Transform3D] = []
 	var wall_transforms: Array[Transform3D] = []
-	for y in WorldConstants.CHUNK_TILES:
-		for x in WorldConstants.CHUNK_TILES:
-			var centre: Vector3 = chunk.tile_to_world(x, y)
-			if chunk.is_solid(x, y):
-				var lift := Vector3(0.0, WALL_HEIGHT_M * 0.5, 0.0)
-				wall_transforms.append(Transform3D(Basis.IDENTITY, centre + lift))
-			else:
-				floor_transforms.append(Transform3D(Basis.IDENTITY, centre))
+	for chunk in chunks:
+		for y in WorldConstants.CHUNK_TILES:
+			for x in WorldConstants.CHUNK_TILES:
+				var centre: Vector3 = chunk.tile_to_world(x, y)
+				if chunk.is_solid(x, y):
+					var lift := Vector3(0.0, WALL_HEIGHT_M * 0.5, 0.0)
+					wall_transforms.append(Transform3D(Basis.IDENTITY, centre + lift))
+				else:
+					floor_transforms.append(Transform3D(Basis.IDENTITY, centre))
 	_fill(_floors, floor_transforms)
 	_fill(_walls, wall_transforms)
+	_drawn_chunks = chunks.size()
 
 
-func _rebuild_water(chunk: ChunkData) -> void:
+func _rebuild_water_all(chunks: Array[ChunkData]) -> void:
+	var transforms: Array[Transform3D] = []
+	for chunk in chunks:
+		_collect_water(chunk, transforms)
+	_fill(_water, transforms)
+
+
+func _collect_water(chunk: ChunkData, transforms: Array[Transform3D]) -> void:
 	if chunk == null:
 		return
-	var transforms: Array[Transform3D] = []
 	for y in WorldConstants.CHUNK_TILES:
 		for x in WorldConstants.CHUNK_TILES:
 			var units: int = chunk.fluid_at(x, y)
@@ -89,7 +133,6 @@ func _rebuild_water(chunk: ChunkData) -> void:
 			var basis := Basis.IDENTITY.scaled(Vector3(1.0, fill * 4.0, 1.0))
 			var centre: Vector3 = chunk.tile_to_world(x, y)
 			transforms.append(Transform3D(basis, centre + Vector3(0, 0.06, 0)))
-	_fill(_water, transforms)
 
 
 func _fill(layer: MultiMeshInstance3D, transforms: Array[Transform3D]) -> void:

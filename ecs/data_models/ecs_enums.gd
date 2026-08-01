@@ -24,6 +24,17 @@ enum Emotion { CALM, FEARFUL, AGGRESSIVE, DESPERATE }
 
 enum AwarenessState { UNAWARE, SUSPICIOUS, INVESTIGATING, COMBAT }
 
+## History graph vocabulary (DAG spec §2). The DAG is generated before the world exists and is
+## the only source of "why is this here", so its node and edge kinds are canonical enums like
+## everything else — never strings.
+enum NodeType { FACTION, LEADER, LOCATION, ARTIFACT, EVENT_ABSTRACT }
+
+## DESTROYED nodes are RETAINED, never deleted. A conquered faction is the reason its conqueror
+## holds that territory, and erasing it erases the explanation.
+enum NodeStatus { ACTIVE, DESTROYED, DORMANT }
+
+enum EdgeType { FOUNDED, DESTROYED, CONQUERED, MIGRATED_TO, FORGED, ALLIED_WITH }
+
 enum MaterializationPolicy {
 	LEDGERIZE,
 	PRESERVE_ENTITY,
