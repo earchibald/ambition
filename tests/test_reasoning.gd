@@ -258,6 +258,49 @@ func test_only_the_most_salient_memories_are_sent() -> void:
 	assert_true(chosen.has("event 39"), "the newest event is included")
 
 
+## TOTAL ORDER, OR IT IS NOT REPRODUCIBLE. Both sorts compared a single field, and `sort_custom`
+## is not stable, so ties could resolve either way — which changes WHICH memories are selected,
+## not merely their order. That breaks ADR-20's reproduce-from-seed rule and silently defeats the
+## response cache in `ReasoningQueue`, which keys on the prompt hash: identical world state
+## missing the cache is a paid call that should never have been made.
+func test_the_same_history_always_produces_the_same_memories() -> void:
+	var core := FactionCoreComponent.new()
+	# EVERY weight and tick tied. Nothing but the tie-breaker can decide this.
+	for i in 20:
+		core.faction_memory.append({
+			"event_id": i, "text": "event %d" % i, "tick": 5, "weight": 2.0, "core": false
+		})
+	var first: Array[String] = PromptBuilder.salient_memories(core)
+
+	# Same memories, arriving in the OPPOSITE order. Selection must not depend on how the
+	# history happened to be appended, or two saves of the same world reason differently.
+	var reversed_core := FactionCoreComponent.new()
+	for i in range(19, -1, -1):
+		reversed_core.faction_memory.append({
+			"event_id": i, "text": "event %d" % i, "tick": 5, "weight": 2.0, "core": false
+		})
+	assert_eq(
+		PromptBuilder.salient_memories(reversed_core),
+		first,
+		"the same history chose the same memories, whatever order it arrived in"
+	)
+
+
+## Ties must not silently reorder the ones that DO differ, either.
+func test_weight_still_beats_recency_when_they_disagree() -> void:
+	var core := FactionCoreComponent.new()
+	core.faction_memory.append(
+		{"event_id": 1, "text": "old but grave", "tick": 0, "weight": 99.0, "core": true}
+	)
+	for i in 8:
+		core.faction_memory.append({
+			"event_id": 10 + i, "text": "recent trivia %d" % i,
+			"tick": 100 + i, "weight": 0.1, "core": false
+		})
+	var chosen: Array[String] = PromptBuilder.salient_memories(core)
+	assert_true(chosen.has("old but grave"), "the heavy memory survives eight fresher ones")
+
+
 func test_the_prompt_states_the_required_schema() -> void:
 	var handle: int = _make_core(generator.active_factions()[0].node_id, 30, 500)
 	var prompt: String = PromptBuilder.build(

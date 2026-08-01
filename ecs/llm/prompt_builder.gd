@@ -85,27 +85,55 @@ static func build_context(core: FactionCoreComponent, generator: DAGGenerator) -
 
 ## Top-3 by weight plus the 3 most recent, de-duplicated. Sending the whole history is how a
 ## per-call cost becomes unbounded.
+##
+## TOTALLY ORDERED, and it was not until 2026-08-01. Both sorts compared one field, and
+## `sort_custom` is not stable, so two memories of equal weight could come back in either order.
+## That is not cosmetic: it changes WHICH THREE ARE SELECTED, so identical world state could
+## produce different prompts run to run. It breaks ADR-20's reproduce-from-seed requirement, and
+## it silently defeats the response cache in `ReasoningQueue`, which keys on the prompt hash — a
+## cache that misses on identical state is a paid call that should not have happened.
+## Tie-break to `event_id`, which is globally unique, so the order is total and no tie remains.
 static func salient_memories(core: FactionCoreComponent) -> Array[String]:
 	var chosen: Array[String] = []
 	var seen: Dictionary = {}
 
 	var by_weight: Array = core.faction_memory.duplicate()
-	by_weight.sort_custom(
-		func(a: Dictionary, b: Dictionary) -> bool:
-			return float(a.get("weight", 0.0)) > float(b.get("weight", 0.0))
-	)
+	by_weight.sort_custom(_more_salient)
 	for i in mini(TOP_MEMORIES, by_weight.size()):
 		_append_memory(by_weight[i], chosen, seen)
 
 	# Most recent = highest tick. Recency and weight overlap often, hence the dedup.
 	var by_tick: Array = core.faction_memory.duplicate()
-	by_tick.sort_custom(
-		func(a: Dictionary, b: Dictionary) -> bool:
-			return int(a.get("tick", 0)) > int(b.get("tick", 0))
-	)
+	by_tick.sort_custom(_more_recent)
 	for i in mini(RECENT_MEMORIES, by_tick.size()):
 		_append_memory(by_tick[i], chosen, seen)
 	return chosen
+
+
+## Weight, then recency, then the unique id. Every comparison ends in a strict decision.
+static func _more_salient(a: Dictionary, b: Dictionary) -> bool:
+	var weight_a: float = float(a.get("weight", 0.0))
+	var weight_b: float = float(b.get("weight", 0.0))
+	if not is_equal_approx(weight_a, weight_b):
+		return weight_a > weight_b
+	var tick_a: int = int(a.get("tick", 0))
+	var tick_b: int = int(b.get("tick", 0))
+	if tick_a != tick_b:
+		return tick_a > tick_b
+	return int(a.get("event_id", 0)) < int(b.get("event_id", 0))
+
+
+## Recency, then weight, then the unique id.
+static func _more_recent(a: Dictionary, b: Dictionary) -> bool:
+	var tick_a: int = int(a.get("tick", 0))
+	var tick_b: int = int(b.get("tick", 0))
+	if tick_a != tick_b:
+		return tick_a > tick_b
+	var weight_a: float = float(a.get("weight", 0.0))
+	var weight_b: float = float(b.get("weight", 0.0))
+	if not is_equal_approx(weight_a, weight_b):
+		return weight_a > weight_b
+	return int(a.get("event_id", 0)) < int(b.get("event_id", 0))
 
 
 ## Neighbours this faction could plausibly act on, with their INTEGER ids. The player is always

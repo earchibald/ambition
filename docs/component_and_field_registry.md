@@ -71,7 +71,13 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 - `NodeType { FACTION, LEADER, LOCATION, ARTIFACT, EVENT_ABSTRACT }` (DAG history graph)
 - `NodeStatus { ACTIVE, DESTROYED, DORMANT }` — DESTROYED nodes are **retained, never deleted**:
   a conquered faction is the reason its conqueror holds that territory.
-- `EdgeType { FOUNDED, DESTROYED, CONQUERED, MIGRATED_TO, FORGED, ALLIED_WITH }`
+- `EdgeType { FOUNDED, DESTROYED, CONQUERED, MIGRATED_TO, FORGED, ALLIED_WITH, KILLED_BY }`
+  - Edge direction is `(source = the subject the edge is about, target = the other party)`.
+    `CONQUERED(aggressor, victim)`. `KILLED_BY(victim, killer)`. `DESTROYED` is written as a
+    self-loop `(node, node)` meaning "this node ceased to exist".
+  - `KILLED_BY` added 2026-08-01: the Sprint 3 roadmap asked for a player-death edge and named a
+    type that was not in this enum, so the implementation overloaded `DESTROYED` and recorded the
+    death with the direction reversed. A death with no killer is `KILLED_BY(victim, victim)`.
 
 ## 4. Shared record types
 - `RelationshipState` = `{ score:float(-100..100), status:RelationshipStatus, grievances:Array }`

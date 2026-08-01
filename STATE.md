@@ -5,7 +5,7 @@
     via PR #6. PRs #7 and #8 are OPEN and UNMERGED — await human review.
 
 *   **SPRINT 3 + 3.5 (2026-07-31). Green, and under adversarial audit.**
-    366 tests across 28 scripts, gdlint clean, boot sentinel present.
+    375 tests across 28 scripts, gdlint clean, boot sentinel present.
     Sprint 3 delivered: grid A* with bounded expansions and partial-route degradation; two-tier
     locomotion; the `JOB_TEMPLATES` planner; the reasoner (heuristic default, remote optional per
     the ADR-5 amendment) behind a Validation Gate; the death loop with corpse, generation bump,
@@ -18,6 +18,24 @@
     four Sprint 3 requirements that were not built (per-faction reasoning cap, thinking bark,
     Adventurer's Residence, `reason_summary` length cap). Do not treat that section as scope
     creep to close silently — it is the declared baseline two external auditors are checking.
+    TWO EXTERNAL INPUT AUDITS ARE IN AND TRIAGED — see `docs/audits/TRIAGE--*.md`. The second
+    (GPT-5.5 via Copilot CLI) found three defects that were live in the SHIPPED CODE, not only in
+    the specs, all now fixed:
+    *   The player-death DAG edge was `DESTROYED(player, killer)`, which under this graph's own
+        convention read as the player having wiped out the killer's faction. `KILLED_BY` is now a
+        registered `EdgeType` with the direction convention written down. The old test asserted
+        only `source_id`, so it passed against an edge that said the opposite of the truth.
+    *   `PromptBuilder.salient_memories` and `FactionCoreComponent.prune_diplomacy` both sorted on
+        one field with the unstable `sort_custom`, so ties changed WHICH items were selected.
+        That violates ADR-20 and silently missed the prompt-hash response cache. Both now use a
+        total order ending in a unique id. **Any `sort_custom` comparing a single field is a
+        candidate for the same bug — check before adding one.**
+    *   Interregnum reputation decay was never implemented at all, so a hostile faction stayed
+        hostile across every future life and the death loop was a respawn. Now decays annually
+        (`GRUDGE_RETAINED`); the grievance LIST deliberately survives.
+    Also added: `test_every_registry_enum_matches_the_code`, because nothing enforced the
+    registry-is-canonical rule and that is how a roadmap came to name an `EdgeType` that did not
+    exist.
 
 *   **SPRINT 2 COMPLETE (2026-07-31).** All six roadmap steps implemented and green:
     DAG history, world generation + tile sampler, DAG-to-ECS instantiator, LoD boundary two-way
@@ -32,10 +50,9 @@
     across boots; and Sprint 1's collision could not cross a chunk seam at all.
     STILL UNPLAYED BY A HUMAN in the world scenario — frames inspected only.
 
-*   **Active Goal:** Sprint 3 and 3.5 are implemented and documented. Two self-bootstrapping
-    audit manifests are in `docs/audits/` for external models to run — one against the input
-    specs, one against the implementation. Await their findings and the human review of #7/#8
-    before starting Sprint 4.
+*   **Active Goal:** Sprint 3 and 3.5 are implemented and documented. External and Copilot input
+    audits now exist in `docs/audits/`; the implementation audit manifest is also present. Await
+    human review of #7/#8 and triage the remaining input-spec findings before starting Sprint 4.
 
 *   **START HERE IF YOU ARE NEW:** `RUNNING.md`. It has the exact commands to run the game, the
     control list, what every object in the test arena is there to test, how to read the debug

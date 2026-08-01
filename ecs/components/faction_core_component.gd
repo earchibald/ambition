@@ -87,9 +87,16 @@ func prune_diplomacy() -> void:
 	if diplomacy.size() <= DIPLOMACY_TOP_K:
 		return
 	var ids: Array = diplomacy.keys()
+	# Tie-broken by faction id. `sort_custom` is not stable, so comparing |score| alone let two
+	# equally-strong relationships evict each other differently run to run — and this decides
+	# which relationships a faction KEEPS, so a tie was a silent, unreproducible data loss.
 	ids.sort_custom(
 		func(a: int, b: int) -> bool:
-			return absf(diplomacy[a]["score"]) > absf(diplomacy[b]["score"])
+			var strength_a: float = absf(diplomacy[a]["score"])
+			var strength_b: float = absf(diplomacy[b]["score"])
+			if not is_equal_approx(strength_a, strength_b):
+				return strength_a > strength_b
+			return a < b
 	)
 	for i in range(DIPLOMACY_TOP_K, ids.size()):
 		diplomacy.erase(ids[i])

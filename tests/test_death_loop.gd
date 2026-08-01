@@ -111,6 +111,95 @@ func test_the_death_is_written_into_history() -> void:
 	assert_eq(generator.edges.size(), before + 1, "an edge was added")
 	var edge: DAGEdge = generator.edges[generator.edges.size() - 1]
 	assert_eq(edge.source_id, WorldConstants.PLAYER_FACTION_ID, "hung off Faction 0 (ADR-14)")
+	assert_eq(edge.type, ECSEnums.EdgeType.KILLED_BY, "and says what kind of event it was")
+
+
+## THE EDGE POINTED THE WRONG WAY. It was `DESTROYED(player, killer)`, which under this graph's
+## own convention — `CONQUERED(aggressor, victim)` — reads as the player having wiped out the
+## killer's faction. The old test asserted only `source_id`, so it passed throughout.
+func test_the_death_edge_does_not_claim_the_player_destroyed_anyone() -> void:
+	var rat: int = World.spawn_creature(ECSManager.position_of(0) + Vector3(1.0, 0.0, 0.0))
+	var rat_row: int = ECSManager.resolve(rat)
+	var identity := SocialIdentityComponent.new()
+	identity.faction_id = 7
+	ECSManager.social_identities[rat_row] = identity
+	ECSManager.add_component_bit(rat_row, ComponentMask.SOCIAL_IDENTITY)
+
+	deaths.on_player_death(rat, generator)
+	var edge: DAGEdge = generator.edges[generator.edges.size() - 1]
+	assert_eq(edge.type, ECSEnums.EdgeType.KILLED_BY, "the type says who did what to whom")
+	assert_eq(edge.target_id, 7, "the killer is the other end of the edge")
+	for written in generator.edges:
+		if written.type == ECSEnums.EdgeType.DESTROYED:
+			assert_ne(written.target_id, 7, "faction 7 was NOT destroyed; it won")
+
+
+## A fall or a starvation has no killer. An edge to faction -1 is a dangling reference in the
+## only record of why the world looks the way it does, so an unwitnessed death is a self-loop.
+func test_a_death_with_no_killer_records_a_valid_edge() -> void:
+	deaths.on_player_death(EH.INVALID, generator)
+	var edge: DAGEdge = generator.edges[generator.edges.size() - 1]
+	assert_eq(edge.target_id, WorldConstants.PLAYER_FACTION_ID, "a self-loop, not faction -1")
+	assert_gte(edge.target_id, 0, "and never a node that does not exist")
+
+
+# --- The grudge decay ---------------------------------------------------------------------------
+
+## Reputation was PERMANENT. Sprint 3.5 gave factions a reason to hate the player and Sprint 3D
+## gave the player a way to die, and nothing connected them, so a hostile village stayed hostile
+## across every future life. That makes the death loop a respawn, not a fresh start.
+func test_a_year_away_cools_a_grudge() -> void:
+	var core: FactionCoreComponent = _make_core(0)
+	ReputationSystem.adjust(core, WorldConstants.PLAYER_FACTION_ID, -80.0, &"MURDER")
+	var before: float = ReputationSystem.relationship_score(
+		core, WorldConstants.PLAYER_FACTION_ID
+	)
+	deaths._decay_grudges()
+	var after: float = ReputationSystem.relationship_score(
+		core, WorldConstants.PLAYER_FACTION_ID
+	)
+	assert_gt(after, before, "they are less angry than they were")
+	assert_lt(after, 0.0, "and have not forgotten entirely")
+	assert_eq(deaths.grudges_decayed, 1, "reported")
+
+
+## The score decays. The grievance list does not. They stop acting on it and still remember.
+func test_the_year_does_not_erase_what_you_did() -> void:
+	var core: FactionCoreComponent = _make_core(0)
+	ReputationSystem.adjust(core, WorldConstants.PLAYER_FACTION_ID, -80.0, &"MURDER")
+	deaths._decay_grudges()
+	var state: Dictionary = core.diplomacy[WorldConstants.PLAYER_FACTION_ID]
+	assert_true(state["grievances"].has(&"MURDER"), "the record of the murder survives")
+
+
+## Crossing back out of hostility has to update the status, or a faction reads as at WAR with a
+## score that is no longer hostile and the two disagree forever.
+func test_cooling_below_the_threshold_restores_the_status() -> void:
+	var core: FactionCoreComponent = _make_core(0)
+	ReputationSystem.adjust(core, WorldConstants.PLAYER_FACTION_ID, -60.0, &"MURDER")
+	assert_eq(
+		core.diplomacy[WorldConstants.PLAYER_FACTION_ID]["status"],
+		ECSEnums.RelationshipStatus.WAR,
+		"hostile to begin with"
+	)
+	deaths._decay_grudges()
+	assert_eq(
+		core.diplomacy[WorldConstants.PLAYER_FACTION_ID]["status"],
+		ECSEnums.RelationshipStatus.NEUTRAL,
+		"and no longer at war once the score says so"
+	)
+
+
+## Everyone else's opinion is none of the dead player's business.
+func test_the_decay_only_touches_the_players_reputation() -> void:
+	var core: FactionCoreComponent = _make_core(0)
+	ReputationSystem.adjust(core, 9, -80.0, &"MURDER")
+	var before: float = ReputationSystem.relationship_score(core, 9)
+	deaths._decay_grudges()
+	assert_almost_eq(
+		ReputationSystem.relationship_score(core, 9), before, 0.01,
+		"a feud between two other factions is not settled by the player dying"
+	)
 
 
 # --- The Interregnum taxes -------------------------------------------------------------------

@@ -24,6 +24,33 @@ running game. Anything the implementer said it did that it did not do.
 `INPUT-SPEC-AUDIT-sprint3-and-3.5.md` in this directory. "The spec was vague here" is not your
 finding; "the implementation does X and nothing anywhere asked for X" is.
 
+### IGNORE OTHER AUDITORS' RESULTS — this is mandatory, not advice
+
+`docs/audits/` accumulates finished reports from parallel auditors. **Treat every file matching
+these patterns as if it does not exist:**
+
+```
+docs/audits/INPUT-AUDIT-RESULT--*.md
+docs/audits/OUTPUT-AUDIT-RESULT--*.md
+docs/audits/TRIAGE--*.md
+```
+
+Do not open them. Do not cite them. Do not check whether you agree with them. If you have already
+read one, say so in your report and treat every finding you share with it as suspect.
+
+The reason is not politeness. Several models audit this change set independently, and the entire
+value of that is **independent** evidence: a defect found by three auditors who could not see each
+other is strong evidence, and a defect found by one auditor and echoed by two who read it first is
+one auditor with extra steps. Anchoring is not something you can decide not to do after reading.
+
+This has already cost something. The first input audit reported a documentation heading as having
+"zero text underneath" when it has seven lines under it, including a complete selection rule. An
+auditor who took that on trust would have propagated it. **Verify every claim against the file,
+including claims made by the implementer in §4 and §4b of this document.**
+
+The two manifests — this one and `INPUT-SPEC-AUDIT-sprint3-and-3.5.md` — are inputs and are meant
+to be read. Result files are outputs and are not.
+
 ---
 
 ## 1. Environment and how to run it
@@ -68,7 +95,7 @@ godot --headless --quit-after 120 res://viewer/Main.tscn 2>&1 | grep ECS_BOOT_OK
 godot --write-movie /tmp/f.png --fixed-fps 10 --quit-after 30 res://viewer/Main.tscn
 ```
 
-**Expected at the audited commit: 28 test scripts, 366 tests, 0 failures, gdlint clean.**
+**Expected at the audited commit: 28 test scripts, 375 tests, 0 failures, gdlint clean.**
 If you observe otherwise, that is your first finding.
 
 `RUNNING.md` documents controls and what each scenario contains. `STATE.md` records known
@@ -189,6 +216,13 @@ or `UNVERIFIABLE`.
 - **C-C4** The queue is bounded (`MAX_PENDING`) and de-duplicates repeat submissions.
 - **C-C5** A leader that dies while queued costs zero requests.
 - **C-C6** The salience filter sends at most top-3-by-weight plus 3-most-recent, de-duplicated.
+- **C-C6b** The salience ordering is TOTAL: `(weight, tick, event_id)` for the weight pass and
+  `(tick, weight, event_id)` for the recency pass, so identical history selects identical
+  memories no matter what order the history arrived in. **This was broken until 2026-08-01** —
+  both sorts compared one field, and `sort_custom` is unstable, so ties changed *which* memories
+  were selected, violating ADR-20 and silently missing the prompt-hash response cache.
+  `FactionCoreComponent.prune_diplomacy` had the same defect and is fixed the same way. Hunt for
+  a third instance: any `sort_custom` comparing a single field is a candidate.
 - **C-C7** Valid target ids are enumerated explicitly in the prompt, and the player (Faction 0) is
   always among them.
 - **C-C8** The Validation Gate applies identically to the heuristic and remote providers.
@@ -216,6 +250,16 @@ or `UNVERIFIABLE`.
 - **C-D9** The player's death is written into world history as a DAG event with an edge to the
   killer (`DeathLoopSystem._record_death_in_history`), so the death is part of the world's record
   and not only a UI message.
+- **C-D9b** The death edge is `KILLED_BY(PLAYER_FACTION_ID, killer_faction)` — a registered
+  `EdgeType`, pointing the way the event actually went. A death with no killer (a fall, drowning,
+  starvation) is a self-loop rather than an edge to faction `-1`, because there is no node `-1`.
+  **This was wrong until 2026-08-01**: it was `DESTROYED(player, killer)`, which under this
+  graph's own convention (`CONQUERED(aggressor, victim)`) claimed the player had wiped out the
+  killer's faction. Check the fix and check for other edges written with the direction reversed.
+- **C-D11** A year away decays every faction's grievance score against the player toward neutral
+  (`GRUDGE_RETAINED`), and updates the derived `status`, so a faction can cross back out of WAR.
+  The grievance LIST is deliberately not cleared: they stop acting on it and still remember.
+  Reputation against factions other than the player is untouched.
 - **C-D10** Death suspends the tick hierarchy (`GameLoopManager.paused = true`) until the player
   presses `R`, so the world does not keep simulating around a corpse the player still controls
   nothing in.
@@ -249,10 +293,15 @@ or `UNVERIFIABLE`.
 
 ### Cross-cutting
 
-- **C-X1** 366 tests pass, gdlint is clean, and the boot sentinel prints with no errors.
+- **C-X1** 375 tests pass, gdlint is clean, and the boot sentinel prints with no errors.
 - **C-X2** The window opens **maximized and windowed**, not fullscreen.
 - **C-X3** No Godot physics node or `move_and_slide` appears in first-party code.
 - **C-X4** `ecs/` contains no wall-clock reads.
+- **C-X5** `tests/invariants/test_forbidden_apis.gd` parses
+  `docs/component_and_field_registry.md` and asserts every documented enum matches `ECSEnums`
+  member-for-member and in order, so the registry cannot drift from the code in silence. Nothing
+  enforced this before 2026-08-01, which is how a roadmap came to name an `EdgeType` that did not
+  exist. Confirm the parse is not vacuous: add a member to any enum and check the test fails.
 
 ---
 
@@ -275,6 +324,8 @@ you can tell them apart.
 | G-2 | A non-blocking "thinking" bark / Diplomatic Ping so the player sees that a leader is deliberating | `sprint_3_implementation_roadmap.md` review F1 | **ABSENT.** There is no UX surface for a pending decision at all. Reasoning is invisible except on the F1 debug page. |
 | G-3 | The successor spawns at an "Adventurer's Residence" | `sprint_3_implementation_roadmap.md` Step 6 | **ABSENT.** The successor spawns at the same location the previous body started from. No residence structure exists in worldgen. |
 | G-4 | `reason_summary` capped at 200 characters | `prompt_builder.gd:30` asks the model for it | **NOT ENFORCED.** The cap is requested in the prompt and never validated on the way back in. A remote provider returning 5 kB puts 5 kB in the overlay. |
+| G-5 | Priority among weekly, crisis and diplomatic reasoning triggers | Implied by `llm_reasoner_and_planning_architecture.md`; never stated | **ABSENT.** The queue is strictly FIFO, so a faction under attack waits behind routine weekly thinking. |
+| G-6 | A Sprint 3 performance gate — which scenario and metric prove `death → respawn ≤ 5 s` and that the queue stays inside the tick budget | `scope_and_milestones.md` states the budget; no sprint doc assigns a test | **ABSENT.** No sprint-owned performance failure signal exists for anything Sprint 3 added. |
 
 ### Sprint 3.5 — the nine named items, honestly
 
@@ -297,6 +348,17 @@ implemented" is **overstated**. Three of nine items are genuinely built, one is 
 different shape than named, one is partial, two exist as unread fields, and two do not exist. The
 commit message says "implement Sprint 3.5: consequences" — *consequences* is the honest scope, and
 the sprint's title is not. If you conclude otherwise, say why.
+
+### Ambiguities resolved by choosing, and the choice recorded
+
+Not gaps — decisions the spec left open where the implementation had to pick. Each is a fair
+target if you think the choice is wrong; none is a concealment.
+
+| Ambiguity | The two readings | Chosen, and why |
+|---|---|---|
+| Interregnum grievance decay: "60-75% toward neutral on each Interregnum pass", where a pass is one of 12 months | per-month, or once across the year | **Annual**, retaining 30%. Per-month compounds to `0.4^12 = 1.7e-5` at the gentle end — a faction that watched you murder its people forgets completely, and the consequence layer resets on every death. The arithmetic decides it. |
+| Swarm cap: "cap all Tier 1 Swarm populations (Rats, Spiders) to a maximum of 10 per chunk" | 10 per species, or 10 total | **10 total**, in `ChunkData.swarm_population`. The registry defines exactly one counter; a per-species cap would need `ZonePopulationComponent.population_by_species`, which nothing in Sprint 3 populates. |
+| `Job_Chat` gossip | a job NPCs are assigned, or a system pass | **A system pass** (`ReputationSystem.spread_gossip`). No `Job_Chat` exists in `JOB_TEMPLATES`. Judge whether the substitution is acceptable. |
 
 ### Known open issue not introduced by this change set
 
@@ -385,7 +447,7 @@ Date (UTC): <timestamp>
 | Check | Claimed | Observed |
 |---|---|---|
 | Test scripts | 28 | |
-| Tests passing | 366 | |
+| Tests passing | 375 | |
 | gdlint | clean | |
 | Boot sentinel | present | |
 
