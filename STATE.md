@@ -1,8 +1,44 @@
 # Agent Handoff State
 
-*   **Current Branch:** `feature/sprint4-the-crucible`, stacked on
-    `feature/sprint3.5-body-politic` (PR #8), itself on `feature/sprint3-world-inspector`
-    (PR #7), off `dev`. **PRs #7 and #8 are still OPEN and UNMERGED** — await human review.
+*   **Current Branch:** `fix/sprints1-4-remediation`, stacked on
+    `feature/sprint4-the-crucible` (PR #9), on `feature/sprint3.5-body-politic` (PR #8), on
+    `feature/sprint3-world-inspector` (PR #7), off `dev`. **PRs #7, #8 and #9 are still OPEN
+    and UNMERGED** — await human review.
+
+*   **THE SPRINTS 1–4 REMEDIATION PASS IS COMPLETE (2026-08-01). 585 tests across 37 scripts,
+    gdlint clean, soak gate green, 27/27 mutations killed.** Four audit sweeps (Sprints 1–2
+    spec-vs-code, Sprint 3/3.5 beyond §4b, Sprint 4 beyond §6, and a dead-symbol sweep over
+    every first-party declaration) produced 51 spec findings and 72 dead symbols on top of the
+    ~28 already-declared gaps. Every declared gap and every buildable finding is closed; the
+    rest are declared with reasons. The ledger is
+    `docs/audits/REMEDIATION-LEDGER-sprints1-4.md` (56 items, all FIXED); the external-audit
+    manifest is `docs/audits/OUTPUT-IMPL-AUDIT-remediation-sprints1-4.md`.
+    The headline closures:
+    *   **The social layer exists** (`ecs/systems/social_system.gd`): loyalty recalculated and
+        READ, succession by prestige with an immediate crisis reasoning tick, schism into a
+        real DAG faction at war with its parent, WAR's first behavioural consumer (hostile
+        citizens attack on sight), non-lethal brawls, trade caravans carrying real
+        interceptable cargo, ClaimTags with a trespass rule, and Guest_Status that a witnessed
+        crime revokes.
+    *   **Fire is a process**: DoT, burnout, fuelled sources burn down, ignition temperatures,
+        fire heats what it touches (`conduct_pair`'s first production caller), smoke blocks
+        sight, detonations are audible (`spawn_noise`'s first callers). One word for water
+        (`Wet`) — the starting water spell could not quench a fire it hit before.
+    *   **Strain per the magic doc** (temporary max-stamina damage) with rest recovery —
+        nothing in the build restored stamina at all; a fireball was castable five times per
+        LIFE. Overclocking + the d100 mishap table + the Mercy Cap. Rune learning at lecterns.
+        Insight grows in play.
+    *   **The wiring blockers**: Pre-Warm actually runs at boot (the counter used to claim 100
+        ticks while zero ran); all seven missing systems merged into `counters()` (F1 showed
+        zeros forever); planner jobs claim at a real score (LLM objectives used to survive
+        half a second); professions attached with matching `Prof_*` keys; faction memory
+        decays at read; queue priorities; timeout requeue; the 200-char cap enforced.
+    *   **Infrastructure**: the ADR-20 soak harness (`--soak=<n>`, CSV, committed baseline,
+        SOAK_OK gate, verified deterministic), the debugging spec's event trace (ring buffer,
+        dump-on-death), free camera + spawn console (F8/F9/F10), boot per-phase timing,
+        per-floor hazard zones, the Adventurer's Residence, DAG compaction at the Interregnum,
+        the Interregnum advancing the CALENDAR, and the dead-symbol cull (24 deleted, 2 wired,
+        registry reconciled in both directions).
 
 *   **SPRINT 4 "THE CRUCIBLE" IS IMPLEMENTED (2026-08-01). 506 tests across 32 scripts, gdlint
     clean, boot sentinel present.** All five roadmap steps plus the Grimoire UI the scope
@@ -135,10 +171,10 @@
     across boots; and Sprint 1's collision could not cross a chunk seam at all.
     STILL UNPLAYED BY A HUMAN in the world scenario — frames inspected only.
 
-*   **Active Goal:** Sprint 4 is implemented, documented and self-audited.
-    `docs/audits/OUTPUT-IMPL-AUDIT-sprint4.md` is the manifest for an external auditor — it
-    carries the claim ledger, the six self-found defects, and **thirteen DECLARED GAPS**. Await
-    human review of #7/#8, then open the Sprint 4 PR against `dev`.
+*   **Active Goal:** The Sprints 1–4 remediation is implemented, documented, mutation-tested
+    and self-audited. `docs/audits/OUTPUT-IMPL-AUDIT-remediation-sprints1-4.md` is the manifest
+    for an external auditor. Await human review of PRs #7/#8/#9, then open the remediation PR
+    stacked on #9 (or fold it into #9 if the owner prefers).
 
 *   **START HERE IF YOU ARE NEW:** `RUNNING.md`. It has the exact commands to run the game, the
     control list, what every object in the test arena is there to test, how to read the debug
@@ -292,20 +328,19 @@
         reference before believing a doc comment.
 
 *   **Next Immediate Steps:**
-    1.  **Play it.** Sprint 4 has never been touched by a human. Set
-        `"boot_scenario": "test_arena"` and follow the Sprint 4 table in RUNNING.md §3a: `B` to
-        build a fireball, `Q` to shoot the spore cloud, `H` to reach the mutation loop. Every
-        claim is test-covered and NONE of it is judged for feel.
-    2.  **Send `OUTPUT-IMPL-AUDIT-sprint4.md` to external auditors.** §5 Pass 4 — grep every new
-        symbol for a second reference — has now caught five instances of this codebase's
-        signature defect across two sprints and is the highest-yield check available.
-    3.  Close or scope the thirteen declared gaps in that manifest §6. G-3 (no way to learn runes
-        in play) is the one that most limits what a play-tester can reach: ten of seventeen runes
-        are currently test-only.
-    4.  **Close the SPRINT 3.5 declared gaps in `OUTPUT-IMPL-AUDIT-sprint3-and-3.5.md` §4b**, or
-        move them into a spec with an owner. Sprint 4 did not touch them. The per-faction
-        reasoning cap (G-1) is still the one with a real failure mode: one faction can fill the
-        global queue.
-    5.  Close the ADR-10 perf gap. Rust/GDExtension port of the CA and the spatial hash. The
-        vendored performance skill flagged `ViewManager`'s one `MeshInstance3D` per entity as
-        the next lead — the terrain already uses MultiMesh; entities do not.
+    1.  **Play it.** The remediation checks table in RUNNING.md §3a is the route: the water
+        spell, the burning rat, the lectern, overclocking, succession-then-war, the Residence
+        respawn. Everything is test-covered and NOTHING is judged for feel.
+    2.  **Send `OUTPUT-IMPL-AUDIT-remediation-sprints1-4.md` to external auditors.** The
+        highest-yield attack is unchanged: grep every FIXED item's symbol for its second
+        PRODUCTION reference.
+    3.  Close the ADR-10 perf gap — the one big engineering debt this pass deliberately did
+        not touch. Rust/GDExtension port of the CA and the spatial hash; `ViewManager`'s
+        one-MeshInstance3D-per-entity remains the flagged viewer-side lead.
+    4.  The declared list in RUNNING.md is the content backlog: swarms materializing as
+        creatures, doors/arrest/tavern-gating, NPC casting, reagent costs, trauma cures,
+        disease, gear. Each is scoped and none is concealed.
+    5.  **Mutation-harness lesson, for the next agent:** restore mutated files from the saved
+        source STRING, never `git checkout` (it reverts uncommitted work), always re-import
+        after editing an autoload, and treat "test file did not run" as its own verdict —
+        Godot's cyclic-parse quirk makes a skipped file read as a green one.

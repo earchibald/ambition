@@ -89,7 +89,7 @@ day, and it is the only place the specific test features in §3 exist.
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
 | `B` | **Grimoire** — compose a spell | Opens the rune list. `1`-`9` add and remove runes, `Enter` binds, `Backspace` clears, `B` or `Esc` closes. The panel previews the compiled spell live — cost, radius, lifetime, and any cap that fired — and previewing costs nothing. |
 | `Q` | **Cast** the bound spell | Fires whatever the Grimoire last bound, aimed where the cursor points. Refuses out loud if nothing is bound, or if you lack the stamina. Magic costs **stamina**, not mana. |
-| `H` | **DEBUG: fill the chunk with spores** | Toggles. The only route to the mutation loop — no hazard zone occurs naturally in either scenario yet. About 50 s of standing in it produces a mutation. |
+| `H` | **DEBUG: fill the chunk with spores** | Toggles. The fast route to the mutation loop; natural spore and toxin zones now generate on dungeon floors -2 and below, so `H` is a convenience, not the only door. About 50 s of standing in it produces a mutation. |
 | `E` | **Use stairs**, or interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
 | `Tab` | Inspect — **toggles** | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Tab the **same** target again to clear it; Tab **empty ground** to clear it. Tab a **different** target to switch straight to it, with no clearing press in between. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
@@ -152,7 +152,7 @@ Aim rotates **continuously** everywhere, including behind you and above the hori
 that never meets the ground keeps the heading the cursor implies, which is exactly the limit the
 ground intersection approaches as the ray flattens — so the two cases meet without a seam.
 
-## 3a. What to test right now — CURRENT AS OF SPRINT 4
+## 3a. What to test right now — CURRENT AS OF THE SPRINTS 1-4 REMEDIATION PASS (2026-08-01)
 
 > **Maintenance rule.** This section is rewritten at the end of every sprint, before its PR
 > opens. A play-tester should never have to work out what is finished by poking at it, and three
@@ -222,6 +222,30 @@ Where they are, relative to your spawn point:
 | **Factions judge you by their own culture** | With a mutation, walk into view of a villager. `F1` FACTIONS: a Farming/Trade culture moves **against** you, a Raiding/Scavenging one moves **toward** you | The mutation shift is gossip-propagated reputation, not a hivemind — and it is the only act in the game whose severity depends on who saw it |
 | **Tab toggles** | Tab a villager, read the panel, Tab the same villager again — the panel goes. Tab a second villager directly and it switches without a clearing press | Sprint 4 Step 5, the playability defect carried over from Sprint 3 |
 
+### The remediation-pass checks (2026-08-01)
+
+A full audit of Sprints 1-4 closed forty-odd gaps. These are the ones you can SEE. All in the
+arena (`godot --scenario=test_arena res://viewer/Main.tscn`) unless marked *world*.
+
+| Do this | What should happen | What it proves |
+|---|---|---|
+| `B`, pick `On_Cast` + `Projectile` + `Apply_Water`, `Enter`, `Q` at the brazier | The flame goes OUT | The starting water spell can quench a fire it hits. It could not before: the rune said `Water`, the world said `Wet`, and the rule matched neither |
+| Shoot the spore cloud with the fireball, watch the rat | The rat takes damage-over-time while `Burning`, dies, leaves a corpse | Burning is a process now — DoT, corpse, burnout — not an inert permanent tag |
+| Stand near the brazier ~3 min | It burns down and goes dark | Heat sources spend fuel (`output_j_per_tick` finally has a reader) |
+| `E` the stone lectern (2 m south-west of spawn) | `LEARNED: ...` lists every rune; the Grimoire shows all seventeen | Rune learning in play (gap G-3). Ten of seventeen runes used to be reachable only from tests |
+| `B`, select MANY runes until the preview refuses, press `O`, `Enter`, then `Q` a few times | `OVERCLOCK ARMED` warning, the bind succeeds, and casts misfire — self-damage with `Bleeding`, a doubled blast, or the spell going off ON you. You cannot die below 1 HP from it | Overclocking, the d100 mishap table, and the Mercy Cap (gap G-2) |
+| Cast anything, then stand still and watch the vitals row | Stamina refills; strain drains | Rest exists. Nothing in the build restored stamina before — a fireball was castable five times per LIFE |
+| *world*: `K` x4 a villager's leader (Tab villagers to find high prestige), or just murder villagers until war | Feed: `faction N has a new leader`, then villagers ATTACK YOU ON SIGHT | Succession by prestige, and WAR finally has a behavioural consumer |
+| *world*: murder one villager in view of another | Feed: grievances, and `you read the inscription`-style guest line is gone — trespass grievances start dripping | A witnessed crime revokes `Guest_Status`; claimed ground notices you |
+| *world*: die (`K` x4) and respawn (`R`) | You wake in the Adventurer's Residence, a year LATER on the clock, and the village is not hostile | The Residence (gap), the calendar moving across the Interregnum, and the spawn-faction NEUTRAL floor |
+| *world*: boot and read the console | `boot phase pre_warm ~50 ms` and villagers already mid-routine, hungry | The Pre-Warm actually runs; it never did — the counter claimed 100 ticks while zero ran |
+| `godot --headless --scenario=world --soak=600 res://viewer/Main.tscn` | `SOAK_OK — 10 metrics inside their bands` | The ADR-20 soak gate: deterministic metrics against a committed baseline |
+| `F8`, fly somewhere, `F9` | A rat appears at the cursor | The Sprint 1 "free camera + spawn console" debug deliverable, shipped |
+
+Caravans run between factions whose mutual score reaches the TRADE band (40+); organic pairs are
+rare in a young world, so the caravan path is proven by `tests/test_social_system.gd` rather
+than by a play route. The feed lines are `caravan: faction A -> faction B ...` if you see them.
+
 ### The Sprint 3 checks
 
 Boot the `world` scenario (the default) and watch the overlay:
@@ -271,56 +295,69 @@ Corrections earlier audits forced, kept as a record of the failure mode:
 If something here does not work as described, that is a bug in the code or in this file — report
 it either way.
 
-### NOT built yet — as of Sprint 4
+### NOT built yet — as of the Sprints 1-4 remediation pass (2026-08-01)
 
 **ONE list, rewritten every sprint, never appended to.** Not bugs. Listed so play-testing stops
-rediscovering them.
+rediscovering them. The remediation pass closed most of the previous list — what remains is
+smaller and different.
 
 **World and threat**
 
-- **No guards, no arrest, no combat response.** A faction that hates you will FORTIFY and hold a
-  grudge, but nobody comes after you.
-- **Nothing in the world attacks you.** No hostile creatures outside the arena, and no naturally
-  occurring hazard zones — which is why `K` exists to reach death and `H` exists to reach
-  mutation. Both are debug keys standing in for content.
-- **No loot placement.** Faction stockpiles materialize at anchors; nothing else is scattered.
-- **The doorway is a gap, not a door.** No door entities or openable fixtures exist.
-- **No ceilings.** Floors are 2.5D planes (ADR-3), so "indoors" is not a concept the renderer
-  expresses yet.
+- **No arrest, no jail, no gated buildings.** A faction at WAR now attacks you on sight, but the
+  roadmap's "guards refuse to let them into the tavern" needs doors and access rules that do not
+  exist. Hostility is the built half.
+- **Swarm counters never materialize.** Chunks breed abstract rat populations across the
+  Interregnum and the cap taxes them, but promotion does not yet spawn them as creatures — the
+  number is real, the bodies are not.
+- **The doorway is a gap, not a door. No ceilings.** Unchanged (ADR-3).
+- **Loot placement is lecterns only.** About a third of dungeon chunks hold a readable lectern;
+  no other scattered loot exists.
 
 **Magic**
 
-- **The Grimoire is a keyboard list, not the node graph.** The drag-and-drop editor, the Dry Run
-  **hologram** (a 3D wireframe preview in a SubViewport) and the translation-cipher minigame from
-  `inventory_and_grimoire_mechanics_specification.md` §2 are a UI sprint. The Dry Run's *logic*
-  is built — the panel previews the real compiled spell — but it is text, not wireframes.
-- **No overclocking and no mishap table.** A spell you cannot afford is refused; it cannot be
-  force-compiled into an `[Unstable]` one that rolls d100 on cast. Spec'd in the grimoire doc,
-  not built.
-- **You cannot learn new runes in play.** `MindComponent.known_runes` is seeded with seven and
-  nothing in the world grants more. The ruined libraries the DAG places are not readable yet, so
-  the runes that exist to be excavated — `Great_Aura`, `Heavy_Projectile`, `On_Proximity`,
-  `On_Timer`, `Cone`, `Apply_Filth`, `Apply_Spores`, `Absorb_Heat`, `Chill`, `Remove_Wet` — are
-  reachable only from tests.
-- **Spells have no visual.** A cast spawns a real entity that moves, collides and applies its
-  payload, and `ViewManager` draws it as an ordinary box. No particles, no light, no trail.
-- **NPCs do not cast.** The compiler is reachable by any mind; only the player's is driven.
+- **The Grimoire is a keyboard list, not the node graph.** The drag-and-drop editor, the 3D Dry
+  Run hologram and the translation-cipher minigame (grimoire spec §2) are a UI sprint. The Dry
+  Run's logic — live preview, zero cost — is built, as is overclocking.
+- **NPCs do not cast.** The compiler is mind-agnostic; only the player's mind is driven.
+- **No material costs.** Spells consume no reagents from the inventory (magic doc names bone
+  dust and sulfur); Strain and Absorb are the only prices.
+- **Absorb happens at the caster, not on the projectile.** A deliberate, recorded departure from
+  the grimoire spec's collide-and-absorb: the cast refuses up front instead of wasting into a
+  `[Spark]`. Disagree with the choice, not the concealment — it is on the record now.
 
 **Chemistry**
 
-- **Four reaction rules**, not a content library: fire+gas, fire+spores, fire+water, and the
-  self-quench. Enough to prove the matrix; not a game's worth of chemistry.
-- **Heat does not ignite.** There is no ignition-temperature model, so `Add_Temperature` alone
-  will not set a flammable thing alight — a spell has to say `Apply_Burning`.
-- **Gas is temperature-driven only.** A material becomes gaseous when the chunk's ambient passes
-  its boiling point. There is no separate gas emission, no pressure, and no ventilation.
+- **Three reaction rules**, not a content library: fire+gas, fire+spores, fire+water(both ways).
+- **Gas has no emission, pressure, or ventilation.** Ambient-vs-boiling-point only.
+- **No spatial temperature.** A chunk's air is one number; heat has no gradient and no spread
+  between chunks.
 
 **Body and interface**
 
-- **Four mutations, one per hazard track.** The table is a worked example, not a content set.
-- **No respawn UI.** `R` triggers the Interregnum and it works, but there is no fade, no "One
-  Year Passes" card, and no death screen — you simply have control again.
-- **No inventory screen.** A successful `E` reports in the event feed and nowhere else.
+- **Four mutations, one per track.** Exposure never rolls the disease branch the magic doc
+  offers as the alternative outcome, and no protective gear item grants `Resist_*` tags (the
+  check exists; the items do not).
+- **`Arcane_Burn` and `Bleeding` cannot be cured.** The trauma tags work — crippled rest — but
+  the "advanced medical crafting" that clears them belongs to the crafting sprint.
+- **No respawn UI, no inventory screen.** Unchanged.
+
+**Infrastructure debts, on the record**
+
+- **ADR-10 is still missed at 1,500 entities** (~14-19 ms against 8 ms, machine-dependent). The
+  agreed response remains the Rust/GDExtension port of the CA and spatial hash. Unchanged by
+  this pass and verified so.
+- **AbstractGraph reconstruction and the topology-dirty consumers** are absent; the dirty flags
+  are written and nothing rebuilds from them. Nothing in production mutates tiles yet, so the
+  wire has no current. Declared, not forgotten.
+- **Perception runs as a capped burst, not an amortized slice**, and the sector-visibility
+  bitset is not built (two of the scaffolding's four mitigations — recorded substitution).
+- **NavBridge's async request/response contract** is satisfied by bounded synchronous
+  pathfinding (12 routes per Simulation tick); the named queue/signal shape is not built.
+- **"Why did this NPC do that" explanation records** (debugging spec §8) and consumers for
+  `hard_fail_on_invariant_violation` do not exist.
+- **Macro systems still do not write faction memory**, so an Abstracted faction reasons from a
+  thin record; and the Interregnum's world evolution is taxes + swarms + compaction, not wars
+  resolving or borders shifting.
 
 ### What is in the arena, and what each thing is there to test
 
@@ -523,7 +560,8 @@ godot --headless -s addons/gut/gut_cmdln.gd \
 `tests/invariants/`, `tests/perf/` and `tests/soak/` are silently skipped and the run reports
 green having never opened them.
 
-Expected: **32 scripts, 506 tests, 506 passing**. Under six seconds.
+Expected: **37 scripts, 585 tests, 585 passing**. Under twenty seconds — the world-boot
+tests now run a real 100-tick Pre-Warm each, which is the price of the boot being honest.
 
 One file at a time, which is what you want while iterating:
 

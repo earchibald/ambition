@@ -109,6 +109,37 @@ func test_a_starving_terrified_citizen_of_a_destitute_faction_is_disloyal() -> v
 	)
 
 
+## Each penalty asserted ALONE. The combined test above survives the deletion of any single
+## term — a mutation run proved it — so every term gets its own pin.
+func test_each_loyalty_penalty_bites_on_its_own() -> void:
+	var plain := FactionCoreComponent.new()
+	plain.faction_id = 779
+	plain.add_wealth(MaterialLibrary.MAT_IRON, 1)
+
+	var starving: int = _citizen(779, Vector3.ZERO)
+	var need := NeedsComponent.new()
+	need.hunger = 95.0
+	ECSManager.needs[starving] = need
+	ECSManager.add_component_bit(starving, ComponentMask.NEEDS)
+	# COMPARATIVE, not against the constant: asserting BASE + LOYALTY_STARVING is a tautology a
+	# mutation run exposed — zeroing the constant changes both sides of the equation.
+	var fed_control: int = _citizen(779, Vector3.ZERO)
+	assert_lt(
+		SocialSystem.loyalty_for(starving, plain),
+		SocialSystem.loyalty_for(fed_control, plain) - 10.0,
+		"a starving citizen is markedly less loyal than an identical fed one"
+	)
+
+	var terrified: int = _citizen(779, Vector3.ZERO)
+	ECSManager.memories[terrified].remember(MemoryEvent.create(&"WAS_ATTACKED", &"raid", 0, true))
+	var calm_control: int = _citizen(779, Vector3.ZERO)
+	assert_lt(
+		SocialSystem.loyalty_for(terrified, plain),
+		SocialSystem.loyalty_for(calm_control, plain),
+		"a remembered horror alone costs loyalty"
+	)
+
+
 func test_a_fed_citizen_of_a_wealthy_faction_is_loyal() -> void:
 	var rich := FactionCoreComponent.new()
 	rich.faction_id = 778

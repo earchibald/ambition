@@ -234,18 +234,21 @@ func _decay_grudges() -> void:
 		if is_zero_approx(before):
 			continue
 		state["score"] = before * GRUDGE_RETAINED
-		# THE SPAWN-FACTION FLOOR (death-loop doc, REQUIRED): the faction whose chunk the new
-		# adventurer wakes in is hard-clamped to NEUTRAL at re-entry. Before this clamp the rule
-		# held only by arithmetic accident — score floor -100 x 0.30 = -30, just above the -40
-		# hostility line — so anyone tuning GRUDGE_RETAINED past 0.4 would have silently restored
-		# the unwinnable spawn the requirement exists to prevent. An invariant enforced by
-		# coincidence is not enforced.
 		if core.anchor_chunk_id == Vector3i.ZERO:
-			state["score"] = maxf(
-				float(state["score"]), ReputationSystem.HOSTILE_BELOW + 1.0
-			)
+			state["score"] = spawn_faction_floor(float(state["score"]))
 		state["status"] = ReputationSystem.status_for(float(state["score"]))
 		grudges_decayed += 1
+
+
+## THE SPAWN-FACTION FLOOR (death-loop doc, REQUIRED): the faction whose chunk the new
+## adventurer wakes in is hard-clamped to NEUTRAL at re-entry. Before this clamp the rule held
+## only by arithmetic accident — score floor -100 x 0.30 = -30, just above the -40 hostility
+## line — so anyone tuning GRUDGE_RETAINED past 0.4 would have silently restored the unwinnable
+## spawn the requirement exists to prevent. Extracted as a static PRECISELY because the accident
+## also makes the clamp unreachable at today's constants: a test can only prove the invariant by
+## asking the rule directly, with a score the decay cannot currently produce.
+static func spawn_faction_floor(score: float) -> float:
+	return maxf(score, ReputationSystem.HOSTILE_BELOW + 1.0)
 
 
 ## Residual physical sweep. Filth and scrap always go; unowned loose items go by chance, because

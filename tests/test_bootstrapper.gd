@@ -153,3 +153,35 @@ func _total_faction_wealth() -> int:
 	for row in ECSManager.query(ComponentMask.FACTION_CORE):
 		total += ECSManager.faction_cores[row].ledger_total()
 	return total
+
+
+## The Pre-Warm's ROADMAP SUCCESS STATE, asserted against the production boot: "when the player
+## gains camera control, NPCs are already working". The old test injected its own callable and
+## proved the injection point; the shipped boot passed nothing, so zero ticks ran and the
+## counter still read 100. This asserts the visible consequence, which no injection can fake.
+func test_the_shipped_boot_prewarms_so_npcs_are_already_working() -> void:
+	World.boot_scenario(World.SCENARIO_WORLD, SEED)
+	# Evidence only SIMULATION TICKS can produce: hunger accrues at 0.139 per tick, so 100
+	# Pre-Warm ticks leave every citizen visibly hungrier than a fresh spawn. Job assignment is
+	# NOT usable as evidence — the boot-time planner pass hands out jobs with zero ticks run,
+	# which is exactly how the first version of this test let an unwired Pre-Warm survive a
+	# mutation run.
+	var hungriest: float = 0.0
+	for row in ECSManager.query(ComponentMask.NEEDS):
+		if row == WorldConstants.PLAYER_INDEX:
+			continue
+		hungriest = maxf(hungriest, ECSManager.needs[row].hunger)
+	assert_gt(hungriest, 5.0, "the village is mid-routine before the player's first frame")
+	assert_eq(
+		World.grid.chunk_at(Vector3i.ZERO).claim_faction_id,
+		_origin_faction_id(),
+		"and the village chunk is CLAIMED by its faction — the ClaimTag is set in production"
+	)
+
+
+func _origin_faction_id() -> int:
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[row]
+		if core.anchor_chunk_id == Vector3i.ZERO:
+			return core.faction_id
+	return -1

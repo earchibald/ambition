@@ -276,3 +276,21 @@ func test_compaction_prunes_only_the_unremembered_dead() -> void:
 			if edge.target_id == node_id and generator._is_active(edge.source_id):
 				justified = true
 		assert_true(justified, "every surviving dead node %d has a living reason" % node_id)
+
+
+# --- The two vacuities my own review of THIS pass found -----------------------------------------
+
+## The spawn floor cannot bind at today's constants (-100 x 0.30 = -30 sits above the -40
+## line), so the integration test passes with or without the clamp — the exact "enforced by
+## coincidence" trap the audit flagged. The rule is therefore asserted DIRECTLY, with a score
+## the decay cannot currently produce.
+func test_the_spawn_floor_binds_when_the_arithmetic_accident_stops_protecting() -> void:
+	assert_gt(
+		DeathLoopSystem.spawn_faction_floor(-90.0),
+		ReputationSystem.HOSTILE_BELOW,
+		"a hypothetical -90 after decay is still clamped out of WAR"
+	)
+	assert_almost_eq(
+		DeathLoopSystem.spawn_faction_floor(-10.0), -10.0, 0.001,
+		"and a score already above the line is untouched"
+	)
