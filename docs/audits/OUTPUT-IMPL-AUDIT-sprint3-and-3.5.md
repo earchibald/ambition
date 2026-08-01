@@ -68,7 +68,7 @@ godot --headless --quit-after 120 res://viewer/Main.tscn 2>&1 | grep ECS_BOOT_OK
 godot --write-movie /tmp/f.png --fixed-fps 10 --quit-after 30 res://viewer/Main.tscn
 ```
 
-**Expected at the audited commit: 28 test scripts, 364 tests, 0 failures, gdlint clean.**
+**Expected at the audited commit: 28 test scripts, 366 tests, 0 failures, gdlint clean.**
 If you observe otherwise, that is your first finding.
 
 `RUNNING.md` documents controls and what each scenario contains. `STATE.md` records known
@@ -170,6 +170,14 @@ or `UNVERIFIABLE`.
 - **C-B3** A latched (in-progress) job is never overwritten by re-planning.
 - **C-B4** Assigned destinations are always walkable tiles inside the faction's anchor chunk.
 - **C-B5** Dead entities are not assigned jobs.
+- **C-B6** The objective the reasoner chose is what the planner expands. `GameLoopManager` calls
+  `planner.plan(core.current_objective, …)`, so a reasoner verdict of `FORTIFY` produces fortify
+  work and not a default template. Falsify by making the reasoner return an objective and checking
+  the jobs that appear.
+- **C-B7** A worker whose `ProfessionComponent.profession` matches a job's preferred profession is
+  given that job in preference to round-robin — and a faction of unqualified workers still gets
+  jobs rather than stalling. (`FactionPlanner.PREFERRED_PROFESSION` was dead code until
+  `_best_action_for()` was added; check the table is genuinely *read*, not merely declared.)
 
 ### Sprint 3C — reasoner
 
@@ -205,6 +213,12 @@ or `UNVERIFIABLE`.
 - **C-D8** The Lineage Journal carries insight and known runes forward and nothing else; merges
   take the higher insight per subject; a corrupt journal starts fresh; a newer-schema journal is
   refused rather than misread.
+- **C-D9** The player's death is written into world history as a DAG event with an edge to the
+  killer (`DeathLoopSystem._record_death_in_history`), so the death is part of the world's record
+  and not only a UI message.
+- **C-D10** Death suspends the tick hierarchy (`GameLoopManager.paused = true`) until the player
+  presses `R`, so the world does not keep simulating around a corpse the player still controls
+  nothing in.
 
 ### Stairs / floors
 
@@ -235,10 +249,61 @@ or `UNVERIFIABLE`.
 
 ### Cross-cutting
 
-- **C-X1** 364 tests pass, gdlint is clean, and the boot sentinel prints with no errors.
+- **C-X1** 366 tests pass, gdlint is clean, and the boot sentinel prints with no errors.
 - **C-X2** The window opens **maximized and windowed**, not fullscreen.
 - **C-X3** No Godot physics node or `move_and_slide` appears in first-party code.
 - **C-X4** `ecs/` contains no wall-clock reads.
+
+---
+
+## 4b. DECLARED GAPS — things the spec asked for that are NOT implemented
+
+The claims above are what I assert I built. This section is what I assert I did **not** build,
+written down before you looked, so that a concealed omission and a declared one cannot be
+confused. **Your job here is to prove this list is INCOMPLETE, not to rediscover what is on it.**
+
+An item found missing that is already listed below is not a finding. An item found missing that is
+**not** listed below is a MAJOR finding at minimum, because it means either the omission was
+concealed or the implementer did not know about it. Report the difference between the two cases if
+you can tell them apart.
+
+### Sprint 3 spec requirements known to be absent
+
+| # | Requirement | Where specified | Status |
+|---|---|---|---|
+| G-1 | A per-faction cap on concurrent Tier-3 (leader) reasoning requests, checked *before* enqueue | `sprint_3_technical_scaffolding.md` §7 / ADR-12 | **ABSENT.** `reasoning_queue.gd` bounds the queue globally (`MAX_PENDING`) and allows one request in flight, but never counts per faction. One faction can therefore fill the queue. |
+| G-2 | A non-blocking "thinking" bark / Diplomatic Ping so the player sees that a leader is deliberating | `sprint_3_implementation_roadmap.md` review F1 | **ABSENT.** There is no UX surface for a pending decision at all. Reasoning is invisible except on the F1 debug page. |
+| G-3 | The successor spawns at an "Adventurer's Residence" | `sprint_3_implementation_roadmap.md` Step 6 | **ABSENT.** The successor spawns at the same location the previous body started from. No residence structure exists in worldgen. |
+| G-4 | `reason_summary` capped at 200 characters | `prompt_builder.gd:30` asks the model for it | **NOT ENFORCED.** The cap is requested in the prompt and never validated on the way back in. A remote provider returning 5 kB puts 5 kB in the overlay. |
+
+### Sprint 3.5 — the nine named items, honestly
+
+Sprint 3.5's whole specification is one table row naming nine things. Here is each one:
+
+| Item | Status | Evidence |
+|---|---|---|
+| Grievance accumulation | **IMPLEMENTED** | `ecs/systems/reputation_system.gd`, claims C-P1..C-P9 |
+| Job_Chat gossip | **IMPLEMENTED UNDER ANOTHER NAME** | `ReputationSystem.spread_gossip()` moves `core` memories between neighbours. There is no job named `Job_Chat` and no chat *job* in `JOB_TEMPLATES`; gossip is a system pass, not work an NPC is assigned. Judge whether that substitution is acceptable. |
+| Profession assignment | **IMPLEMENTED** | `FactionPlanner._best_action_for()`, claim C-B7. Note this was dead code until this change set. |
+| War-time job generation | **PARTIAL** | `JOB_TEMPLATES` has entries for hostile objectives and `HeuristicProvider` returns `FORTIFY` when attacked (C-P11). There is no distinct war*time* state, no mobilisation, no draft. |
+| Loyalty | **FIELD ONLY** | `SocialIdentityComponent.loyalty` is declared in the registry and set at spawn. **Nothing reads it.** |
+| Prestige | **FIELD ONLY** | `SocialIdentityComponent.prestige` — same. Declared, never read. |
+| Succession by prestige | **ABSENT** | No code path selects a new faction leader. Grep `succession` in `ecs/` returns nothing. A faction whose leader dies simply has no leader. |
+| ClaimTags | **ABSENT** | No `ClaimTag` component, tag, or field exists anywhere. |
+| Caravans | **NAME ONLY** | `caravan` appears solely as a `MaterializationPolicy` enum value from an earlier sprint. No caravan entity, route, or trade exists. |
+
+**My own verdict, stated so you can disagree with it on the record:** calling this "Sprint 3.5
+implemented" is **overstated**. Three of nine items are genuinely built, one is built under a
+different shape than named, one is partial, two exist as unread fields, and two do not exist. The
+commit message says "implement Sprint 3.5: consequences" — *consequences* is the honest scope, and
+the sprint's title is not. If you conclude otherwise, say why.
+
+### Known open issue not introduced by this change set
+
+ADR-10's frame budget is 8 ms. The measured cost at 1,500 entities is 13.7 ms. Sprint 3 adds
+pathfinding and a reasoning queue on top of an already-missed budget, and no spec addresses that.
+`STATE.md` records this. It is listed here so you do not spend time proving a known miss — but
+quantifying **how much of the 13.7 ms this change set added** would be a genuinely useful finding.
 
 ---
 
@@ -274,15 +339,23 @@ villager in view of another. **Report anything that reads as broken to a player*
 a test covers it.
 
 ### Pass 5 — Spec conformance, one way only
-For each Sprint 3 roadmap Step, does the implementation deliver what the Step asked? Report
-*missing* deliverables and *unrequested* additions. Do not report that the spec was vague — that
-is the other auditor's finding.
+For each Sprint 3 roadmap Step and each numbered section of `sprint_3_technical_scaffolding.md`,
+does the implementation deliver what it asked? Report *missing* deliverables and *unrequested*
+additions. Do not report that the spec was vague — that is the other auditor's finding.
 
-### Pass 6 — Sprint 3.5 scope honesty
-Sprint 3.5's specification names nine things (see the other manifest, §3). The implementation
-claims grievances and gossip. **Enumerate all nine and state which are implemented, which are
-partially implemented, and which are absent.** Then judge: is calling this "Sprint 3.5
-implemented" honest, overstated, or false? Say so plainly.
+### Pass 6 — Audit the declared gaps (§4b)
+§4b is my own list of what I did not build. Do not take it on trust and do not merely re-derive it.
+
+1. **Verify each declared gap is real.** If something listed as ABSENT actually exists, that is a
+   finding — I was wrong about my own code.
+2. **Prove the list incomplete.** Walk the specs independently and find a requirement that is
+   neither in §4 (claimed) nor §4b (declared missing). Every such item is a MAJOR finding.
+3. **Judge the Sprint 3.5 verdict.** §4b concludes "overstated". Agree or disagree, with reasons.
+4. **Hunt for more dead code of the `PREFERRED_PROFESSION` kind** — a constant, field, or function
+   that is declared and documented as if it works but is never read. `SocialIdentityComponent`'s
+   `loyalty` and `prestige` are two I already found and declared. Find the ones I did not. Grep
+   each public symbol added by this change set for a second reference; one reference means the
+   declaration is its only appearance.
 
 ---
 
@@ -312,7 +385,7 @@ Date (UTC): <timestamp>
 | Check | Claimed | Observed |
 |---|---|---|
 | Test scripts | 28 | |
-| Tests passing | 364 | |
+| Tests passing | 366 | |
 | gdlint | clean | |
 | Boot sentinel | present | |
 
@@ -339,8 +412,20 @@ Date (UTC): <timestamp>
 ## Unbounded work
 <Every loop/queue/collection with no effective bound.>
 
+## Declared-gap audit (§4b)
+| Declared gap | Really absent? | Notes |
+|---|---|---|
+| G-1 .. G-4, and each of the nine Sprint 3.5 items | yes / NO — it exists at file:line | |
+
+### Undeclared gaps found
+<Requirements in the specs that appear in NEITHER §4 nor §4b. This is the section I most want
+filled. Empty is an acceptable answer if you looked and found none — say that you looked.>
+
+### Dead code found
+<Symbols declared and documented but never read, beyond the three already declared.>
+
 ## Sprint 3.5 scope assessment
-<The §6 enumeration and your plain judgement on whether the claim is honest.>
+<Your plain judgement. §4b says "overstated" — agree or disagree, with reasons.>
 
 ## What is genuinely well built
 <Required. At least three specifics. An audit with no positive findings is not calibrated.>

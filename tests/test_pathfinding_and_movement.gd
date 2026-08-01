@@ -293,3 +293,42 @@ func _make_faction(members: int) -> FactionCoreComponent:
 		ECSManager.bodies[row] = BodyComponent.new()
 		ECSManager.add_component_bit(row, ComponentMask.BODY)
 	return core
+
+
+## PROFESSION FILTERING (ADR-4). `PREFERRED_PROFESSION` was declared, documented as if it worked,
+## and never read — so a miner was as likely to be sent to guard duty as a guard was. Dead code
+## that claims to do something is worse than absent code, because it reads as covered.
+func test_a_worker_is_given_a_job_their_profession_suits() -> void:
+	var core: FactionCoreComponent = _make_faction(4)
+	var members: Array[int] = FactionPlanner.members_of(core.faction_id)
+	for row in members:
+		var job_role := ProfessionComponent.new()
+		job_role.profession = &"Guard"
+		ECSManager.professions[row] = job_role
+		ECSManager.add_component_bit(row, ComponentMask.PROFESSION)
+
+	var jobs: Array[Dictionary] = planner.plan(
+		ECSEnums.Objective.GATHER_RESOURCES, core.faction_id, grid
+	)
+	var guard_actions: Array = FactionPlanner.PREFERRED_PROFESSION.keys().filter(
+		func(a: StringName) -> bool: return FactionPlanner.PREFERRED_PROFESSION[a] == &"Guard"
+	)
+	var template: Array = FactionPlanner.JOB_TEMPLATES[ECSEnums.Objective.GATHER_RESOURCES]
+	var suitable: Array = template.filter(
+		func(a: StringName) -> bool: return guard_actions.has(a)
+	)
+	if suitable.is_empty():
+		# No guard work in this template, so round-robin is the correct outcome.
+		assert_gt(jobs.size(), 0, "everyone still gets work when nobody is qualified")
+		return
+	for job in jobs:
+		assert_true(suitable.has(job["action"]), "guards drew guard work")
+
+
+## A village where every job needs a specialist and none exists must not stop working.
+func test_unqualified_workers_still_get_jobs() -> void:
+	var core: FactionCoreComponent = _make_faction(3)
+	var jobs: Array[Dictionary] = planner.plan(
+		ECSEnums.Objective.RAID_FACTION, core.faction_id, grid
+	)
+	assert_eq(jobs.size(), 3, "nobody is left idle for lack of a profession")

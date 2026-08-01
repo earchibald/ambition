@@ -56,12 +56,15 @@ func plan(objective: ECSEnums.Objective, faction_id: int, grid: WorldGrid) -> Ar
 	if workers.is_empty():
 		return [] as Array[Dictionary]
 
+	# Profession-filtered, as ADR-4 requires. This table was previously declared, documented, and
+	# NEVER READ — a miner was as likely to be sent to guard duty as a guard was. Dead code that
+	# claims to do something is worse than absent code, because it reads as covered.
 	var out: Array[Dictionary] = []
 	var index: int = 0
 	for worker in workers:
 		if out.size() >= MAX_JOBS_PER_FACTION:
 			break
-		var action: StringName = template[index % template.size()]
+		var action: StringName = _best_action_for(worker, template, index)
 		index += 1
 		out.append({
 			"row": worker,
@@ -70,6 +73,19 @@ func plan(objective: ECSEnums.Objective, faction_id: int, grid: WorldGrid) -> Ar
 		})
 	jobs_issued += out.size()
 	return out
+
+
+## Picks this worker's job from the template, preferring one their profession suits.
+##
+## Falls back to round-robin so the whole template is still covered when nobody is qualified —
+## a village where every job needs a specialist and none exists would simply stop working.
+func _best_action_for(worker: int, template: Array, index: int) -> StringName:
+	var profession: ProfessionComponent = ECSManager.professions.get(worker)
+	if profession != null and profession.profession != &"":
+		for candidate in template:
+			if PREFERRED_PROFESSION.get(candidate, &"") == profession.profession:
+				return candidate
+	return template[index % template.size()]
 
 
 ## Applies a plan: writes each worker's job and points it somewhere to walk.
