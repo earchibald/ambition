@@ -60,9 +60,12 @@ var brawls: int = 0
 var caravans_dispatched: int = 0
 var caravans_arrived: int = 0
 var caravans_lost: int = 0
+var trespasses: int = 0
 
 ## "from:to" -> {carrier, cargo, material, quantity, from_faction, to_faction, destination}.
 var _caravans: Dictionary = {}
+## The trespass drip throttle: last in-game hour a grievance was filed.
+var _last_trespass_hour: int = -1
 
 
 ## The Simulation-tick pass. Order matters: loyalty first (schism reads it), succession before
@@ -79,6 +82,37 @@ func run(
 	_check_schisms(generator, reasoning)
 	_engage_hostiles(hash, combat)
 	_resolve_brawls(hash)
+	_check_trespass()
+
+
+## THE CLAIMTAG CONSUMER (factions doc §4: "factions exert influence over zones via ClaimTags").
+## Standing on claimed ground WITHOUT Guest_Status files a slow drip of TRESPASS grievances —
+## which is what makes a claim a fact with consequences rather than a field nothing reads. The
+## drip is throttled to one grievance per in-game hour: territory is a pressure, not a mugging.
+## Guests are welcome, and a guest stays a guest until someone SEES them commit a crime
+## (`ReputationSystem` revokes the tag on a witnessed offence).
+func _check_trespass() -> void:
+	var chunk: ChunkData = World.active_chunk
+	if chunk == null or chunk.claim_faction_id < 0:
+		return
+	var owner: FactionCoreComponent = DAGInstantiator.faction_core(chunk.claim_faction_id)
+	if owner == null:
+		return
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(WorldConstants.PLAYER_INDEX)
+	if chemistry != null and chemistry.has_tag(&"Guest_Status"):
+		return
+	if _at_war(owner, WorldConstants.PLAYER_FACTION_ID):
+		# Already shooting; a trespass complaint on top is bookkeeping nobody needs.
+		return
+	var now: int = GameClock.total_hours()
+	if now - _last_trespass_hour < 1:
+		return
+	_last_trespass_hour = now
+	ReputationSystem.adjust(
+		owner, WorldConstants.PLAYER_FACTION_ID,
+		ReputationSystem.SEVERITY[&"TRESPASS"], &"TRESPASS"
+	)
+	trespasses += 1
 
 
 ## Loyalty is RECALCULATED, not accumulated (factions doc §3): it is a statement about the
@@ -557,4 +591,5 @@ func counters() -> Dictionary:
 		"caravans_dispatched": caravans_dispatched,
 		"caravans_arrived": caravans_arrived,
 		"caravans_lost": caravans_lost,
+		"trespasses": trespasses,
 	}

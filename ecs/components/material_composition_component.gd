@@ -24,14 +24,6 @@ func fraction_sum() -> float:
 	return total
 
 
-func normalize() -> void:
-	var total: float = fraction_sum()
-	if total <= 0.0:
-		return
-	for key in volume_fractions:
-		volume_fractions[key] = float(volume_fractions[key]) / total
-
-
 ## Convert mass fractions to volume fractions:
 ##   vf_i = (w_i / rho_i) / sum(w_j / rho_j)
 static func from_mass_fractions(mass_fractions: Dictionary) -> MaterialCompositionComponent:

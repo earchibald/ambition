@@ -199,10 +199,6 @@ const TABLE: Dictionary = {
 }
 
 
-static func has_material(material_id: StringName) -> bool:
-	return TABLE.has(material_id)
-
-
 static func field(material_id: StringName, key: String, fallback: float = 0.0) -> float:
 	if not TABLE.has(material_id):
 		return fallback

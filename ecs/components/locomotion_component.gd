@@ -33,10 +33,6 @@ func set_route(target: Vector3, route: Array[Vector3]) -> void:
 	has_destination = true
 
 
-func is_walking() -> bool:
-	return has_destination and not waypoints.is_empty()
-
-
 ## Consumes the current waypoint if we are standing on it. Returns the direction to steer, or
 ## Vector3.ZERO when the route is finished.
 func steer_from(position: Vector3) -> Vector3:

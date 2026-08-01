@@ -16,8 +16,6 @@ var active_spell: StringName = &""
 ## Registry section 2: a Dictionary, never a bare scalar. The Spell Compiler gates on the
 ## Rune_Stability key specifically.
 var insight: Dictionary = {}
-var faction_reputations: Dictionary = {}
-var language_fluency: Dictionary = {}
 
 
 func insight_in(topic: StringName) -> int:

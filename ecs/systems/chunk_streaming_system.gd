@@ -135,6 +135,7 @@ func _materialize_faction_wealth(chunk: ChunkData) -> void:
 	var core: FactionCoreComponent = _core_anchored_at(chunk.chunk_id)
 	if core == null:
 		return
+	chunk.claim_faction_id = core.faction_id
 	var taken: Dictionary = core.withdraw_all()
 	var slot: int = 0
 	for material in taken:

@@ -91,6 +91,7 @@ const MAX_GOSSIP_PER_TICK: int = 24
 var grievances_recorded: int = 0
 var gossip_spread: int = 0
 var factions_turned_hostile: int = 0
+var guest_status_revoked: int = 0
 
 
 ## Turns this tick's witnesses into grievances.
@@ -129,6 +130,21 @@ func _record(event: WitnessEvent) -> void:
 	var before: float = relationship_score(core, offender_faction)
 	adjust(core, offender_faction, severity, event.action)
 	grievances_recorded += 1
+
+	# A WITNESSED crime revokes Guest_Status (the other half of the perception invariant "an
+	# unseen crime does not revoke Guest_Status", which shipped with no revoking half at all).
+	# Only real offences: a welcomed mutation is kinship, not a crime.
+	if (
+		offender_faction == WorldConstants.PLAYER_FACTION_ID
+		and severity < 0.0
+		and not String(event.action).begins_with(MUTATION_PREFIX)
+	):
+		var player_chemistry: ChemistryComponent = ECSManager.chemistries.get(
+			WorldConstants.PLAYER_INDEX
+		)
+		if player_chemistry != null and player_chemistry.has_tag(&"Guest_Status"):
+			player_chemistry.remove_tag(&"Guest_Status")
+			guest_status_revoked += 1
 
 	if before > HOSTILE_BELOW and relationship_score(core, offender_faction) <= HOSTILE_BELOW:
 		factions_turned_hostile += 1
@@ -308,4 +324,5 @@ func counters() -> Dictionary:
 		"grievances": grievances_recorded,
 		"gossip_spread": gossip_spread,
 		"factions_turned_hostile": factions_turned_hostile,
+		"guest_status_revoked": guest_status_revoked,
 	}

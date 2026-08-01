@@ -53,10 +53,6 @@ func advance_interregnum_year() -> void:
 	ECSEvents.clock_advanced.emit(hour, day, season, year)
 
 
-func is_daylight() -> bool:
-	return hour >= 6 and hour < 18
-
-
 func to_display_string() -> String:
 	var names: Array[String] = ["Spring", "Summer", "Autumn", "Winter"]
 	return "%s %d %02d:00" % [names[season], (day % DAYS_PER_SEASON) + 1, hour]

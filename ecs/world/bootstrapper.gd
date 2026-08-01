@@ -97,6 +97,10 @@ func _run_interregnum() -> void:
 		for _hour in HOURS_PER_INTERREGNUM_MONTH:
 			economy.run()
 		interregnum_months_run += 1
+	# THE CALENDAR MOVES TOO. The coarse pass aged the ledgers and left the clock alone, so the
+	# successor woke on the same date their predecessor died and every "recently" comparison —
+	# memory decay, crisis windows — treated the missing year as never having happened.
+	GameClock.advance_interregnum_year()
 
 
 ## 100 Simulation ticks so the village is mid-routine when the player arrives.

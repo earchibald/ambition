@@ -11,7 +11,6 @@ extends Node
 
 signal entity_created(entity: int, tags: Array, initial_pos: Vector3)
 signal entity_destroyed(entity: int)
-signal entity_moved(entity: int, new_pos: Vector3)
 signal chunk_state_changed(chunk_id: Vector3i, is_active: bool)
 signal clock_advanced(hour: int, day: int, season: int, year: int)
 

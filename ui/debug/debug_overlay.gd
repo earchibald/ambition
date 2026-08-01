@@ -16,11 +16,6 @@ enum Page { LIVE, HISTORY, FACTIONS, MAP, HIDDEN }
 
 const REFRESH_INTERVAL_S: float = 0.25
 
-## How far the cursor ray is marched, and how finely. 0.25 m is a quarter tile, which is well
-## under the smallest feature in the arena, and 240 samples at 4 Hz costs nothing.
-const CURSOR_MAX_DIST_M: float = 60.0
-const CURSOR_STEP_M: float = 0.25
-
 ## How many outcome events the feed keeps. Enough to see a fight, short enough to read.
 const FEED_CAPACITY: int = 8
 
@@ -438,39 +433,6 @@ func _cursor_value() -> String:
 	]
 
 
-## Health, stamina and airborne state. Fall damage was resolving correctly and reporting nowhere,
-## so a 2.5 m drop and a 0.4 m step looked identical from the player's seat.
-func _vitals() -> String:
-	var row: int = ECSManager.resolve(ECSManager.player_handle())
-	if row < 0:
-		return "vitals: <no player>"
-	var body: BodyComponent = ECSManager.bodies.get(row)
-	if body == null:
-		return "vitals: <no body>"
-	var velocity: Vector3 = ECSManager.velocity_of(row)
-	var state: String = "grounded"
-	if velocity.y < -0.05:
-		state = "FALLING %.1f m/s" % -velocity.y
-	elif velocity.y > 0.05:
-		state = "rising"
-	return "vitals: health %.1f/%.1f   stamina %.1f   %s   (safe fall < %.0f m/s)" % [
-		body.health, body.max_health, body.stamina, state, WorldConstants.SAFE_FALL_MPS
-	]
-
-
-## Raw mouse-button state. Requested during play-testing, and immediately useful: it separates
-## "the click never registered" from "the click registered and the action was refused".
-func _mouse_state() -> String:
-	var left: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-	var right: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	return "mouse: LMB %s  RMB %s   attack-presses %d  interact-presses %d" % [
-		"HELD" if left else "up",
-		"HELD" if right else "up",
-		_lmb_presses,
-		_rmb_presses,
-	]
-
-
 ## Newest-first ring of outcome events. Bounded, so a long session cannot grow it without limit.
 func _remember(text: String) -> void:
 	_feed.push_front("%s  %s" % [GameClock.to_display_string(), text])
@@ -691,50 +653,6 @@ func select_row(row: int) -> void:
 ## whether a Tab press is a re-select of the same target (which clears) or a new one.
 func selected_row() -> int:
 	return _selected_row
-
-
-## Where the player is, in BOTH coordinate systems. Every arena feature is specified in tile
-## coordinates (`ecs/world/test_arena.gd`, and the table in RUNNING.md), but the ECS stores
-## metres — so without this line neither number can be checked against the other, and "walk to
-## the ledge and confirm the step rule" is not a runnable instruction.
-func _player_location() -> String:
-	var row: int = ECSManager.resolve(ECSManager.player_handle())
-	if row < 0:
-		return "you: <no player entity>"
-	var pos: Vector3 = ECSManager.position_of(row)
-	var chunk: ChunkData = World.chunk_containing(pos)
-	if chunk == null:
-		return "you: world (%.2f, %.2f, %.2f)   <no active chunk>" % [pos.x, pos.y, pos.z]
-	var tile: Vector2i = chunk.world_to_tile(pos)
-	return "you: tile %s   world (%.2f, %.2f, %.2f)   %s" % [
-		_format_tile(tile), pos.x, pos.y, pos.z, _tile_readout(chunk, tile)
-	]
-
-
-## The tile under the mouse. This is a SURVEY tool: it answers "what is over there" for any tile
-## on screen, with no walking involved. Walking is only needed to test the movement RULES, which
-## are a separate question — see the two tables in RUNNING.md.
-##
-## Marched against the actual height map rather than intersected with the y=0 plane. A flat-plane
-## approximation is wrong at exactly the two places worth inspecting — the raised ledge and the
-## pit — because those are the only tiles whose elevation is not zero.
-##
-## Not routed through PickSystem: the DDA march registers a hit only on SOLID tiles, so over open
-## floor it correctly reports nothing at all, which is useless for a terrain survey.
-func _cursor_location() -> String:
-	var chunk: ChunkData = World.active_chunk
-	var camera: Camera3D = get_viewport().get_camera_3d()
-	if chunk == null or camera == null:
-		return "cursor: <no camera>"
-	var tile: Vector2i = _cursor_tile(chunk, camera)
-	if tile.x < 0:
-		return "cursor: <not over the world>"
-	var owner: ChunkData = World.chunk_containing(
-		chunk.tile_to_world(tile.x, tile.y)
-	) if World.grid == null else _owner_for(camera)
-	return "cursor: tile %s   %s" % [
-		_format_tile(tile), _tile_readout(owner if owner != null else chunk, tile)
-	]
 
 
 ## The chunk under the cursor, so the readout describes the tile it names.

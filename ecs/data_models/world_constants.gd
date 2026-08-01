@@ -35,7 +35,6 @@ const SLIDE_EPSILON_M: float = 0.001
 const REPORTABLE_LANDING_MPS: float = 2.0
 
 const SAFE_FALL_MPS: float = 5.0
-const FALL_DAMAGE_M: float = 3.0
 
 # --- Movement (ADR-18). ---
 ## 4.0 m/s is a real brisk walk and reads as a CRAWL from this camera: the rig sits 11 m up, so
@@ -55,8 +54,6 @@ const ARM_MASS_FRAC: float = 0.10
 const J_PER_HP: float = 3.0
 const TOUGHNESS_J: float = 120.0
 
-# --- Fluid CA (Sprint 1 §5). 1 unit = 1 litre; a tile is 1 m^2. ---
-const CA_UNIT_CM3: int = 1000
 const MAX_CELL_VOLUME: int = 1000
 const FLOW_MIN_DIFF: int = 2
 const FLOOD_PUMP_UNITS_PER_TICK: int = 50

@@ -86,14 +86,16 @@ func test_overlay_reports_player_tile_and_world_position() -> void:
 	add_child_autofree(overlay)
 	World.boot_scenario(World.SCENARIO_TEST_ARENA, 1)
 
-	var text: String = overlay._player_location()
+	# Asserted against the LIVE panel rows, not a helper. The old `_player_location()` was a
+	# superseded orphan the panel never printed — this test was the only thing keeping it alive,
+	# so it certified a readout no human could see (the 2026-08-01 cull deleted it).
+	var text: String = "\n".join(overlay._player_rows())
 	assert_string_contains(text, "tile", "the overlay names a tile coordinate")
-	assert_string_contains(text, "world", "the overlay names a world coordinate")
 	# The player spawns on TestArena.SPAWN_TILE. If these ever disagree, one of the two
 	# coordinate systems has drifted and the arena table in RUNNING.md is lying.
 	assert_string_contains(
 		text,
-		"(%d, %d)" % [TestArena.SPAWN_TILE.x, TestArena.SPAWN_TILE.y],
+		"tile %d, %d" % [TestArena.SPAWN_TILE.x, TestArena.SPAWN_TILE.y],
 		"the reported tile is the spawn tile the arena actually authored"
 	)
 

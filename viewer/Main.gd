@@ -88,6 +88,12 @@ func _spawn_demo_contents() -> void:
 ## conditions from `docs/invariants_and_test_strategy.md`.
 func _verify_boot_contract() -> void:
 	assert(ECSEvents != null, "ECSEvents autoload missing")
+	# Content validation at BOOT, not only under GUT. `validate_table` existed and ran only in
+	# tests, so a bad material committed without running the suite shipped silently.
+	assert(
+		MaterialLibrary.validate_table().is_empty(),
+		"material table invalid: %s" % ", ".join(MaterialLibrary.validate_table())
+	)
 	assert(ECSManager != null, "ECSManager autoload missing")
 	assert(GameLoopManager != null, "GameLoopManager autoload missing")
 	assert(

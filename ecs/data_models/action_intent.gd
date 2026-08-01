@@ -58,6 +58,3 @@ static func cast(spell_id: StringName, aim: Vector3) -> ActionIntent:
 	intent.name_data = spell_id
 	return intent
 
-
-func has_target() -> bool:
-	return EH.is_valid(target)

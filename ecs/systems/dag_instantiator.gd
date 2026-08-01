@@ -71,6 +71,10 @@ func _create_faction_core(node: DAGNode) -> int:
 ## Tier 2 citizens, at the faction's anchor. Population above the cap stays abstract rather than
 ## being silently dropped: `abstract_population` keeps the remainder, so the count is conserved.
 func _materialize_citizens(node: DAGNode, chunk: ChunkData) -> void:
+	# Moving in is claiming (ClaimTags, factions doc §4). Lazy on purpose: a chunk that has
+	# never been generated cannot be claimed, and claiming at first materialization is exactly
+	# when the claim starts being enforceable by people standing on it.
+	chunk.claim_faction_id = node.node_id
 	var wanted: int = mini(node.population, MAX_CITIZENS_PER_FACTION)
 	var rng: RandomNumberGenerator = FloorGenerator.chunk_rng(
 		node.anchor_chunk_id, node.node_id

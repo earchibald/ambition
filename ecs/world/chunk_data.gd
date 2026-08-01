@@ -30,6 +30,13 @@ var hazard_tags: Array[StringName] = []
 ## must not be, or every visit to a chunk grows another lectern.
 var props_spawned: bool = false
 
+## The ClaimTag (factions doc §4: "factions exert influence over zones via ClaimTags"). The
+## faction that considers this chunk THEIRS, or -1 for the unclaimed dark. Set when a faction
+## materializes here; read by the trespass rule in `SocialSystem` — standing on claimed ground
+## without Guest_Status is a grievance, which is what makes "their territory" a fact with
+## consequences instead of a colour on a map that does not exist yet.
+var claim_faction_id: int = -1
+
 ## Tile solidity and per-tile elevation in metres (2.5D, ADR-3).
 var tile_map: PackedInt32Array = PackedInt32Array()
 var height_map: PackedFloat32Array = PackedFloat32Array()
@@ -158,11 +165,6 @@ func mutate_tile(x: int, y: int, kind: int, elevation: float = 0.0) -> void:
 	topology_dirty = true
 	if state == ECSEnums.LoD.ACTIVE:
 		nav_region_dirty = true
-
-
-func mark_dirty_cell(x: int, y: int) -> void:
-	if in_bounds(x, y):
-		dirty_cells[WorldConstants.cell_index(x, y)] = true
 
 
 func fluid_at(x: int, y: int) -> int:
