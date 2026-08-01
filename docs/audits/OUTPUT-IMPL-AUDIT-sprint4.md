@@ -33,7 +33,7 @@ conditional on them.
 | Check | Command | Claimed |
 |---|---|---|
 | Import | `godot --headless --import` | clean, no `SCRIPT ERROR` |
-| Tests | `godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_subdirs -gexit` | **32 scripts, 503 tests, 503 passing** |
+| Tests | `godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests -ginclude_subdirs -gexit` | **32 scripts, 506 tests, 506 passing** |
 | Lint | `gdlint ecs singletons ui viewer tests` | clean |
 | Boot | `timeout 60 godot --headless --quit-after 200 res://viewer/Main.tscn` | prints `ECS_BOOT_OK` |
 
@@ -156,12 +156,14 @@ Each row is falsifiable. Verdicts: UPHELD / FALSE / UNPROVEN.
 | C-F5 | The arena contains a spore cloud, a volatile pocket and a lit brazier, placed apart so nothing fires on boot |
 | C-F6 | `H` toggles a chunk hazard on and off, and standing in it actually accrues exposure |
 | C-F7 | Both demos this manifest and RUNNING.md describe are executed end to end by `test_grimoire_ui.gd` |
+| C-F8 | `--scenario=<name>` works both as `godot --scenario=x` and `godot -- --scenario=x`, and is NEVER written back to the config file |
+| C-F9 | Every boot prints the active scenario and the globalized config path |
 
 ### G. Cross-cutting
 
 | ID | Claim |
 |---|---|
-| C-G1 | 503 tests across 32 scripts, all passing |
+| C-G1 | 506 tests across 32 scripts, all passing |
 | C-G2 | No Godot physics nodes anywhere in `ecs/`, `viewer/`, `ui/`, `singletons/` |
 | C-G3 | `ecs/` reads no wall-clock; the mutation clock is derived from the frame count |
 | C-G4 | Registry enums and components match the code, enforced by `tests/invariants` |
@@ -196,6 +198,12 @@ is the thing worth hunting for more of.
    harmless until Sprint 4 made insight load-bearing: a successor born with an empty journal
    would have had `Rune_Stability` wiped to 0 and been unable to compile any spell ever again,
    with no error to explain it.
+
+7. **`--scenario=<name>` did not exist**, despite `scope_and_milestones.md` §7 naming it a
+   Sprint 1 deliverable. Found by the owner failing to play Sprint 4 at all: the only route to
+   the test arena was hand-written JSON in an OS-specific directory that RUNNING.md referenced
+   eleven times before disclosing. Built, along with the guard that stops a one-run override
+   persisting itself.
 
 Every one of the above is covered by a test that fails when the fix is reverted — see §5.
 

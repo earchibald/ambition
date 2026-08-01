@@ -26,6 +26,11 @@ func _ready() -> void:
 	])
 	print("player handle: %s" % EH.to_debug_string(ECSManager.player_handle()))
 	print("world: %s  player at %v" % [World.scenario, ECSManager.position_of(0)])
+	# Printed every boot, because "which scenario am I in and how do I change it" cost a
+	# play-tester a whole session. `--scenario=test_arena` is the answer; the file path is the
+	# fallback, and it is an OS-specific directory nobody can guess.
+	print("scenario: %s   (override: --scenario=test_arena|world)" % World.scenario)
+	print("debug config: %s" % DebugFlags.config_path_for_humans())
 	# Printed LAST, so its presence means every check above completed.
 	print(BOOT_SENTINEL)
 

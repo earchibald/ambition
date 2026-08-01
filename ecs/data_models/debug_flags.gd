@@ -43,14 +43,55 @@ static var boot_overlay_page: int = 0
 
 static var _loaded: bool = false
 
+## Flags the command line overrode this run. A CLI override is for ONE run: without this,
+## launching once with `--scenario=test_arena` and then nudging the font size would call
+## `save_config`, write `test_arena` into the file, and silently make the override permanent —
+## so the next plain `godot` boots the arena and the player has no idea why.
+static var _cli_overrides: Dictionary = {}
+
 
 ## Idempotent. Called once from Main._ready(); safe to call again.
+##
+## COMMAND LINE LAST, so it beats the config file. Editing JSON in an OS-specific application
+## data directory is not a developer loop — you cannot put it in a shell alias, a README, or a
+## `.desktop` shortcut, and on macOS the path contains a space and the words "Application
+## Support". `--scenario=test_arena` is what the scope document actually specifies.
 static func initialize() -> void:
 	if _loaded:
 		return
 	_loaded = true
 	_ensure_trace_dir()
 	_load_config()
+	_apply_command_line()
+
+
+## `--scenario=<name>` and `--overlay-font=<n>`, specified in `scope_and_milestones.md` §7 as a
+## Sprint 1 deliverable and never built until 2026-08-01. Its absence meant the only way to reach
+## the test arena — where every hand-authored feature in the build lives, including all three
+## Sprint 4 props — was to hand-write JSON into `user://`, and RUNNING.md named that file eleven
+## times before saying where it was.
+##
+## Both `godot --scenario=x` and `godot -- --scenario=x` work. Godot swallows arguments it
+## recognises, so unknown ones appear in `get_cmdline_args()`; anything after a bare `--` appears
+## in `get_cmdline_user_args()` instead. Reading both means the caller does not have to know
+## which list Godot chose to put it in.
+static func _apply_command_line() -> void:
+	var args: PackedStringArray = OS.get_cmdline_args()
+	args.append_array(OS.get_cmdline_user_args())
+	for arg in args:
+		if arg.begins_with("--scenario="):
+			_cli_overrides["boot_scenario"] = boot_scenario
+			boot_scenario = StringName(arg.trim_prefix("--scenario="))
+		elif arg.begins_with("--overlay-font="):
+			_cli_overrides["overlay_font_size"] = overlay_font_size
+			overlay_font_size = clampi(
+				int(arg.trim_prefix("--overlay-font=")),
+				MIN_OVERLAY_FONT_SIZE,
+				MAX_OVERLAY_FONT_SIZE
+			)
+		elif arg == "--no-overlay":
+			_cli_overrides["tick_counters_enabled"] = tick_counters_enabled
+			tick_counters_enabled = false
 
 
 ## The debugging spec requires that logs be writable under `user://`. Fail loudly here rather
@@ -111,9 +152,21 @@ static func snapshot() -> Dictionary:
 
 ## Persists the current flags, so a size chosen at runtime survives a restart. Writing the file
 ## by hand to change one number is a chore nobody does twice.
+##
+## COMMAND-LINE OVERRIDES ARE NOT PERSISTED. `--scenario` is for one run; writing it back would
+## make a throwaway flag permanent and leave the player wondering why the game now boots the
+## debug arena.
 static func save_config() -> void:
 	var file: FileAccess = FileAccess.open(CONFIG_PATH, FileAccess.WRITE)
 	if file == null:
 		push_warning("could not write %s; overlay settings will not persist" % CONFIG_PATH)
 		return
-	file.store_string(JSON.stringify(snapshot(), "\t"))
+	var persisted: Dictionary = snapshot()
+	persisted.merge(_cli_overrides, true)
+	file.store_string(JSON.stringify(persisted, "\t"))
+
+
+## Where the config file actually lives, as a real filesystem path. `user://` is meaningless in a
+## shell, and RUNNING.md referred to this file eleven times before saying where it was.
+static func config_path_for_humans() -> String:
+	return ProjectSettings.globalize_path(CONFIG_PATH)

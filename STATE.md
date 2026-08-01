@@ -4,7 +4,7 @@
     `feature/sprint3.5-body-politic` (PR #8), itself on `feature/sprint3-world-inspector`
     (PR #7), off `dev`. **PRs #7 and #8 are still OPEN and UNMERGED** — await human review.
 
-*   **SPRINT 4 "THE CRUCIBLE" IS IMPLEMENTED (2026-08-01). 503 tests across 32 scripts, gdlint
+*   **SPRINT 4 "THE CRUCIBLE" IS IMPLEMENTED (2026-08-01). 506 tests across 32 scripts, gdlint
     clean, boot sentinel present.** All five roadmap steps plus the Grimoire UI the scope
     document assigns to this sprint:
     *   **Step 5 first, as the roadmap instructs.** `Tab` now toggles: a new target inspects, the
@@ -44,6 +44,16 @@
     6.  `LineageJournal.apply_to` REPLACED insight rather than merging. Pre-existing and harmless
         until Sprint 4 made insight load-bearing; an empty journal would have left a successor
         permanently unable to cast.
+
+*   **`--scenario=<name>` FINALLY EXISTS.** `scope_and_milestones.md` §7 specifies it as a
+    SPRINT 1 deliverable and it was never built, which meant the only route to the test arena —
+    where every hand-authored feature in the build lives, including all three Sprint 4 props —
+    was hand-writing JSON into an OS-specific application-data directory that RUNNING.md named
+    eleven times before saying where it was. It cost the owner a play session on the very first
+    attempt at Sprint 4. Also `--overlay-font=` and `--no-overlay`. **CLI overrides are never
+    persisted**: without that guard, one `--scenario=test_arena` plus any runtime font change
+    would write the debug room in as the permanent default. Every boot now prints the active
+    scenario and the real config path.
 
 *   **30 MUTATION TESTS RUN AGAINST THE NEW CODE, ALL KILLED.** Two initially survived and both
     turned out to be BAD MUTATIONS rather than weak tests — worth re-deriving rather than

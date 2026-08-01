@@ -46,9 +46,38 @@ its inhabitants standing where the history put them. The debug overlay is on by 
 | `world` (default) | The real thing. DAG history, generated village, factions at their anchors, Pre-Warm. | ~22 ms |
 | `test_arena` | The Sprint 1 hand-authored room: ledge, pit, doorway, diagonal pinch, puddle, one rat, one nugget. | ~2 ms |
 
-Switch with `"boot_scenario": "test_arena"` in `debug_config.json`. **Use the arena while
-iterating on movement and combat** — it is the loop you pay ~50 times a day, and it is the only
-place the specific test features in §3 exist.
+**Switch with a command-line flag.** No file to find, no JSON to edit:
+
+```bash
+godot --scenario=test_arena res://viewer/Main.tscn
+godot --scenario=world      res://viewer/Main.tscn
+```
+
+Every boot prints which one it chose and where the config file is, so this is never a guess:
+
+```
+scenario: test_arena   (override: --scenario=test_arena|world)
+debug config: /Users/you/Library/Application Support/Godot/app_userdata/The Living Delve/debug_config.json
+```
+
+The flag applies to **that run only** and is deliberately never written back — otherwise one
+`--scenario=test_arena` would silently make the debug room your permanent default.
+
+To change the default instead, edit `boot_scenario` in that file. It lives under Godot's user
+data directory, which is OS-specific and not guessable:
+
+| OS | Path |
+|---|---|
+| macOS | `~/Library/Application Support/Godot/app_userdata/The Living Delve/debug_config.json` |
+| Linux | `~/.local/share/godot/app_userdata/The Living Delve/debug_config.json` |
+| Windows | `%APPDATA%\Godot\app_userdata\The Living Delve\debug_config.json` |
+
+It may not exist yet — the game writes it the first time you change the overlay text size with
+`=`/`-`. Creating it by hand with just `{ "boot_scenario": "test_arena" }` also works; every
+other key falls back to its default.
+
+**Use the arena while iterating on movement and combat** — it is the loop you pay ~50 times a
+day, and it is the only place the specific test features in §3 exist.
 
 ### Controls
 
@@ -165,9 +194,9 @@ Two readings that look wrong and are not:
 
 ### The Sprint 4 checks
 
-**Use `test_arena` for these.** Set `"boot_scenario": "test_arena"` in `debug_config.json`. The
-generated village has no spores, no volatile gas and nothing burning; the arena is where the
-Sprint 4 props are placed. They sit apart from each other on purpose, so nothing goes off before
+**Use `test_arena` for these** — `godot --scenario=test_arena res://viewer/Main.tscn`, or see §3
+for the config-file route. The generated village has no spores, no volatile gas and nothing
+burning; the arena is where the Sprint 4 props are placed. They sit apart from each other on purpose, so nothing goes off before
 you do it.
 
 Where they are, relative to your spawn point:
@@ -219,8 +248,8 @@ Boot the `world` scenario (the default) and watch the overlay:
 | Villagers are people | **Tall and green.** Monsters are **small and red**, corpses are **flat grey slabs**. Villagers have 100 HP, so killing one takes about three hits |
 
 **For movement feel, combat, fall damage and fluids, use `test_arena`.** Those features have
-authored test geometry there and none of it exists in a generated village. Set
-`"boot_scenario": "test_arena"` in `debug_config.json`.
+authored test geometry there and none of it exists in a generated village:
+`godot --scenario=test_arena res://viewer/Main.tscn`.
 
 ### Claims in this file are checked against the code
 
@@ -457,7 +486,9 @@ project uses `canvas_items` stretch. To change it:
 
 * Press `=` to enlarge and `-` to shrink, at any time. The choice is saved immediately and
   survives a restart.
-* Or set `"overlay_font_size"` in `debug_config.json` (see the path below). Range is 10 to 64.
+* Or launch with `--overlay-font=28`. Range is 10 to 64, and like `--scenario` it applies to that
+  run only.
+* Or set `"overlay_font_size"` in `debug_config.json` (paths in §3) to change the default.
 
 The two lines worth watching:
 
@@ -470,8 +501,8 @@ The two lines worth watching:
 set, which is the whole point of the hysteresis. Break the puddle by walking into it and the
 count rises again.
 
-To change what is drawn, write `debug_config.json` into the user data directory
-(`~/Library/Application Support/Godot/app_userdata/The Living Delve/` on macOS):
+To change what is drawn, write `debug_config.json` into the user data directory (paths in §3;
+the game prints the exact one at every boot):
 
 ```json
 { "tick_counters_enabled": true, "fluid_overlay_enabled": true, "event_trace_enabled": true }
@@ -492,7 +523,7 @@ godot --headless -s addons/gut/gut_cmdln.gd \
 `tests/invariants/`, `tests/perf/` and `tests/soak/` are silently skipped and the run reports
 green having never opened them.
 
-Expected: **32 scripts, 503 tests, 503 passing**. Under six seconds.
+Expected: **32 scripts, 506 tests, 506 passing**. Under six seconds.
 
 One file at a time, which is what you want while iterating:
 

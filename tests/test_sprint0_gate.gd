@@ -112,3 +112,45 @@ func test_debug_config_initializes_and_trace_dir_is_writable() -> void:
 		flags["hard_fail_on_invariant_violation"],
 		"debug builds hard-fail on invariant violations by default"
 	)
+
+
+## `--scenario=<name>` is specified in `scope_and_milestones.md` §7 as a SPRINT 1 DELIVERABLE and
+## was never built. Its absence cost a play-tester a whole session: the only way to reach the
+## test arena — where every hand-authored feature lives, including all three Sprint 4 props — was
+## to hand-write JSON into an OS-specific application-data directory that RUNNING.md referenced
+## eleven times before saying where it was.
+func test_the_scenario_override_is_documented_where_a_human_will_find_it() -> void:
+	var running: String = FileAccess.get_file_as_string("res://RUNNING.md")
+	assert_true(running.contains("--scenario="), "RUNNING.md tells you the command-line flag")
+	assert_true(
+		running.contains("Application Support"),
+		"and names the real path for the config file, not just `user://`"
+	)
+
+
+## The path has to be resolvable to something a shell can open. `user://` is not.
+func test_the_config_path_is_a_real_filesystem_path() -> void:
+	var path: String = DebugFlags.config_path_for_humans()
+	assert_false(path.begins_with("user://"), "globalized, so it can be copied into a terminal")
+	assert_true(path.ends_with("debug_config.json"), "and points at the config file")
+
+
+## THE FOOTGUN. A CLI override is for one run. Without this guard, booting once with
+## `--scenario=test_arena` and then nudging the font size writes `test_arena` into the config
+## file, so every later plain launch boots the debug arena with nothing to explain why.
+func test_a_command_line_override_is_never_written_back_to_the_config() -> void:
+	var real_scenario: StringName = DebugFlags.boot_scenario
+	var real_overrides: Dictionary = DebugFlags._cli_overrides.duplicate()
+
+	DebugFlags._cli_overrides = {"boot_scenario": "world"}
+	DebugFlags.boot_scenario = &"test_arena"
+	var persisted: Dictionary = DebugFlags.snapshot()
+	persisted.merge(DebugFlags._cli_overrides, true)
+	assert_eq(
+		persisted["boot_scenario"],
+		"world",
+		"the file keeps what the file said, not what the flag said this run"
+	)
+
+	DebugFlags.boot_scenario = real_scenario
+	DebugFlags._cli_overrides = real_overrides
