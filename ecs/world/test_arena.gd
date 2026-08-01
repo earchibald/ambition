@@ -20,6 +20,12 @@ extends RefCounted
 const DOORWAY_Y: int = 32
 const LEDGE_HEIGHT_M: float = 0.4
 const PIT_DEPTH_M: float = -2.5
+## Ramp out of the pit. 0.4 m per tile keeps every tread inside `STEP_UP_MAX_M` (0.5 m) with
+## margin, so it is walkable up and down without a jump.
+const RAMP_RISE_PER_TILE_M: float = 0.4
+const RAMP_Y_MIN: int = 14
+const RAMP_Y_MAX: int = 15
+
 const WATER_SOURCE: Vector2i = Vector2i(10, 10)
 const SPAWN_TILE: Vector2i = Vector2i(8, 32)
 
@@ -69,6 +75,23 @@ static func _carve_pit(chunk: ChunkData) -> void:
 	for y in range(12, 18):
 		for x in range(40, 46):
 			chunk.set_tile(x, y, ChunkData.TILE_OPEN, PIT_DEPTH_M)
+	_carve_pit_ramp(chunk)
+
+
+## A way BACK OUT of the pit.
+##
+## The pit floor is 2.5 m below the surrounding stone and the step-up limit is 0.5 m, so a player
+## who fell in was simply trapped: every wall of the pit is five times too tall to climb and there
+## is no jump. Correct physics, unusable test arena.
+##
+## Each tread rises 0.4 m, comfortably inside STEP_UP_MAX_M, so the ramp is walkable in both
+## directions and also exercises the step rule repeatedly on the way up.
+static func _carve_pit_ramp(chunk: ChunkData) -> void:
+	var tread: float = PIT_DEPTH_M
+	for x in range(46, 52):
+		tread += RAMP_RISE_PER_TILE_M
+		for y in range(RAMP_Y_MIN, RAMP_Y_MAX + 1):
+			chunk.set_tile(x, y, ChunkData.TILE_OPEN, tread)
 
 
 ## Two diagonal solids with open cells between them. An axis-separated collision resolve would

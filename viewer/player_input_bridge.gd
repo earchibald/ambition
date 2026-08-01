@@ -10,6 +10,11 @@ extends Node
 
 var intents_pushed: int = 0
 
+## The direction the player is currently aiming, recomputed every frame from the cursor. Exposed
+## so DebugGizmos can DRAW it: without this the player is a featureless box with no on-screen
+## indication of facing, and the swing arc is invisible.
+var last_aim: Vector3 = Vector3(0.0, 0.0, 1.0)
+
 var _camera: Camera3D = null
 var _overlay: DebugOverlay = null
 
@@ -44,8 +49,11 @@ func _physics_process(_delta: float) -> void:
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
 
+	# Recomputed every frame, not only on click, so the gizmo shows where a swing WOULD go.
+	last_aim = _aim_direction(row, direction)
+
 	if Input.is_action_just_pressed(&"attack"):
-		_push_attack(row, direction)
+		_push_attack(row, last_aim)
 	if Input.is_action_just_pressed(&"interact"):
 		_push_interact(row)
 	if Input.is_action_just_pressed(&"inspect"):
@@ -55,13 +63,44 @@ func _physics_process(_delta: float) -> void:
 		GameLoopManager.time_scale = 0.2 if GameLoopManager.time_scale == 1.0 else 1.0
 
 
+## You swing where you POINT, not where you last walked.
+##
+## The swing arc is +/-60 degrees around this vector. Taking it from the movement keys meant a
+## standing player swung along a hard-coded +Z, so a rat standing due east sat 90 degrees outside
+## the arc and clicking on it did nothing — with no message explaining why.
+## Aim comes from `PickSystem.aim_direction`, which is continuous everywhere. It replaced a
+## terrain march that fell back to a hard-coded `+Z` whenever the march found nothing — which is
+## most of the upper half of the screen, since those rays reach the horizon or outrun the march
+## budget. Sweeping the cursor past the player therefore made the aim SNAP to a fixed direction
+## instead of continuing to rotate.
+func _aim_direction(row: int, movement: Vector3) -> Vector3:
+	if _camera != null:
+		var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
+		var feet: Vector3 = ECSManager.position_of(row)
+		var bounds: BoundsComponent = ECSManager.bounds.get(row)
+		if bounds != null:
+			feet.y -= bounds.half_extents.y
+		var aim: Vector3 = PickSystem.aim_direction(
+			feet, _camera.project_ray_origin(mouse), _camera.project_ray_normal(mouse)
+		)
+		if aim.length() > 0.01:
+			return aim
+	if movement.length() > 0.01:
+		return movement.normalized()
+	# Genuinely undefined only when the cursor sits on the actor and nobody is moving. Holding the
+	# previous aim beats snapping to a constant.
+	return last_aim
+
+
 ## Targeting goes through the ECS PickSystem, never a Godot raycast.
-func _push_attack(row: int, direction: Vector3) -> void:
-	var swing: Vector3 = direction if direction.length() > 0.01 else Vector3(0.0, 0.0, 1.0)
+func _push_attack(row: int, swing: Vector3) -> void:
 	var target: int = GameLoopManager.picking.melee_target(row, swing, GameLoopManager.spatial_hash)
-	if EH.is_valid(target):
-		ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MELEE, target, swing))
-		intents_pushed += 1
+	if not EH.is_valid(target):
+		# Silence is the worst possible feedback. Say why nothing happened.
+		ECSEvents.action_rejected.emit(ECSManager.handle_of(row), &"attack", &"nothing in reach")
+		return
+	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MELEE, target, swing))
+	intents_pushed += 1
 
 
 ## Mouse-cursor entity inspection. `DebugOverlay.select_row` existed but NOTHING called it, so
@@ -86,14 +125,24 @@ func _select_under_cursor() -> void:
 	)
 
 
+## `E` takes what is under the cursor, or failing that the nearest thing within arm's reach.
+##
+## The ray now runs through the MOUSE rather than straight out of the camera's nose, and reach is
+## measured from the player. The old version cast from the camera and compared the ray's own
+## travel against a 2.5 m reach — the camera sits ~14 m away, so it never once succeeded.
 func _push_interact(row: int) -> void:
 	if _camera == null or World.active_chunk == null:
 		return
-	var origin: Vector3 = _camera.global_position
-	var forward: Vector3 = -_camera.global_transform.basis.z
+	var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
 	var target: int = GameLoopManager.picking.interact_target(
-		origin, forward, GameLoopManager.spatial_hash, World.active_chunk
+		row,
+		_camera.project_ray_origin(mouse),
+		_camera.project_ray_normal(mouse),
+		GameLoopManager.spatial_hash,
+		World.active_chunk
 	)
-	if EH.is_valid(target):
-		ECSManager.push_intent(row, ActionIntent.create(ActionIntent.TAKE, target))
-		intents_pushed += 1
+	if not EH.is_valid(target):
+		ECSEvents.action_rejected.emit(ECSManager.handle_of(row), &"take", &"nothing in reach")
+		return
+	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.TAKE, target))
+	intents_pushed += 1

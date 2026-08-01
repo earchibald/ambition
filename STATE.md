@@ -63,7 +63,62 @@
     *   **Rendered frames inspected**, via
         `godot --write-movie /tmp/frames/f.png --fixed-fps 10 --quit-after 40 res://viewer/Main.tscn`.
 
-*   **PLAY NOTE 2026-07-31 (required by `docs/scope_and_milestones.md` R3):**
+*   **PLAY NOTE 2026-07-31 (b) — FIRST HUMAN PLAY SESSION. Gate A/B signed with defects.**
+    The owner played the build. It boots, renders, and the movement rules hold up: wall sliding
+    works, the automatic step onto the 0.4 m ledge works, the diagonal pinch does NOT let you
+    through, the pit reads as lower ground, fluid spreads and trails off, and overlay text
+    resizing works. Seven defects were found that 146 green tests did not catch. The shape of
+    every one: the SIMULATION was right and the PLAYER'S ROUTE INTO IT was wrong.
+    1.  **`E` never worked on anything.** Reach was compared against the ray's own travel
+        distance, but the ray starts at the camera ~14 m away, so the 2.5 m check could never
+        pass. Reach is now measured from the actor, and the actor is excluded from its own pick.
+    2.  **`LMB` could not hit a target you were standing next to.** The swing arc came from the
+        movement keys, so a standing player swung along a hard-coded +Z and a rat due east sat
+        90 degrees outside the 120-degree arc. Aim now runs from the player to the cursor tile.
+    3.  **Nothing ever moved vertically.** The collision resolve integrated X and Z only, so a
+        falling body accumulated downward velocity forever while its position stayed put. The
+        pit could not be entered, dropped items hung in the air, and creatures had no gravity
+        at all — `resolve_fall` had zero callers anywhere in the codebase. Fall damage was
+        implemented, tested, and unreachable.
+    4.  **No outcome feed.** Melee, falls, deaths and pickups all resolved correctly and reported
+        nothing, so a hit and a miss looked identical. Added `entity_damaged`, `entity_died`,
+        `item_taken` and `action_rejected` to the bus, plus an 8-entry event feed in the overlay.
+        Refusals are reported too: silence was the single worst thing about the build.
+    5.  **`boot_scenario` never reset the ECS.** A second boot left every entity from the first
+        one alive at its old position. Found via a leaking test, but it is a real duplication bug.
+    6.  **Enums printed as raw integers.** `awareness 0` was read as "asleep"; it is UNAWARE, and
+        Sprint 1 has no sleep state. The inspector now prints names.
+    7.  **No vitals or input state on screen.** Added health/stamina/airborne and LMB/RMB state.
+    Verified after the fixes: the player falls into the pit, lands at frame 32 at 5.4 m/s,
+    and rests exactly on the pit floor. **158 tests green**, 12 of them new regression guards in
+    `tests/test_playtest_regressions.gd`.
+    STILL UNJUDGED: whether melee reach and arc feel fair in play.
+
+*   **PLAY NOTE 2026-07-31 (c) — MOTION FEEL. "Swimmy", with a diagnosable cause.**
+    The owner reported the level sloshing around the player enough to cause mild motion
+    queasiness. The cause was TWO independent exponential lags chasing the same moving target at
+    different rates: `ViewManager` smoothed the avatar toward ECS truth at 15.0, and `CameraRig`
+    smoothed the camera toward the player at 8.0. Exponential smoothing toward a moving target
+    never catches it — at speed v and rate k it settles a constant v/k behind. At the 4 m/s walk
+    speed that is 0.27 m for the avatar and 0.50 m for the camera, and the DIFFERENCE is visible
+    drift of the avatar inside its own frame on every acceleration and stop. A third contributor
+    was a per-frame `camera.look_at`, which rotated the entire world a fraction of a degree every
+    frame — invisible in a screenshot, and the most nauseating part of the rig.
+    Both halves are now exact rather than tuned:
+    *   `ViewManager` uses FIXED-TIMESTEP INTERPOLATION between the previous and current
+        simulation positions. Zero steady-state lag, and no tuning constant to get wrong.
+        `SMOOTHING_RATE` is deleted.
+    *   `CameraRig` has a DEADZONE, as the owner suggested. Inside 5 m horizontally (2 m
+        vertically) it does not move at all; outside, it moves exactly far enough to put the
+        player back on the boundary. No smoothing anywhere. Orientation is set once in `_ready`
+        and frozen. The camera tracks the DRAWN position, not raw ECS truth, or it would sit one
+        interpolation fraction ahead of the avatar it frames.
+    Also added, on request: `viewer/debug_gizmos.gd` (`G`) drawing the facing arrow, melee arc,
+    interact radius and sight radius. Every radius is read from the system that enforces it, so a
+    gizmo cannot disagree with its rule. 7 new tests in `tests/test_camera_and_motion.gd` pin the
+    deadzone arithmetic and assert `_process` contains no `look_at`.
+
+*   **PLAY NOTE 2026-07-31 (a) (required by `docs/scope_and_milestones.md` R3):**
     Verified by looking at rendered frames, not by hand at the keyboard — so Gates A/B are
     provisionally signed for *renders correctly and boots controllable*, and remain UNSIGNED
     for *feel*. What the frames changed:

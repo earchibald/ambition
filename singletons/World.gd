@@ -22,6 +22,7 @@ var booted: bool = false
 func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) -> void:
 	scenario = name
 	RNGService.reseed_all(seed_value)
+	_clear_previous_world()
 	chunks.clear()
 	var chunk: ChunkData = TestArena.build(Vector3i.ZERO)
 	chunks[chunk.chunk_id] = chunk
@@ -30,6 +31,23 @@ func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) 
 	_spawn_player(chunk)
 	booted = true
 	world_ready.emit(chunk.chunk_id)
+
+
+## Destroys everything the previous scenario left behind.
+##
+## Booting a scenario used to rebuild the chunk and re-dress the player while leaving every
+## entity from the previous boot alive at its old position. So a second boot left the corpses,
+## dropped items and creatures of the first one standing invisibly in the new arena — which is
+## exactly how a "reload the level" button turns into a duplication bug.
+##
+## The player at row 0 is deliberately kept: it is the reserved handle (ADR-14) and `_spawn_player`
+## re-dresses it in place.
+func _clear_previous_world() -> void:
+	for row in ECSManager.query(ComponentMask.POSITION):
+		if row == 0:
+			continue
+		ECSManager.destroy_entity(ECSManager.handle_of(row))
+	ECSManager.flush_structural_changes()
 
 
 func chunk_at(chunk_id: Vector3i) -> ChunkData:

@@ -30,6 +30,10 @@ const STEP_UP_MAX_M: float = 0.5
 const AUTO_DROP_MAX_M: float = 1.0
 const GRAVITY_MPS2: float = 9.81
 const SLIDE_EPSILON_M: float = 0.001
+## Landings at or above this speed are announced to the event feed, damaging or not. Below it a
+## landing is an ordinary footstep and reporting it would drown everything else.
+const REPORTABLE_LANDING_MPS: float = 2.0
+
 const SAFE_FALL_MPS: float = 5.0
 const FALL_DAMAGE_M: float = 3.0
 
