@@ -387,3 +387,91 @@ func test_a_full_death_and_rebirth_cycle_completes() -> void:
 func test_the_interregnum_survives_a_world_with_no_history() -> void:
 	deaths.run_interregnum(null, null)
 	assert_eq(deaths.swarms_capped, 0, "no grid means no swarms to cap, and no crash")
+
+
+# --- Remediation pass (2026-08-01): the spawn floor, the swarm tax's missing half, and the
+# --- Residence ----------------------------------------------------------------------------------
+
+## The death-loop doc marks this REQUIRED: the spawn faction is hard-clamped to a floor of
+## NEUTRAL at re-entry. Before the clamp existed the rule held only because -100 x 0.30 lands at
+## -30, one tuning nudge away from an unwinnable spawn.
+func test_the_spawn_faction_cannot_stay_hostile_across_a_death() -> void:
+	var village: FactionCoreComponent = _core_anchored_at_origin()
+	ReputationSystem.adjust(village, WorldConstants.PLAYER_FACTION_ID, -100.0, &"MURDER")
+	assert_eq(
+		int(village.diplomacy[WorldConstants.PLAYER_FACTION_ID]["status"]),
+		int(ECSEnums.RelationshipStatus.WAR),
+		"they hate you when you die"
+	)
+	deaths.run_interregnum(null, null)
+	assert_ne(
+		int(village.diplomacy[WorldConstants.PLAYER_FACTION_ID]["status"]),
+		int(ECSEnums.RelationshipStatus.WAR),
+		"and the new adventurer is not born at war with their own doorstep"
+	)
+
+
+## A faction that is NOT the spawn faction keeps its decayed grudge — the floor is a spawn
+## guarantee, not an amnesty.
+func test_other_factions_keep_their_decayed_grudges() -> void:
+	var rival: FactionCoreComponent = _core_anchored_at(Vector3i(3, 3, -1))
+	ReputationSystem.adjust(rival, WorldConstants.PLAYER_FACTION_ID, -100.0, &"MURDER")
+	deaths.run_interregnum(null, null)
+	var score: float = ReputationSystem.relationship_score(
+		rival, WorldConstants.PLAYER_FACTION_ID
+	)
+	assert_almost_eq(score, -100.0 * DeathLoopSystem.GRUDGE_RETAINED, 0.01)
+
+
+## The swarm tax clamped a counter no production code ever raised, so `swarms_capped` was
+## structurally zero in every session ever played. Breeding is the missing half.
+func test_swarms_breed_geometrically_and_filth_feeds_them() -> void:
+	var grid := WorldGrid.new(SEED)
+	var dungeon: ChunkData = grid.chunk_at(Vector3i(0, 0, -1))
+	dungeon.swarm_population = 3
+	deaths._breed_swarms(grid)
+	assert_eq(dungeon.swarm_population, 6, "a year of breeding doubles the swarm")
+
+
+func test_the_swarm_cap_is_now_reachable_from_production_state() -> void:
+	var grid := WorldGrid.new(SEED)
+	var dungeon: ChunkData = grid.chunk_at(Vector3i(0, 0, -1))
+	dungeon.swarm_population = 8
+	deaths._breed_swarms(grid)
+	deaths._cap_swarms(grid)
+	assert_eq(
+		dungeon.swarm_population, DeathLoopSystem.SWARM_CAP_PER_CHUNK,
+		"breeding overflows the cap and the tax bites — with no test writing the counter"
+	)
+	assert_gt(deaths.swarms_capped, 0)
+
+
+## Sprint 3 roadmap Step 6: the successor spawns at an Adventurer's Residence. It spawned at
+## the previous body's start point, which reads as a reset rather than an arrival.
+func test_worldgen_carves_the_residence_and_the_world_spawn_uses_it() -> void:
+	var grid := WorldGrid.new(SEED)
+	var home: ChunkData = grid.chunk_at(Vector3i.ZERO)
+	var tile: Vector2i = FloorGenerator.RESIDENCE_TILE
+	assert_false(home.is_solid(tile.x, tile.y), "the Residence interior is open ground")
+	assert_true(
+		home.is_solid(tile.x - FloorGenerator.RESIDENCE_HALF, tile.y),
+		"inside a real building"
+	)
+	var spawn: Vector3 = World.residence_position(home)
+	var expected: Vector3 = home.tile_to_world(tile.x, tile.y)
+	assert_almost_eq(spawn.x, expected.x, 0.01, "and the world spawn is the Residence")
+	assert_almost_eq(spawn.z, expected.z, 0.01)
+
+
+func _core_anchored_at_origin() -> FactionCoreComponent:
+	return _core_anchored_at(Vector3i.ZERO)
+
+
+func _core_anchored_at(anchor: Vector3i) -> FactionCoreComponent:
+	var row: int = EH.index_of(ECSManager.allocate_entity())
+	var core := FactionCoreComponent.new()
+	core.faction_id = 500 + row
+	core.anchor_chunk_id = anchor
+	ECSManager.faction_cores[row] = core
+	ECSManager.add_component_bit(row, ComponentMask.FACTION_CORE)
+	return core

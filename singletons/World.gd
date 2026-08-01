@@ -165,6 +165,21 @@ static func spawn_position_in(chunk: ChunkData) -> Vector3:
 	return chunk.tile_to_world(centre, centre) + Vector3(0.0, 0.9, 0.0)
 
 
+## The Residence interior when this is the generated origin village chunk; the centre-search
+## fallback otherwise (a chunk handed in by a test, or a future scenario with no residence).
+## The fallback matters: a residence tile that happened to be solid in some other chunk would
+## spawn the player inside a wall, which reads as broken controls rather than a spawn bug.
+static func residence_position(chunk: ChunkData) -> Vector3:
+	var tile: Vector2i = FloorGenerator.RESIDENCE_TILE
+	if (
+		chunk.chunk_id == Vector3i.ZERO
+		and not chunk.is_solid(tile.x, tile.y)
+	):
+		var ground: Vector3 = chunk.tile_to_world(tile.x, tile.y)
+		return Vector3(ground.x, ground.y + 0.9, ground.z)
+	return spawn_position_in(chunk)
+
+
 ## What collision and picking resolve terrain against. The grid when the world is streamed, the
 ## single chunk when it is the debug arena — both satisfy the same TileSampler contract, so the
 ## systems never branch on which one they have.
@@ -204,12 +219,13 @@ func _spawn_player(chunk: ChunkData) -> void:
 	var row: int = EH.index_of(handle)
 
 	# The arena AUTHORS its spawn — west of the interior wall, so walking east exercises the
-	# doorway, the ledge and the pit in order. A generated chunk has no such intent, so one is
-	# searched for instead.
+	# doorway, the ledge and the pit in order. The generated world spawns at the Adventurer's
+	# Residence (Sprint 3 roadmap Step 6): every generation of adventurer wakes in the same house,
+	# which is what makes a respawn read as an arrival rather than a reset.
 	var spawn: Vector3 = (
 		TestArena.spawn_position(chunk)
 		if scenario == SCENARIO_TEST_ARENA
-		else spawn_position_in(chunk)
+		else residence_position(chunk)
 	)
 	ECSManager.set_position(row, spawn)
 	ECSManager.set_velocity(row, Vector3.ZERO)
@@ -254,7 +270,13 @@ func _spawn_player(chunk: ChunkData) -> void:
 	ECSManager.containers[row] = container
 	ECSManager.add_component_bit(row, ComponentMask.CONTAINER)
 
-	ECSManager.chemistries[row] = ChemistryComponent.new()
+	# Guest_Status is the Sprint 2 roadmap's explicit spawn requirement, and it was never granted:
+	# the perception invariant "an unseen crime does not revoke Guest_Status" was tested against a
+	# fixture tag no real player ever carried. The tag means the village treats the newcomer as a
+	# guest until they are seen doing something that forfeits it.
+	var player_chemistry := ChemistryComponent.new()
+	player_chemistry.add_tag(&"Guest_Status")
+	ECSManager.chemistries[row] = player_chemistry
 	ECSManager.add_component_bit(row, ComponentMask.CHEMISTRY)
 
 	var mind := MindComponent.new()
@@ -273,12 +295,41 @@ func _spawn_player(chunk: ChunkData) -> void:
 	ECSManager.social_identities[row] = identity
 	ECSManager.add_component_bit(row, ComponentMask.SOCIAL_IDENTITY)
 
+	_grant_starting_kit(row)
+
 	# ViewManager spawns visuals ONLY in response to this signal. Without it the player had no
 	# body at all: the camera tracked an invisible point, and every movement bug looked instead
 	# like a camera bug. Emitted last, so the entity is fully assembled before anyone sees it.
 	ECSEvents.emit_entity_created(
 		handle, [&"Player"] as Array[StringName], ECSManager.position_of(row)
 	)
+
+
+## "A starting inventory based on Village Wealth" (Sprint 2 roadmap spawn step). WITHDRAWN from
+## the richest faction's ledger, never minted: the village equips its guest, so a starting kit
+## that appeared from nowhere would break the economy conservation invariant on the first frame.
+## A poor village hands over less; a village with no copper at all hands over nothing, and both
+## are the correct reading of "based on wealth".
+func _grant_starting_kit(row: int) -> void:
+	var richest: FactionCoreComponent = null
+	for core_row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[core_row]
+		if richest == null or core.ledger_total() > richest.ledger_total():
+			richest = core
+	if richest == null:
+		return
+	var granted: int = richest.withdraw(
+		MaterialLibrary.MAT_COPPER, clampi(richest.ledger_total() / 200, 1, 8)
+	)
+	if granted <= 0:
+		return
+	var kit: int = spawn_item(
+		ECSManager.position_of(row), MaterialLibrary.MAT_COPPER, 112.0, granted
+	)
+	if not GameLoopManager.inventory.try_insert(row, kit):
+		# A full pack cannot happen at spawn; if it ever does, the coins stay on the floor of the
+		# Residence rather than vanishing — conservation again.
+		push_warning("starting kit did not fit the player's pack; left at the Residence")
 
 
 ## Spawns a simple creature for testing and for the perception/combat gates.

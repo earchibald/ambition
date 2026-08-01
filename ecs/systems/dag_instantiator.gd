@@ -75,11 +75,27 @@ func _materialize_citizens(node: DAGNode, chunk: ChunkData) -> void:
 	var rng: RandomNumberGenerator = FloorGenerator.chunk_rng(
 		node.anchor_chunk_id, node.node_id
 	)
+	var best_row: int = -1
+	var best_prestige: float = -1.0
 	for i in wanted:
 		var tile: Vector2i = _open_tile_near(chunk, rng)
 		if tile.x < 0:
 			break
-		_spawn_citizen(node, chunk, tile)
+		var handle: int = _spawn_citizen(node, chunk, tile, rng)
+		# Track the founding leader: highest prestige, first-spawned on a tie, so the same seed
+		# always crowns the same citizen (ADR-20).
+		var row: int = EH.index_of(handle)
+		var identity: SocialIdentityComponent = ECSManager.social_identities[row]
+		if identity.prestige > best_prestige:
+			best_prestige = identity.prestige
+			best_row = row
+
+	# The faction gets a LEADER, not just a ledger (factions doc §3). This is the body succession
+	# replaces when it dies, the memory the prompt reads, and the mouth a declaration comes from.
+	if best_row >= 0:
+		var core: FactionCoreComponent = faction_core(node.node_id)
+		if core != null and not ECSManager.is_alive(core.leader_handle):
+			core.leader_handle = ECSManager.handle_of(best_row)
 
 
 ## Citizens must stand on open ground. Bounded search with a give-up, because a chunk can be
@@ -92,7 +108,9 @@ func _open_tile_near(chunk: ChunkData, rng: RandomNumberGenerator) -> Vector2i:
 	return Vector2i(-1, -1)
 
 
-func _spawn_citizen(node: DAGNode, chunk: ChunkData, tile: Vector2i) -> int:
+func _spawn_citizen(
+	node: DAGNode, chunk: ChunkData, tile: Vector2i, rng: RandomNumberGenerator
+) -> int:
 	var handle: int = ECSManager.allocate_entity()
 	var row: int = EH.index_of(handle)
 	var ground: Vector3 = chunk.tile_to_world(tile.x, tile.y)
@@ -135,8 +153,21 @@ func _spawn_citizen(node: DAGNode, chunk: ChunkData, tile: Vector2i) -> int:
 	ECSManager.chemistries[row] = ChemistryComponent.new()
 	ECSManager.add_component_bit(row, ComponentMask.CHEMISTRY)
 
-	ECSManager.social_identities[row] = SocialIdentityComponent.new(node.node_id)
+	# Standing and trade, from the deterministic per-faction stream. Prestige was 0.0 for every
+	# citizen ever spawned, which made "succession by highest prestige" a selection over a
+	# constant; loyalty starts mid-band and is RECALCULATED each Simulation tick by SocialSystem,
+	# so the spawn value only matters for the first half-second.
+	var identity := SocialIdentityComponent.new(node.node_id)
+	identity.prestige = rng.randf_range(5.0, 80.0)
+	identity.loyalty = rng.randf_range(40.0, 70.0)
+	ECSManager.social_identities[row] = identity
 	ECSManager.add_component_bit(row, ComponentMask.SOCIAL_IDENTITY)
+	ECSManager.professions[row] = ProfessionComponent.new(
+		FactionPlanner.SPAWN_PROFESSIONS[
+			rng.randi_range(0, FactionPlanner.SPAWN_PROFESSIONS.size() - 1)
+		]
+	)
+	ECSManager.add_component_bit(row, ComponentMask.PROFESSION)
 	ECSManager.ownerships[row] = OwnershipComponent.new(node.node_id)
 	ECSManager.add_component_bit(row, ComponentMask.OWNERSHIP)
 

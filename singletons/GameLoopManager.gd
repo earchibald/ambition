@@ -63,6 +63,7 @@ var reasoning: ReasoningQueue = ReasoningQueue.new()
 var llm: LLMResolutionSystem = LLMResolutionSystem.new()
 var death_loop: DeathLoopSystem = DeathLoopSystem.new()
 var reputation: ReputationSystem = ReputationSystem.new()
+var social: SocialSystem = SocialSystem.new()
 var mutation: MutationSystem = MutationSystem.new()
 var spells: SpellCompilerSystem = SpellCompilerSystem.new()
 
@@ -178,6 +179,16 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	combat.witnessed_actions.clear()
 	reputation.run(perception)
 	reputation.spread_gossip(spatial_hash)
+	# The consequence chain's LAST link: loyalty, succession, schism, and hostile engagement act
+	# on the relationship states the links above just moved. After reputation, so a grievance
+	# filed this tick can tip a faction to WAR and be answered this tick; before LoD, so a
+	# schism's new macro-entity is seen by the same tick's streaming pass.
+	social.run(
+		spatial_hash,
+		null if World.boot_report == null else World.boot_report.generator,
+		reasoning,
+		combat
+	)
 	lod.run(World.player_chunk_id)
 	# Chunk streaming rides the Simulation tick, not the Micro tick: promoting a chunk spawns
 	# stockpiles and pumps fluid, and doing that 60 times a second would be both wasteful and
@@ -224,6 +235,9 @@ func _run_macro_tick(chunk: ChunkData) -> void:
 	spoilage.run(chunk)
 	# The off-screen economy. Ledger integers only — it may not create a single entity.
 	economy.run()
+	# Trade caravans ride the Macro tick: dispatch is an hour-scale decision, and the walk
+	# between dispatch and arrival is where interception lives.
+	social.run_trade(World.grid, inventory)
 	_think()
 	_replan_factions()
 
@@ -254,13 +268,28 @@ func _think() -> void:
 		)
 		if not scheduled and not crisis:
 			continue
-		if reasoning.submit(handle):
+		# A crisis jumps the line (queue priority, declared gap G-5): a faction under attack must
+		# not think after twenty routine weekly reviews. The bark (review F1) is emitted the
+		# moment the request is accepted, so deliberation is visible before the answer exists.
+		var priority: int = (
+			ReasoningQueue.PRIORITY_CRISIS if crisis else ReasoningQueue.PRIORITY_ROUTINE
+		)
+		if reasoning.submit(handle, priority):
 			_last_thought[core.faction_id] = hour
+			ECSEvents.faction_thinking.emit(core.faction_id, crisis)
 
 	# Pumped EVERY macro tick regardless. The cadence governs who joins the queue, not how fast
 	# the queue drains — a request that waited a week to be made should not wait another to fire.
+	#
+	# AN EMPTY RESPONSE REQUEUES (fallback matrix: "timeout -> maintain current objective AND
+	# requeue next Macro tick"). The resolver's half — keep the plan — shipped in Sprint 3; this
+	# half was asserted in a comment and implemented nowhere, so one failed call cost a faction a
+	# week of thinking. Routine priority: a timeout is not a crisis, and with a remote provider
+	# the retry is bounded by the session budget rather than by hope.
 	reasoning.pump(generator, func(handle: int, response: Dictionary) -> void:
 		llm.resolve(handle, response, generator)
+		if response.is_empty() and ECSManager.is_alive(handle):
+			reasoning.submit(handle, ReasoningQueue.PRIORITY_ROUTINE)
 	)
 
 
@@ -348,10 +377,16 @@ func counters() -> Dictionary:
 		"time_scale": time_scale,
 		"clock": GameClock.to_display_string(),
 	}
+	# EVERY registered system, not a hand-picked subset. Seven Sprint 3 systems — planner,
+	# reasoning, llm, locomotion, death_loop, streaming, economy — were missing from this list,
+	# so the F1 page rendered `0 plans, 0 thoughts, 0 rejected` forever and the entire reasoning
+	# layer looked idle from the only surface built to watch it. The overlay reads keys with
+	# `.get(key, 0)`, which is exactly the API shape that turns an omission here into a plausible
+	# zero instead of an error.
 	for system in [
 		spatial_hash, collision, picking, fluids, thermodynamics, reactions, ephemerals,
 		perception, metabolism, jobs, combat, spoilage, lod, inventory, mutation, reputation,
-		spells
+		spells, planner, reasoning, llm, locomotion, death_loop, streaming, economy, social
 	]:
 		out.merge(system.counters())
 	out.merge(ECSManager.counters())

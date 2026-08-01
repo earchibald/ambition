@@ -32,9 +32,16 @@ const PREEMPT_MARGIN: float = 1.35
 ## cannot livelock on something it can never satisfy.
 const FAIL_COOLDOWN_TICKS: int = 20
 
+## IN_PROGRESS ticks before a planner job counts as finished. 40 Simulation ticks is 20 s of
+## standing at the work site — long enough to read as working, short enough that a village
+## visibly cycles through tasks within a play session.
+const WORK_DURATION_TICKS: int = 40
+
 var evaluations: int = 0
 var preemptions: int = 0
 var latched_retained: int = 0
+var jobs_completed: int = 0
+var jobs_aborted: int = 0
 
 ## row -> { action: StringName -> tick_when_available }
 var _cooldowns: Dictionary = {}
@@ -58,6 +65,21 @@ func _evaluate(row: int, sim_tick: int) -> void:
 		job = JobComponent.new()
 		ECSManager.jobs[row] = job
 		ECSManager.add_component_bit(row, ComponentMask.JOB)
+
+	# THE LIFECYCLE, before the argmax. Until 2026-08-01 DONE and ABORTED were enum values with
+	# no producer: a job could start and could be evicted, and could never finish or fail.
+	if job.status == ECSEnums.JobStatus.IN_PROGRESS:
+		job.progress_ticks += 1
+		if job.progress_ticks >= WORK_DURATION_TICKS:
+			jobs_completed += 1
+			job.complete()
+	elif job.status == ECSEnums.JobStatus.CLAIMED and _walk_failed(row):
+		# The path search gave up (bounded A*, unreachable target). Without this the job sat
+		# CLAIMED forever on a worker who was never going to arrive — the stranded-job state the
+		# claim lifecycle exists to prevent, reached through the front door.
+		jobs_aborted += 1
+		mark_precondition_failed(row, job.current_action, sim_tick)
+		job.abort()
 
 	var scores: Dictionary = score_actions(row, need)
 	var best_action: StringName = &""
@@ -129,6 +151,28 @@ func score_actions(row: int, need: NeedsComponent) -> Dictionary:
 	}
 
 
+## True when a walking job's route was refused. Only planner jobs walk — the three personal
+## actions (CONSUME/SLEEP/WORK) never set a locomotion destination, so testing them here would
+## abort every meal. The signature of failure is `_plan` clearing `has_destination` after a
+## refused search, with no waypoints left to follow.
+func _walk_failed(row: int) -> bool:
+	var job: JobComponent = ECSManager.jobs.get(row)
+	if job == null or _is_personal(job.current_action):
+		return false
+	var locomotion: LocomotionComponent = ECSManager.locomotions.get(row)
+	if locomotion == null:
+		return false
+	return not locomotion.has_destination and locomotion.waypoints.is_empty()
+
+
+static func _is_personal(action: StringName) -> bool:
+	return (
+		action == ActionIntent.CONSUME
+		or action == ActionIntent.SLEEP
+		or action == ActionIntent.WORK
+	)
+
+
 ## Called when an action cannot be satisfied (e.g. no food in the stockpile).
 func mark_precondition_failed(row: int, action: StringName, sim_tick: int) -> void:
 	if not _cooldowns.has(row):
@@ -145,8 +189,11 @@ func _on_cooldown(row: int, action: StringName, sim_tick: int) -> bool:
 	return sim_tick < int(_cooldowns[row].get(action, 0))
 
 
-## A dead or destroyed claimant must not strand its job.
-func release_jobs_of(row: int) -> void:
+## A dead or destroyed claimant must not strand its job. Static, because the caller that
+## matters is the corpse-conversion path in `ActionResolutionSystem`, which holds no reference
+## to this system — and this function had NO production caller at all until 2026-08-01, so a
+## dead hauler's job stayed CLAIMED by a corpse forever.
+static func release_jobs_of(row: int) -> void:
 	var job: JobComponent = ECSManager.jobs.get(row)
 	if job != null:
 		job.release()
@@ -157,4 +204,6 @@ func counters() -> Dictionary:
 		"utility_evaluations": evaluations,
 		"job_preemptions": preemptions,
 		"jobs_latched": latched_retained,
+		"jobs_completed": jobs_completed,
+		"jobs_aborted": jobs_aborted,
 	}

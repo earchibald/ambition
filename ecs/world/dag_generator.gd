@@ -183,6 +183,36 @@ func _found_faction(population: int, floor_index: int, is_village: bool) -> DAGN
 	return node
 
 
+## A runtime schism: disloyal citizens of `parent` found a splinter faction (factions doc §3).
+##
+## Goes through the DAG, not around it, so "why does this faction exist" stays answerable: the
+## splinter is a real node with a FOUNDED edge and a chronicle line, exactly like a faction
+## born in history generation. Returns null at the ADR-12 cap — the same skip-don't-merge rule
+## `_found_faction` applies, because a mutiny that cannot form a faction disperses instead.
+func found_splinter(parent: DAGNode, population: int) -> DAGNode:
+	if active_factions().size() >= FACTION_CAP:
+		return null
+	var node := DAGNode.new()
+	node.node_id = _next_node_id
+	_next_node_id += 1
+	node.type = ECSEnums.NodeType.FACTION
+	node.birth_epoch = current_epoch
+	node.population = population
+	node.home_floor = parent.home_floor
+	node.anchor_chunk_id = parent.anchor_chunk_id
+	node.name = StringName("Splinter of %s" % parent.name)
+	node.culture_tags = parent.culture_tags.duplicate()
+	nodes[node.node_id] = node
+	edges.append(
+		DAGEdge.create(node.node_id, parent.node_id, ECSEnums.EdgeType.FOUNDED, current_epoch)
+	)
+	_record(
+		"Year %d: %s broke away from %s in mutiny."
+		% [year_of(current_epoch), node.name, parent.name]
+	)
+	return node
+
+
 ## An aggressive faction conquers a weaker neighbour on the same floor.
 ##
 ## The loser is marked DESTROYED but KEPT. Deleting it would erase the only explanation for why

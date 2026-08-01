@@ -56,6 +56,10 @@ static func build(faction_id: int, generator: DAGGenerator) -> String:
 		lines.append("Recent events you remember:")
 		for memory in context["memories"]:
 			lines.append("  - %s" % memory)
+	if not context["leader_memories"].is_empty():
+		lines.append("What you personally lived through:")
+		for memory in context["leader_memories"]:
+			lines.append("  - %s" % memory)
 	lines.append("Valid Targets: %s" % _describe_targets(context["valid_targets"]))
 	lines.append(SCHEMA_INSTRUCTION)
 
@@ -83,6 +87,10 @@ static func build_context(core: FactionCoreComponent, generator: DAGGenerator) -
 		"strength": strength_of(core),
 		"recently_attacked": was_recently_attacked(core),
 		"memories": salient_memories(core),
+		# What the LEADER personally lived through (roadmap Step 2, declared gap G-8). Faction
+		# memory is the institutional record; a leader who watched their predecessor die knows
+		# things the institution never wrote down, and gossip only ever lands on individuals.
+		"leader_memories": leader_memories(core),
 		"valid_targets": valid_targets(core, generator),
 	}
 
@@ -114,10 +122,18 @@ static func salient_memories(core: FactionCoreComponent) -> Array[String]:
 	return chosen
 
 
-## Weight, then recency, then the unique id. Every comparison ends in a strict decision.
+## DECAYED weight, then recency, then the unique id. Every comparison ends in a strict decision.
+##
+## Decay is applied HERE, at read time. The stored "weight" is the base weight — it was
+## snapshotted at insertion, when age is zero and falloff is exactly 1.0 — so sorting on it
+## directly meant faction memory NEVER decayed: a murder from year 1 outranked everything in the
+## leader's prompt forever, while the identical event in an individual's `MemoryComponent`
+## faded on its 72-hour half-life. One decay model, applied to both stores, evaluated at the
+## moment of the question, which is the only moment age is knowable.
 static func _more_salient(a: Dictionary, b: Dictionary) -> bool:
-	var weight_a: float = float(a.get("weight", 0.0))
-	var weight_b: float = float(b.get("weight", 0.0))
+	var now: int = GameClock.total_hours()
+	var weight_a: float = decayed_weight(a, now)
+	var weight_b: float = decayed_weight(b, now)
 	if not is_equal_approx(weight_a, weight_b):
 		return weight_a > weight_b
 	var tick_a: int = int(a.get("tick", 0))
@@ -125,6 +141,17 @@ static func _more_salient(a: Dictionary, b: Dictionary) -> bool:
 	if tick_a != tick_b:
 		return tick_a > tick_b
 	return int(a.get("event_id", 0)) < int(b.get("event_id", 0))
+
+
+## The same falloff and core floor as `MemoryEvent.weight_at`, for the dictionary-shaped
+## records `faction_memory` holds. Public because eviction in `ReputationSystem` must rank by
+## the same number the prompt ranks by, or the two disagree about which memory matters least.
+static func decayed_weight(memory: Dictionary, now_hours: int) -> float:
+	var age: float = maxf(0.0, float(now_hours - int(memory.get("tick", 0))))
+	var falloff: float = pow(0.5, age / MemoryEvent.HALF_LIFE_H)
+	if bool(memory.get("core", false)):
+		falloff = maxf(MemoryEvent.CORE_FLOOR, falloff)
+	return float(memory.get("weight", 0.0)) * falloff
 
 
 ## Recency, then weight, then the unique id.
@@ -138,6 +165,20 @@ static func _more_recent(a: Dictionary, b: Dictionary) -> bool:
 	if not is_equal_approx(weight_a, weight_b):
 		return weight_a > weight_b
 	return int(a.get("event_id", 0)) < int(b.get("event_id", 0))
+
+
+## The current leader's own most salient memories, as text. Empty when the faction is abstract
+## or leaderless — which is a real state, not an error, so no warning is pushed.
+static func leader_memories(core: FactionCoreComponent) -> Array[String]:
+	var out: Array[String] = []
+	if not ECSManager.is_alive(core.leader_handle):
+		return out
+	var memory: MemoryComponent = ECSManager.memories.get(ECSManager.resolve(core.leader_handle))
+	if memory == null:
+		return out
+	for event in memory.most_salient(TOP_MEMORIES):
+		out.append(String(event.text))
+	return out
 
 
 ## Neighbours this faction could plausibly act on, with their INTEGER ids. The player is always

@@ -67,9 +67,19 @@ const GOSSIP_WORTHY: float = 10.0
 const SCORE_MIN: float = -100.0
 const SCORE_MAX: float = 100.0
 
+## Canonical faction memory cap (factions doc: `FACTION_MEMORY_CAP: int = 64`). Was 24, which
+## matched nothing in any document.
+const FACTION_MEMORY_CAP: int = 64
+
 ## Below this a faction treats you as an enemy; above it, a friend.
 const HOSTILE_BELOW: float = -40.0
 const FRIENDLY_ABOVE: float = 40.0
+## Above this, friendship hardens into alliance. The band between FRIENDLY_ABOVE and here is
+## TRADE — which existed in the enum since Sprint 2 and was UNREACHABLE by construction, so the
+## factions doc's "at high reputation the player is granted Trade status" and the entire
+## caravan mechanism were dead on arrival. Trade is deliberately easier to earn than alliance:
+## commerce precedes trust.
+const ALLIED_ABOVE: float = 75.0
 
 ## A witness only tells people they are actually near. Gossip is a conversation, not a broadcast.
 const GOSSIP_RANGE_M: float = 8.0
@@ -179,8 +189,10 @@ static func relationship_score(core: FactionCoreComponent, other_faction: int) -
 static func status_for(score: float) -> ECSEnums.RelationshipStatus:
 	if score <= HOSTILE_BELOW:
 		return ECSEnums.RelationshipStatus.WAR
-	if score >= FRIENDLY_ABOVE:
+	if score >= ALLIED_ABOVE:
 		return ECSEnums.RelationshipStatus.ALLIED
+	if score >= FRIENDLY_ABOVE:
+		return ECSEnums.RelationshipStatus.TRADE
 	return ECSEnums.RelationshipStatus.NEUTRAL
 
 
@@ -252,13 +264,32 @@ static func _remember_for_faction(core: FactionCoreComponent, record: MemoryEven
 		"event_id": record.event_id,
 		"text": String(record.text),
 		"tick": record.tick_hours,
-		"weight": record.weight_at(GameClock.total_hours()),
+		# The BASE weight. At insertion age is zero, so `weight_at(now)` returns exactly this —
+		# the old call was not wrong, it was misleading: it looked like decay was involved and
+		# it never was. Decay happens at read (`PromptBuilder.decayed_weight`), where age exists.
+		"weight": MemoryEvent.base_weight(record.kind),
 		"core": record.core,
 	})
-	# The faction's memory is a summary, not an archive. The prompt builder only ever reads the
-	# top few anyway, and an unbounded list is what makes a save file grow forever.
-	while core.faction_memory.size() > 24:
-		core.faction_memory.pop_front()
+	# The faction's memory is a summary, not an archive — but eviction follows the CANONICAL
+	# policy (factions doc: cap 64, evict the lowest-weight NON-CORE entry). This was cap 24
+	# with FIFO, which silently pushed a core witnessed murder out after 24 ordinary events —
+	# the exact guarantee (`core memories survive overflow`) the entity-side store enforces.
+	if core.faction_memory.size() <= FACTION_MEMORY_CAP:
+		return
+	var now: int = GameClock.total_hours()
+	var worst_index: int = -1
+	var worst_weight: float = INF
+	for i in core.faction_memory.size():
+		var memory: Dictionary = core.faction_memory[i]
+		if bool(memory.get("core", false)):
+			continue
+		var weight: float = PromptBuilder.decayed_weight(memory, now)
+		if weight < worst_weight:
+			worst_weight = weight
+			worst_index = i
+	# All-core overflow evicts the oldest core memory: a hard cap that can be exceeded is not
+	# a cap, and the oldest is the least likely to still be shaping decisions.
+	core.faction_memory.remove_at(worst_index if worst_index >= 0 else 0)
 
 
 static func _faction_of(row: int) -> int:

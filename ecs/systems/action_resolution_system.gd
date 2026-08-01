@@ -268,6 +268,11 @@ func _convert_to_corpse(row: int) -> void:
 	chemistry.add_tag(&"Corpse")
 	chemistry.add_tag(&"Filth")
 
+	# The claim lifecycle's "no orphaned jobs" rule, honoured at the only moment it can be
+	# broken: death. `release_jobs_of` existed, was documented, and had no production caller, so
+	# a dead hauler's job stayed CLAIMED by a corpse forever.
+	JobResolutionSystem.release_jobs_of(row)
+
 	# A corpse is no longer an agent: strip the behaviour bits so no system keeps ticking it.
 	ECSManager.remove_component_bit(row, ComponentMask.NEEDS)
 	ECSManager.remove_component_bit(row, ComponentMask.SCHEDULE)

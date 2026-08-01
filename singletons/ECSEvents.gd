@@ -37,6 +37,12 @@ signal entity_landed(entity: int, speed_mps: float, damage: float)
 ## than only what it decided — the difference between a log line and a world that talks.
 signal faction_decided(faction_id: int, objective: String, declaration: String)
 
+## A leader just joined the reasoning queue (roadmap review F1: the "thinking" bark). Emitted at
+## SUBMIT, not at dispatch, because the requirement is that deliberation is visible the moment it
+## starts — the async answer replaces it via `faction_decided` whenever it lands. `is_crisis`
+## lets the feed distinguish an emergency from the weekly review.
+signal faction_thinking(faction_id: int, is_crisis: bool)
+
 ## The run ended. Carries the CORPSE handle, not the old player handle: row 0's generation has
 ## been bumped, so the old handle is deliberately dead by the time anyone reads this.
 signal player_died(corpse: int, killer: int, lineage_generation: int)
@@ -65,6 +71,21 @@ signal entity_mutated(entity: int, mutation: StringName)
 signal faction_relationship_changed(
 	faction_id: int, about_faction: int, score: float, now_hostile: bool
 )
+
+## Succession (factions doc §3): the leader died and the highest-prestige member took over.
+## A story beat the feed must carry — a decapitated faction recovering is the entire point of
+## the mechanic, and invisibly recovering is indistinguishable from never having been hurt.
+signal faction_leader_succeeded(faction_id: int, new_leader: int, prestige: float)
+
+## The Schism Mechanic: disloyal citizens broke away as a new faction, at war with the old one.
+signal faction_schism(parent_faction: int, splinter_faction: int, defectors: int)
+
+## Trade caravans (factions doc §4). Departure and arrival are separate signals because the gap
+## between them is where interception lives — a caravan that leaves and never arrives is the
+## player-facing event, and one signal could not express it.
+signal caravan_departed(from_faction: int, to_faction: int, carrier: int)
+signal caravan_arrived(from_faction: int, to_faction: int, material: StringName, quantity: int)
+signal caravan_lost(from_faction: int, to_faction: int)
 
 
 ## Tag arrays are `Array[StringName]`. Emitting an untyped array literal into a typed

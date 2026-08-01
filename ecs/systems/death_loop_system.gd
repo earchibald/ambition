@@ -152,6 +152,10 @@ func run_interregnum(bootstrapper: Bootstrapper, grid: WorldGrid) -> void:
 	if bootstrapper != null:
 		bootstrapper._run_interregnum()
 	_levy_entropy_tax()
+	# Breed BEFORE the junk sweep: the filth that feeds the rats is the same filth the sweep is
+	# about to collect, and a year's vermin bloom is caused by the mess as it stood at death,
+	# not by whatever survives the cleanup.
+	_breed_swarms(grid)
 	_cap_swarms(grid)
 	_collect_junk()
 	_decay_grudges()
@@ -167,6 +171,30 @@ func _levy_entropy_tax() -> void:
 			var after: int = int(float(before) * WEALTH_RETAINED)
 			core.abstract_wealth_ledger[material] = after
 			wealth_taxed += before - after
+
+
+## A year of breeding, on the COUNTER (ecology: "Filth left by the player spawns massive rat
+## populations"). Geometric doubling, plus two heads per piece of filth rotting in the chunk.
+## This is the growth the swarm tax below exists to cap, and until 2026-08-01 it did not exist:
+## the tax clamped a counter nothing ever raised, so `swarms_capped` was structurally zero in
+## every session that was ever played.
+func _breed_swarms(grid: WorldGrid) -> void:
+	if grid == null:
+		return
+	var filth_by_chunk: Dictionary = {}
+	for row in ECSManager.query(ComponentMask.LOOSE_ITEM):
+		var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
+		if chemistry == null or not chemistry.active_tags.has(&"Filth"):
+			continue
+		var chunk_id := Vector3i(
+			ECSManager.col_chunk_x[row], ECSManager.col_chunk_y[row], ECSManager.col_floor[row]
+		)
+		filth_by_chunk[chunk_id] = int(filth_by_chunk.get(chunk_id, 0)) + 1
+	for chunk_id in grid.chunks:
+		var chunk: ChunkData = grid.chunks[chunk_id]
+		var boost: int = 2 * int(filth_by_chunk.get(chunk_id, 0))
+		if chunk.swarm_population > 0 or boost > 0:
+			chunk.swarm_population = chunk.swarm_population * 2 + boost
 
 
 ## Carrying capacity, on the COUNTER. Rats breed geometrically; an unchecked exponential over
@@ -201,6 +229,16 @@ func _decay_grudges() -> void:
 		if is_zero_approx(before):
 			continue
 		state["score"] = before * GRUDGE_RETAINED
+		# THE SPAWN-FACTION FLOOR (death-loop doc, REQUIRED): the faction whose chunk the new
+		# adventurer wakes in is hard-clamped to NEUTRAL at re-entry. Before this clamp the rule
+		# held only by arithmetic accident — score floor -100 x 0.30 = -30, just above the -40
+		# hostility line — so anyone tuning GRUDGE_RETAINED past 0.4 would have silently restored
+		# the unwinnable spawn the requirement exists to prevent. An invariant enforced by
+		# coincidence is not enforced.
+		if core.anchor_chunk_id == Vector3i.ZERO:
+			state["score"] = maxf(
+				float(state["score"]), ReputationSystem.HOSTILE_BELOW + 1.0
+			)
 		state["status"] = ReputationSystem.status_for(float(state["score"]))
 		grudges_decayed += 1
 

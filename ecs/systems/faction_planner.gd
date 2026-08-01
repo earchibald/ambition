@@ -22,21 +22,43 @@ const JOB_TEMPLATES: Dictionary = {
 
 ## Which profession prefers which job. A miner sent to guard duty is a planner bug that reads as
 ## a content bug, so the filter is explicit rather than implied by ordering.
+##
+## KEYED ON THE REGISTRY'S `Prof_*` VOCABULARY, and it was not: the first version used bare
+## `&"Guard"`-style names that matched neither the society doc nor `ProfessionComponent`'s own
+## `&"Prof_Idler"` default, so even with professions assigned every lookup would have missed and
+## the table would have stayed a constant round-robin wearing a filter. The same defect as the
+## invented `CULTURE_FUNGAL` tags, and the invariant test now guards this table the same way.
 const PREFERRED_PROFESSION: Dictionary = {
-	&"ReassignToGuard": &"Guard",
-	&"PatrolBorders": &"Guard",
-	&"Equip": &"Guard",
-	&"FormSquad": &"Guard",
-	&"Siege": &"Guard",
-	&"Haul": &"Hauler",
-	&"Restock": &"Hauler",
-	&"ClaimResourceZone": &"Miner",
-	&"Barricade": &"Mason",
+	&"ReassignToGuard": &"Prof_Guard",
+	&"PatrolBorders": &"Prof_Guard",
+	&"Equip": &"Prof_Guard",
+	&"FormSquad": &"Prof_Guard",
+	&"Siege": &"Prof_Guard",
+	&"Haul": &"Prof_Hauler",
+	&"Restock": &"Prof_Hauler",
+	&"ClaimResourceZone": &"Prof_Miner",
+	&"Barricade": &"Prof_Mason",
 }
+
+## What a materialized citizen can be. Weighted toward labour: a village that is mostly guards
+## defends granaries nobody filled.
+const SPAWN_PROFESSIONS: Array[StringName] = [
+	&"Prof_Hauler", &"Prof_Hauler", &"Prof_Miner", &"Prof_Miner",
+	&"Prof_Mason", &"Prof_Guard", &"Prof_Guard", &"Prof_Idler",
+]
 
 ## Never hand a faction more concurrent jobs than it has plausible workers for. An unbounded
 ## queue is a memory leak that presents as an AI that never finishes anything.
 const MAX_JOBS_PER_FACTION: int = 24
+
+## The utility score a planner-issued job claims at. This was 0.0 — the default — which made
+## every faction job preemptible by ANY nonzero personal utility, so `MarchToTarget` survived
+## for at most one Simulation tick before the worker's own routine (WORK scores 1.0 in work
+## hours) evicted it. The LLM decided, the planner assigned, and half a second later everyone
+## went back to what they were doing. Set equal to full scheduled work: personal EMERGENCIES
+## (starving 2.0, exhausted 1.8 — both above 1.0 x PREEMPT_MARGIN) still interrupt a patrol,
+## and mere routine does not. A faction order outranks habit, not survival.
+const PLANNER_CLAIM_SCORE: float = 1.0
 
 var plans_made: int = 0
 var jobs_issued: int = 0
@@ -103,8 +125,7 @@ func assign(jobs: Array[Dictionary]) -> void:
 			continue
 		job.current_action = entry["action"]
 		job.target_location = entry["location"]
-		job.status = ECSEnums.JobStatus.CLAIMED
-		job.claimed_by = ECSManager.handle_of(row)
+		job.claim(ECSManager.handle_of(row), PLANNER_CLAIM_SCORE)
 		LocomotionSystem.send_to(row, entry["location"])
 		workers_assigned += 1
 

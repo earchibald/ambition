@@ -61,6 +61,14 @@ func _ready() -> void:
 	ECSEvents.action_rejected.connect(_on_rejected)
 	ECSEvents.entity_landed.connect(_on_landed)
 	ECSEvents.faction_decided.connect(_on_faction_decided)
+	ECSEvents.faction_thinking.connect(_on_faction_thinking)
+	ECSEvents.player_died.connect(_on_player_died)
+	ECSEvents.player_reborn.connect(_on_player_reborn)
+	ECSEvents.faction_leader_succeeded.connect(_on_leader_succeeded)
+	ECSEvents.faction_schism.connect(_on_schism)
+	ECSEvents.caravan_departed.connect(_on_caravan_departed)
+	ECSEvents.caravan_arrived.connect(_on_caravan_arrived)
+	ECSEvents.caravan_lost.connect(_on_caravan_lost)
 	ECSEvents.player_changed_floor.connect(_on_changed_floor)
 	ECSEvents.faction_relationship_changed.connect(_on_relationship_changed)
 	ECSEvents.spell_cast.connect(_on_spell_cast)
@@ -497,6 +505,15 @@ func _on_rejected(actor: int, action: StringName, reason: StringName) -> void:
 	_remember("%s: %s refused — %s" % [_name_of(actor), action, reason])
 
 
+## The "thinking" bark (roadmap review F1). Deliberation used to be invisible until the answer
+## landed, so a leader mid-decision looked identical to a leader doing nothing — and with a slow
+## remote provider that could be many seconds of apparent inertness. The decided line below is
+## what replaces this one when the response arrives.
+func _on_faction_thinking(faction_id: int, is_crisis: bool) -> void:
+	var why: String = "URGENTLY " if is_crisis else ""
+	_remember("faction %d is %sdeliberating..." % [faction_id, why])
+
+
 ## Factions talk. Without this the entire reasoning layer runs invisibly and the only evidence
 ## it exists at all is that NPCs occasionally walk somewhere different.
 func _on_faction_decided(faction_id: int, objective: String, declaration: String) -> void:
@@ -534,6 +551,45 @@ func _on_spell_detonated(_caster: int, spell_id: StringName, at: Vector3) -> voi
 ## as a delay rather than as nothing happening.
 func _on_mutated(entity: int, mutation: StringName) -> void:
 	_remember("%s MUTATED — %s" % [_name_of(entity), mutation])
+
+
+## The biggest event in the game had NO LISTENER anywhere — `player_died` was emitted into
+## silence, so the run ending produced no feed line and the freeze that follows (the loop pauses
+## on death) read as a crash. Found by the dead-symbol sweep, not by any test or play session.
+func _on_player_died(_corpse: int, _killer: int, lineage_generation: int) -> void:
+	_remember("YOU DIED — generation %d ends here" % lineage_generation)
+
+
+func _on_player_reborn(_player: int, lineage_generation: int) -> void:
+	_remember("a new adventurer arrives — generation %d" % lineage_generation)
+
+
+func _on_leader_succeeded(faction_id: int, _new_leader: int, prestige: float) -> void:
+	_remember("faction %d has a new leader (prestige %.0f)" % [faction_id, prestige])
+
+
+func _on_schism(parent_faction: int, splinter_faction: int, defectors: int) -> void:
+	_remember(
+		"SCHISM — %d citizens of faction %d break away as faction %d"
+		% [defectors, parent_faction, splinter_faction]
+	)
+
+
+func _on_caravan_departed(from_faction: int, to_faction: int, _carrier: int) -> void:
+	_remember("caravan: faction %d -> faction %d departs" % [from_faction, to_faction])
+
+
+func _on_caravan_arrived(
+	from_faction: int, to_faction: int, material: StringName, quantity: int
+) -> void:
+	_remember(
+		"caravan: %d %s delivered, faction %d -> %d"
+		% [quantity, material, from_faction, to_faction]
+	)
+
+
+func _on_caravan_lost(from_faction: int, to_faction: int) -> void:
+	_remember("caravan: faction %d -> %d LOST on the road" % [from_faction, to_faction])
 
 
 func _on_changed_floor(from_floor: int, to_floor: int) -> void:
