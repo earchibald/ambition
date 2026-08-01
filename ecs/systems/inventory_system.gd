@@ -196,7 +196,14 @@ func _passes_filters(
 	item_row: int, container: ContainerComponent, physical: PhysicalPropertyComponent
 ) -> bool:
 	var chemistry: ChemistryComponent = ECSManager.chemistries.get(item_row)
-	var tags: Array[StringName] = [] if chemistry == null else chemistry.active_tags
+	# BUILT EXPLICITLY, NOT WITH A TERNARY. `x if c else y` yields an UNTYPED Array, and
+	# assigning that to `Array[StringName]` throws at runtime — aborting this function mid-way,
+	# which GDScript reports as `false`. Every item WITHOUT a ChemistryComponent was therefore
+	# silently refused: "take refused - this container refuses it", for a plain pile of cloth.
+	# This is the second time this exact trap has shipped; `tests/invariants` now scans for it.
+	var tags: Array[StringName] = []
+	if chemistry != null:
+		tags = chemistry.active_tags
 	if not container.accepts(tags, ECSManager.containers.has(item_row)):
 		return false
 	# Liquids cannot exist bare in an inventory; they need a container that accepts them.

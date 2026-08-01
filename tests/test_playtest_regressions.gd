@@ -393,3 +393,44 @@ func test_citizens_creatures_and_corpses_look_different() -> void:
 			if a == b:
 				continue
 			assert_ne(sizes[a], sizes[b], "%s and %s are distinguishable" % [a, b])
+
+
+## THE TYPED-ARRAY TERNARY, AGAIN. `_passes_filters` built its tag list with
+## `[] if chemistry == null else chemistry.active_tags`, which yields an untyped Array and throws
+## on assignment to `Array[StringName]`. The throw aborted the function part-way, GDScript
+## reported that as `false`, and every item WITHOUT a ChemistryComponent was silently refused.
+## In the generated world that is every commodity stack: "take refused" on a pile of cloth.
+func test_an_item_with_no_chemistry_component_can_still_be_taken() -> void:
+	var here: Vector3 = ECSManager.position_of(_player_row)
+	var handle: int = ECSManager.allocate_entity()
+	var row: int = EH.index_of(handle)
+	ECSManager.set_position(row, here + Vector3(1.0, 0.0, 0.0))
+	ECSManager.add_component_bit(row, ComponentMask.POSITION)
+	var physical := PhysicalPropertyComponent.new()
+	physical.volume_cm3 = 100.0
+	physical.quantity = 3
+	ECSManager.physicals[row] = physical
+	ECSManager.add_component_bit(row, ComponentMask.PHYSICAL)
+	ECSManager.materials[row] = MaterialCompositionComponent.new({MaterialLibrary.MAT_CLOTH: 1.0})
+	ECSManager.add_component_bit(row, ComponentMask.MATERIAL)
+
+	assert_false(ECSManager.chemistries.has(row), "the item deliberately has no chemistry")
+	assert_true(
+		GameLoopManager.inventory.try_insert(_player_row, handle),
+		"a tagless item is accepted: %s" % GameLoopManager.inventory.last_rejection
+	)
+
+
+## An inspector whose first line is an opaque handle makes the player work the answer out some
+## other way. "e51:g1" was reported from play as literally unidentifiable.
+func test_the_inspector_says_what_a_thing_is() -> void:
+	var overlay: DebugOverlay = DebugOverlay.new()
+	add_child_autofree(overlay)
+	var here: Vector3 = ECSManager.position_of(_player_row)
+	var pile: int = World.spawn_item(
+		here + Vector3(1.0, 0.0, 0.0), MaterialLibrary.MAT_IRON, 100.0, 618
+	)
+	var label: String = overlay._label_for(ECSManager.resolve(pile))
+	assert_string_contains(label, "618", "the label counts the pile")
+	assert_string_contains(label, "MAT_IRON", "and names the material")
+	assert_eq(overlay._label_for(_player_row), "you", "and knows who you are")

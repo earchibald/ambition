@@ -251,6 +251,38 @@ func _name_of(entity: int) -> String:
 	return name
 
 
+## What a thing IS, in words. Material and count first for items, because "618 x MAT_CLOTH" is
+## the answer to "what is this" and a component list is not.
+func _label_for(row: int) -> String:
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
+	if chemistry != null and chemistry.active_tags.has(&"Corpse"):
+		return "corpse"
+	if row == 0:
+		return "you"
+
+	var policy: MaterializationComponent = ECSManager.materializations.get(row)
+	if policy != null and policy.item_class == &"Citizen":
+		return "villager"
+	if ECSManager.has_components(row, ComponentMask.FACTION_CORE):
+		return "faction ledger"
+	if ECSManager.bodies.has(row):
+		return "creature"
+	return _describe_stack(row, policy)
+
+
+## Items read as "618 x MAT_CLOTH (Commodity)" — the count and the material ARE the answer to
+## "what is this", where a component list is not.
+func _describe_stack(row: int, policy: MaterializationComponent) -> String:
+	var physical: PhysicalPropertyComponent = ECSManager.physicals.get(row)
+	var composition: MaterialCompositionComponent = ECSManager.materials.get(row)
+	if physical == null or composition == null:
+		return "object"
+	var kind: String = ""
+	if policy != null and policy.item_class != &"":
+		kind = " (%s)" % policy.item_class
+	return "%d x %s%s" % [physical.quantity, composition.dominant_material(), kind]
+
+
 func _describe(row: int) -> String:
 	if row == 0:
 		return "you"
@@ -367,7 +399,9 @@ func _inspect(row: int) -> String:
 	if not EH.is_valid(handle):
 		return "inspector: <stale row %d>" % row
 	var lines: Array[String] = []
-	lines.append("--- %s ---" % EH.to_debug_string(handle))
+	# The handle SECOND. "e51:g1" told a play-tester nothing about what they were looking at, and
+	# an inspector whose first line is an opaque id makes them work out the answer some other way.
+	lines.append("--- %s  [%s] ---" % [_label_for(row), EH.to_debug_string(handle)])
 	lines.append("components: %s" % ComponentMask.describe(ECSManager.mask_of(row)))
 	var pos: Vector3 = ECSManager.position_of(row)
 	var chunk: ChunkData = World.chunk_containing(pos)

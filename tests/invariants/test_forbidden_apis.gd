@@ -116,3 +116,33 @@ func _read(path: String) -> String:
 		else:
 			out.append(line)
 	return "\n".join(out)
+
+
+## THE TYPED-ARRAY TERNARY TRAP. `var xs: Array[T] = a if c else b` yields an UNTYPED Array, and
+## assigning that to a typed one throws at RUNTIME — aborting the enclosing function part-way,
+## which GDScript then reports as a plain `false`/null return rather than as an error the caller
+## can see.
+##
+## It has shipped twice. In Sprint 1 it aborted the collision axis resolve every frame; in
+## Sprint 2 it made `_passes_filters` refuse every item that had no ChemistryComponent, which
+## surfaced to the player as "take refused - this container refuses it" on a pile of cloth.
+##
+## Both times the code read perfectly and the failure looked like a logic bug somewhere else.
+## Build the array explicitly instead.
+func test_no_typed_array_is_assigned_from_a_ternary() -> void:
+	var offenders: Array[String] = []
+	for dir in FIRST_PARTY_DIRS:
+		for path in _gd_files(dir):
+			var line_number: int = 0
+			for line in _read(path).split("\n"):
+				line_number += 1
+				if not line.contains(": Array["):
+					continue
+				# A declaration with a conditional on the same line is the whole hazard.
+				if line.contains(" if ") and line.contains(" else "):
+					offenders.append("%s:%d %s" % [path, line_number, line.strip_edges()])
+	assert_eq(
+		offenders,
+		[] as Array[String],
+		"typed arrays are built explicitly, never from a ternary"
+	)
