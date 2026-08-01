@@ -65,3 +65,34 @@ INTRA/INTER scope (F2); temperature uses the material §7 heat model (H2); Absor
 quantified, atomically-guarded environmental resource (D8); magic reuses the Sprint 1 Ephemeral/
 aura primitive; the mutation->faction shift is gossip-propagated reputation, not instant (D3).
 See sprint_4_technical_scaffolding.md §5.
+
+Step 5: Playability Defects Carried Into Sprint 4
+
+The Objective: Clear player-facing defects found in play during Sprint 3, before adding systems
+on top of them. These are not new features. Each one is something a play-tester hit.
+
+Required Implementation:
+
+TAB MUST TOGGLE. Tab currently selects the entity under the cursor and there is no way to
+deselect. `_select_under_cursor()` falls back to the player row when nothing is near the cursor,
+so the LIVE overlay always shows an inspection panel and the player cannot get the display back.
+Pressing Tab again on the same target must CLEAR the selection.
+
+Three behaviours, and they must be distinguishable:
+
+- Tab on a new target -> inspect that target.
+- Tab again on the SAME target -> clear the selection, restoring the unobstructed LIVE view.
+- Tab on empty ground -> clear the selection. Do NOT fall back to the player row.
+
+That last one reverses a Sprint 3 decision. The fallback was added so Tab "always shows something
+useful", which was the right fix for a hitbox that felt broken and the wrong fix once the panel
+became large enough to obstruct the view. `DebugOverlay` already treats `_selected_row = -1` as
+"nothing selected" and branches on it, so the state exists and only the input path needs changing.
+
+Success State: The player Tabs a villager, reads the panel, Tabs the same villager again and the
+panel disappears. They then Tab a second villager directly without a clearing press in between,
+and the panel shows the second villager rather than toggling off.
+
+Do this FIRST in the sprint. Sprint 4 adds chemistry, spells and mutation, all of which are
+inspected through this panel — debugging them through a panel you cannot dismiss makes every
+later step slower.

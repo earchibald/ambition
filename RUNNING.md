@@ -59,7 +59,7 @@ place the specific test features in §3 exist.
 | `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
 | `E` | **Use stairs**, or interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
-| `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
+| `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. **Does not toggle off** — see the NOT-built list. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
 | `K` | **DEBUG: injure yourself** — 25 damage | The only way to reach death in the generated world, which has no pit, no hazard and nothing hostile. Four presses kills you. |
 | `R` | **DEBUG: run the year and respawn** | Only works once dead. Runs the Interregnum and brings in the successor, so the loop can be completed rather than pausing forever. |
@@ -219,6 +219,10 @@ Not bugs. Listed so play-testing stops rediscovering them:
 - **No ceilings.** Floors are 2.5D planes (ADR-3), so "indoors" is not a concept the renderer
   expresses yet.
 - **No inventory screen.** A successful `E` reports in the event feed and nowhere else.
+- **`Tab` does not toggle.** It selects; it never deselects. Pressing it on empty ground falls
+  back to inspecting you rather than clearing, so once the inspection panel is up there is no way
+  to get the unobstructed LIVE view back short of cycling `F1` off and on. Fixed first thing in
+  Sprint 4 (roadmap Step 5).
 
 ### What is in the arena, and what each thing is there to test
 

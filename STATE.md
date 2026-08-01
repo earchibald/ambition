@@ -236,6 +236,11 @@
         faction can currently fill the global queue.
     3.  Sprint 4 (reaction matrix, spell compiler, ephemeral casting, mutation) per
         `docs/scope_and_milestones.md`. Do not start until #7 and #8 are merged.
+        **Roadmap Step 5 comes FIRST**: Tab must toggle. It selects and never deselects, and
+        falls back to the player row on a miss, so the LIVE panel cannot be dismissed. Every
+        Sprint 4 system is inspected through that panel, so fixing it first makes the rest of the
+        sprint faster. `DebugOverlay` already treats `_selected_row = -1` as nothing-selected;
+        only `PlayerInputBridge._select_under_cursor` needs to change.
     4.  Close the ADR-10 perf gap. Rust/GDExtension port of the CA and the spatial hash. The
         vendored performance skill flagged `ViewManager`'s one `MeshInstance3D` per entity as
         the next lead — the terrain already uses MultiMesh; entities do not.
