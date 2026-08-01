@@ -168,7 +168,7 @@ func _apply_intent(row: int, intent: ActionIntent, _scaled_delta: float) -> void
 			if inventory.try_insert(row, intent.target):
 				ECSEvents.item_taken.emit(actor, intent.target, &"taken")
 			else:
-				ECSEvents.action_rejected.emit(actor, &"take", &"it will not fit")
+				ECSEvents.action_rejected.emit(actor, &"take", inventory.last_rejection)
 		ActionIntent.CONSUME:
 			var need: NeedsComponent = ECSManager.needs.get(row)
 			if need != null:
