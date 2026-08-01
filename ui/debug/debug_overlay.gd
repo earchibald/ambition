@@ -21,7 +21,11 @@ const CURSOR_STEP_M: float = 0.25
 ## How many outcome events the feed keeps. Enough to see a fight, short enough to read.
 const FEED_CAPACITY: int = 8
 
+var _panel: PanelContainer = null
+var _header: Label = null
 var _label: Label = null
+var _dragging: bool = false
+var _drag_offset: Vector2 = Vector2.ZERO
 var _selected_row: int = -1
 var _accumulator: float = 0.0
 var _feed: Array[String] = []
@@ -32,14 +36,13 @@ var _rmb_presses: int = 0
 
 
 func _ready() -> void:
-	_label = Label.new()
-	_label.position = Vector2(12, 12)
-	# Dark outline: the overlay is drawn over a mid-grey stone floor, and unoutlined light text
-	# on it is barely readable regardless of size.
-	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-	_label.add_theme_constant_override("outline_size", 6)
-	_apply_font_size()
-	add_child(_label)
+	# Godot readies CHILDREN before their parent, so this runs before `Main._ready` — which is
+	# where DebugFlags was being initialised. Every flag read below was therefore reading a
+	# default, and a font size set in `debug_config.json` silently never applied. `initialize`
+	# is idempotent, so asking here costs nothing and removes the ordering dependency.
+	DebugFlags.initialize()
+	_build_panel()
+	_page = clampi(DebugFlags.boot_overlay_page, 0, Page.size() - 1) as Page
 	visible = DebugFlags.tick_counters_enabled
 
 	# Listen only. The overlay never writes ECS state (Prime Directive / invariants §2).
@@ -49,6 +52,81 @@ func _ready() -> void:
 	ECSEvents.action_rejected.connect(_on_rejected)
 	ECSEvents.entity_landed.connect(_on_landed)
 	ECSEvents.faction_decided.connect(_on_faction_decided)
+
+
+## A DRAGGABLE, NON-MODAL panel rather than text painted on the screen.
+##
+## Two problems with the bare label it replaces. It sat over the top-left corner of the world
+## permanently, and there was no way to move it off whatever you were trying to look at. And a
+## click anywhere — including on the text — went straight through to the game and swung a weapon.
+##
+## MONOSPACE IS NOT COSMETIC. The `F1` map is a grid of characters, and in a proportional font the
+## columns do not line up, so the map is unreadable as a map. Every other page benefits too:
+## numbers that change each frame stop jittering sideways.
+func _build_panel() -> void:
+	_panel = PanelContainer.new()
+	_panel.position = Vector2(12, 12)
+	# STOP, deliberately: a click on the panel belongs to the panel. Without it, reading the
+	# overlay means attacking whatever is behind it.
+	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.05, 0.07, 0.78)
+	style.border_color = Color(0.45, 0.45, 0.55, 0.9)
+	style.set_border_width_all(1)
+	style.set_content_margin_all(8)
+	_panel.add_theme_stylebox_override("panel", style)
+	add_child(_panel)
+
+	var column := VBoxContainer.new()
+	_panel.add_child(column)
+
+	_header = Label.new()
+	_header.text = "  ☰  debug  —  drag me    [F1] page    [G] gizmos    [=/-] size"
+	_header.mouse_filter = Control.MOUSE_FILTER_STOP
+	_header.add_theme_color_override("font_color", Color(0.72, 0.78, 0.95))
+	column.add_child(_header)
+
+	_label = Label.new()
+	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# The panel supplies contrast now, but the outline is kept: the panel is translucent so busy
+	# terrain still shows through behind the text.
+	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_label.add_theme_constant_override("outline_size", 4)
+	column.add_child(_label)
+	_apply_font_size()
+
+
+## True while the pointer is over the panel, so gameplay input can ignore that click.
+##
+## The input bridge POLLS `Input.is_action_just_pressed` rather than consuming events, so marking
+## an event handled does not reach it. It has to ask.
+func wants_mouse() -> bool:
+	if not visible or _panel == null:
+		return false
+	return _panel.get_global_rect().has_point(_panel.get_global_mouse_position())
+
+
+## Dragging is handled here rather than on the header, because the pointer routinely leaves the
+## header's rect mid-drag and a Control only receives `_gui_input` while the pointer is inside it.
+func _input(event: InputEvent) -> void:
+	if not visible or _panel == null:
+		return
+	if event is InputEventMouseButton:
+		var button: InputEventMouseButton = event
+		if button.button_index != MOUSE_BUTTON_LEFT:
+			return
+		if button.pressed and _header.get_global_rect().has_point(button.position):
+			_dragging = true
+			_drag_offset = _panel.position - button.position
+			get_viewport().set_input_as_handled()
+		elif not button.pressed:
+			_dragging = false
+	elif event is InputEventMouseMotion and _dragging:
+		var motion: InputEventMouseMotion = event
+		# Clamped so the panel can never be dragged entirely off-screen and stranded.
+		var limit: Vector2 = get_viewport().get_visible_rect().size - Vector2(60, 24)
+		_panel.position = (motion.position + _drag_offset).clamp(Vector2.ZERO, limit)
+		get_viewport().set_input_as_handled()
 
 
 ## Text size is adjustable at runtime, because "edit a JSON file in the user data directory and
@@ -85,10 +163,21 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
+## MONOSPACE. The `F1` map is a grid of characters and a proportional font shreds its columns,
+## which is what made the map "very poorly rendered and not aligned". A system monospace font is
+## requested by name so the panel does not depend on a font asset being present.
 func _apply_font_size() -> void:
 	if _label == null:
 		return
+	var mono := SystemFont.new()
+	mono.font_names = PackedStringArray(
+		["JetBrains Mono", "SF Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
+	)
+	_label.add_theme_font_override("font", mono)
 	_label.add_theme_font_size_override("font_size", DebugFlags.overlay_font_size)
+	if _header != null:
+		_header.add_theme_font_override("font", mono)
+		_header.add_theme_font_size_override("font_size", DebugFlags.overlay_font_size)
 
 
 func _process(delta: float) -> void:
@@ -168,11 +257,11 @@ func _compose_live() -> String:
 		]
 	)
 	lines.append(
-		"LoS marches %d (cache %d, fail %d)  perceived %d  witnesses %d" % [
+		"LoS %d/tick (%d total)  perceived %d/tick (%d total)  witnesses %d" % [
 			counters.get("los_marches", 0),
-			counters.get("los_cache_hits", 0),
-			counters.get("los_failures", 0),
+			counters.get("total_los_marches", 0),
 			counters.get("targets_perceived", 0),
+			counters.get("total_perceived", 0),
 			counters.get("witness_events", 0),
 		]
 	)

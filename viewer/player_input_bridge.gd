@@ -58,11 +58,15 @@ func _physics_process(_delta: float) -> void:
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
 
-	if Input.is_action_just_pressed(&"attack"):
+	# A click on the debug panel belongs to the panel. The bridge POLLS rather than consuming
+	# events, so it has to ask rather than relying on the event being marked handled.
+	var ui_has_mouse: bool = _overlay != null and _overlay.wants_mouse()
+
+	if not ui_has_mouse and Input.is_action_just_pressed(&"attack"):
 		_push_attack(row, last_aim)
-	if Input.is_action_just_pressed(&"interact"):
+	if not ui_has_mouse and Input.is_action_just_pressed(&"interact"):
 		_push_interact(row)
-	if Input.is_action_just_pressed(&"inspect"):
+	if not ui_has_mouse and Input.is_action_just_pressed(&"inspect"):
 		_select_under_cursor()
 	if Input.is_action_just_pressed(&"debug_hurt"):
 		_debug_hurt(row)

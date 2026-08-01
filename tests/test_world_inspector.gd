@@ -110,3 +110,38 @@ func test_the_arena_explains_that_it_has_no_world() -> void:
 ## The pages must be reachable, or the whole inspector is as invisible as what it inspects.
 func test_the_page_cycle_key_is_mapped() -> void:
 	assert_true(InputMap.has_action(&"cycle_debug_page"), "F1 cycles the overlay pages")
+
+
+## MONOSPACE IS NOT COSMETIC. The map is a grid of characters; in a proportional font its columns
+## do not line up and it stops being a map. Every row must therefore be the same width.
+func test_the_map_rows_are_all_the_same_width() -> void:
+	var rows: Array[String] = []
+	for line in WorldInspector.map_text().split("\n"):
+		if line.contains("y="):
+			rows.append(line)
+	assert_gt(rows.size(), 1, "the map has rows")
+	for line in rows:
+		assert_eq(
+			line.length(), rows[0].length(), "every map row is the same character width"
+		)
+
+
+## The panel reads DebugFlags in `_ready`, and Godot readies CHILDREN BEFORE their parent — so it
+## used to run before `Main._ready` initialised them. Every flag read a default, and a font size
+## set in debug_config.json silently never applied.
+func test_the_overlay_initialises_flags_itself() -> void:
+	var overlay: DebugOverlay = DebugOverlay.new()
+	add_child_autofree(overlay)
+	assert_gte(
+		DebugFlags.overlay_font_size,
+		DebugFlags.MIN_OVERLAY_FONT_SIZE,
+		"flags are loaded by the time the panel is built"
+	)
+
+
+## Clicking the panel must not swing a weapon at whatever is behind it.
+func test_the_panel_claims_the_mouse_when_the_pointer_is_over_it() -> void:
+	var overlay: DebugOverlay = DebugOverlay.new()
+	add_child_autofree(overlay)
+	overlay.visible = false
+	assert_false(overlay.wants_mouse(), "a hidden panel never claims input")

@@ -19,6 +19,16 @@ const MAX_NOISE_EVENTS_PER_TICK: int = 8
 const MAX_LISTENERS_PER_EVENT: int = 16
 
 # --- Observability ---
+## CUMULATIVE totals, never reset.
+##
+## The per-tick counters below are zeroed every `run`, and awareness tiering means most ticks do
+## no work at all — so the overlay routinely showed "LoS marches 0, perceived 0" while perception
+## was functioning perfectly. A working system that reads as broken costs more play-testing time
+## than a broken one, because nobody investigates a number that looks fine.
+var total_sight_checks: int = 0
+var total_los_marches: int = 0
+var total_perceived: int = 0
+
 var sight_checks: int = 0
 var los_marches: int = 0
 var los_cache_hits: int = 0
@@ -89,6 +99,7 @@ func _evaluate_sight(
 	for i in limit:
 		var other: int = ordered[i][1]
 		sight_checks += 1
+		total_sight_checks += 1
 		var target_pos: Vector3 = ECSManager.position_of(other)
 
 		# Cheap rejects before the expensive march.
@@ -104,6 +115,7 @@ func _evaluate_sight(
 			continue
 		perception.note_target(ECSManager.handle_of(other), target_pos)
 		targets_perceived += 1
+		total_perceived += 1
 		if perception.awareness_state == ECSEnums.AwarenessState.UNAWARE:
 			perception.awareness_state = ECSEnums.AwarenessState.SUSPICIOUS
 
@@ -119,6 +131,7 @@ func _line_of_sight(
 		los_cache_hits += 1
 		return _los_cache[key]
 	los_marches += 1
+	total_los_marches += 1
 	var visible: bool = GridDDA.has_line_of_sight(from, to, chunk)
 	_los_cache[key] = visible
 	return visible
@@ -266,6 +279,9 @@ func take_witness_events() -> Array[WitnessEvent]:
 func counters() -> Dictionary:
 	return {
 		"sight_checks": sight_checks,
+		"total_sight_checks": total_sight_checks,
+		"total_los_marches": total_los_marches,
+		"total_perceived": total_perceived,
 		"los_marches": los_marches,
 		"los_cache_hits": los_cache_hits,
 		"los_failures": los_failures,

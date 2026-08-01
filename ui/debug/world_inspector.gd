@@ -90,7 +90,9 @@ static func map_text() -> String:
 		var cells: Array[String] = []
 		for x in range(centre.x - MAP_RADIUS_CHUNKS, centre.x + MAP_RADIUS_CHUNKS + 1):
 			cells.append(_cell(Vector3i(x, y, centre.z), centre, anchors))
-		cells.append("   y=%d" % y)
+		# WIDTH-PADDED. "y=-4" is one character wider than "y=0", and that single minus sign is
+			# enough to ragged the right-hand edge of the whole map.
+			cells.append("   y=%3d" % y)
 		lines.append("  " + " ".join(cells))
 	lines.append("")
 	lines.append("  @ you    A active    s simulated    . generated    - not generated yet")

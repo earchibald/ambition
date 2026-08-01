@@ -64,6 +64,7 @@ place the specific test features in §3 exist.
 | `K` | **DEBUG: injure yourself** — 25 damage | The only way to reach death in the generated world, which has no pit, no hazard and nothing hostile. Four presses kills you. |
 | `R` | **DEBUG: run the year and respawn** | Only works once dead. Runs the Interregnum and brings in the successor, so the loop can be completed rather than pausing forever. |
 | `F1` | **Cycle overlay page** | LIVE counters -> CHRONICLE -> FACTIONS -> MAP. See below. |
+| Drag the header | **Move the debug panel** | Grab the `☰ debug — drag me` bar. Clicks on the panel stay on the panel; they do not swing a weapon at the world behind it. |
 | `G` | Toggle debug gizmos | Wireframe facing arrow, melee arc, interact radius, sight radius. On by default. |
 | `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
 | `Esc` | Cancel | Mapped, not yet consumed. |
@@ -164,6 +165,7 @@ Boot the `world` scenario (the default) and watch the overlay:
 | Check | How | What it proves |
 |---|---|---|
 | The village walks | Watch `movers` climb above zero, and `paths_requested` tick as they re-plan | Grid A*, the job planner, and the locomotion tiers |
+| Villagers notice you | Stand near one. `perceived (N total)` climbs; Tab it and awareness reads `SUSPICIOUS(1)` | Sight cones, LoS marching, and awareness tiering |
 | They avoid walls | Watch a villager cross the village without clipping a building | Active movers are collided by the same system that moves you |
 | Factions think | Wait ~10 real seconds for a Macro tick. The feed prints `faction N -> OBJECTIVE: "..."` | The reasoner, the queue, and the validation gate |
 | It thinks with no API key | You did not set one. It still decides | ADR-5 as amended: the LLM is optional, and this is the shipped default |
@@ -202,8 +204,10 @@ it either way.
 
 Not bugs. Listed so play-testing stops rediscovering them:
 
-- **Nothing reacts to you.** Killing a villager produces a corpse and no witness, alarm, or
-  grudge. Faction politics is unowned until Sprint 3.5.
+- **Nothing reacts to you.** Villagers DO perceive you — watch `perceived (N total)` climb, and
+  Tab one to see its awareness rise to `SUSPICIOUS`. But nothing is done with that: killing one
+  produces a corpse and no alarm, grudge, or reputation change. The consequence layer is
+  unowned until Sprint 3.5.
 - **No respawn UI.** `R` triggers the Interregnum from the keyboard, and it works, but there is
   no fade, no "One Year Passes" card, and no death screen — you simply have control again.
 - **Nothing in the world can kill you.** No hazards, no hostile creatures outside the arena. `K`
@@ -332,6 +336,15 @@ witnesses 0` on a bare arena boot is expected. Its awareness reads `UNAWARE(0)` 
 Villagers in the `world` scenario do move, because a faction plans for them (Sprint 3).
 
 The full not-built-yet list lives in §3a, in one place, so it cannot drift out of date in three.
+
+### The debug panel
+
+It is a draggable, non-modal window rather than text painted on the corner of the screen. Grab
+its header to move it off whatever you are trying to look at. Clicking anywhere on it is
+consumed by the panel, so reading the overlay no longer attacks the thing behind it.
+
+The font is **monospace** on purpose: the `F1` map is a grid of characters, and a proportional
+font shreds its columns until it stops being a map.
 
 ### If the text is too small
 

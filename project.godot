@@ -35,6 +35,11 @@ GameLoopManager="*res://singletons/GameLoopManager.gd"
 ; reference resolution below; 3D still renders at native resolution.
 window/size/viewport_width=1280
 window/size/viewport_height=720
+; The WINDOW is bigger than the design reference. 1280x720 stays the layout basis that
+; `canvas_items` scales against, while the actual window opens at 1728x972 — a 1280x720 window on
+; a high-DPI laptop is a postage stamp.
+window/size/window_width_override=1728
+window/size/window_height_override=972
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
