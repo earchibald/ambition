@@ -145,3 +145,31 @@ func test_the_panel_claims_the_mouse_when_the_pointer_is_over_it() -> void:
 	add_child_autofree(overlay)
 	overlay.visible = false
 	assert_false(overlay.wants_mouse(), "a hidden panel never claims input")
+
+
+## F1 cycles round to HIDDEN and dismisses the panel. One key drives the tool and gets it out of
+## the way; a second key that only hides would do nothing else.
+func test_the_page_cycle_includes_a_hidden_state() -> void:
+	assert_eq(
+		DebugOverlay.Page.keys()[DebugOverlay.Page.size() - 1],
+		"HIDDEN",
+		"the last page dismisses the panel"
+	)
+
+
+## THE ASCII MAP IS SUPERSEDED, but it is still the only form available headlessly, so its rows
+## must stay aligned. The regression that produced "y= -4 - y= -4 - y= -4" across the screen was
+## a row label emitted inside the COLUMN loop — one wrong indent.
+func test_the_text_map_emits_one_row_label_per_row() -> void:
+	for line in WorldInspector.map_text().split("\n"):
+		assert_lte(line.count("y="), 1, "each row carries exactly one coordinate label")
+
+
+## The drawn map must never generate a chunk. Marking a stairwell is positional for the same
+## reason: a lookup would bring the chunk it is describing into existence.
+func test_the_drawn_map_generates_nothing() -> void:
+	var minimap: MinimapView = MinimapView.new()
+	add_child_autofree(minimap)
+	var before: int = World.grid.chunks_generated
+	minimap.refresh()
+	assert_eq(World.grid.chunks_generated, before, "drawing the map created no chunks")

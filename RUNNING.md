@@ -63,7 +63,7 @@ place the specific test features in §3 exist.
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
 | `K` | **DEBUG: injure yourself** — 25 damage | The only way to reach death in the generated world, which has no pit, no hazard and nothing hostile. Four presses kills you. |
 | `R` | **DEBUG: run the year and respawn** | Only works once dead. Runs the Interregnum and brings in the successor, so the loop can be completed rather than pausing forever. |
-| `F1` | **Cycle overlay page** | LIVE counters -> CHRONICLE -> FACTIONS -> MAP. See below. |
+| `F1` | **Cycle overlay page / hide** | LIVE -> CHRONICLE -> FACTIONS -> MAP -> hidden -> LIVE. See below. |
 | Drag the header | **Move the debug panel** | Grab the `☰ debug — drag me` bar. Clicks on the panel stay on the panel; they do not swing a weapon at the world behind it. |
 | `G` | Toggle debug gizmos | Wireframe facing arrow, melee arc, interact radius, sight radius. On by default. |
 | `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
@@ -141,14 +141,14 @@ The history, the factions and the chunk layout are the whole output of Sprint 2,
 none of it was visible. Faction ledgers deliberately have **no position** — they are not objects
 in the world — so `Tab` can never reach them, because picking resolves through the spatial hash.
 
-Press `F1` to cycle four pages:
+Press `F1` to cycle the pages. A **fifth press dismisses the panel** entirely:
 
 | Page | What it answers |
 |---|---|
 | **LIVE** | The counters. What the engine is doing right now |
 | **CHRONICLE** | The 500 years that produced this world — who was founded, who conquered whom, in which year |
 | **FACTIONS** | Every living faction: name, population (abstract vs embodied), culture, current objective and mood, wealth, home chunk, and the last thing it said |
-| **MAP** | An ASCII chunk map of your floor. `@` you, `A` active, `s` simulated, `.` generated, `-` not generated yet, `F` a faction anchor |
+| **MAP** | A **drawn** chunk map of your floor: green active, blue simulated, grey generated, near-black unexplored, with your position, faction anchors and the stairwell marked. Colour-coded legend below it |
 
 Two readings that look wrong and are not:
 
@@ -340,8 +340,9 @@ The full not-built-yet list lives in §3a, in one place, so it cannot drift out 
 
 ### Going underground
 
-The village's landing chunk — chunk (0, 0) — has a **stairwell**. Walk to tile (34, 32); the
-cursor readout says `STAIRS (press E)`. Press `E` to descend.
+The village's landing chunk — chunk (0, 0) — has a **stairwell**. It is marked in the world by a **cyan beacon column** you can walk toward from
+anywhere in the village, and the tile itself is a sunken cyan slab. The cursor readout confirms
+`STAIRS (press E)`. Up-stairs are amber and raised.
 
 There are five floors below the surface. Each landing chunk has a way up and, unless it is the
 bottom, a way down. You arrive at the OPPOSITE stair from the one you used, which is where you

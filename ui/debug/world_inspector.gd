@@ -74,7 +74,10 @@ static func factions_text() -> String:
 	return "\n".join(lines)
 
 
-## An ASCII chunk map. Crude on purpose: the question it answers — "what is around me, and is it
+## An ASCII chunk map. SUPERSEDED by `MinimapView`, which draws the same information properly;
+## kept because it is the only form the map can take in a headless test or a terminal dump.
+##
+## Crude on purpose: the question it answers — "what is around me, and is it
 ## loaded" — is answered better by a grid of letters than by any amount of prose.
 static func map_text() -> String:
 	if World.grid == null:
@@ -90,9 +93,13 @@ static func map_text() -> String:
 		var cells: Array[String] = []
 		for x in range(centre.x - MAP_RADIUS_CHUNKS, centre.x + MAP_RADIUS_CHUNKS + 1):
 			cells.append(_cell(Vector3i(x, y, centre.z), centre, anchors))
-		# WIDTH-PADDED. "y=-4" is one character wider than "y=0", and that single minus sign is
-			# enough to ragged the right-hand edge of the whole map.
-			cells.append("   y=%3d" % y)
+		# ONE label per ROW, outside the column loop. Indented one level too deep, this emitted a
+		# coordinate after every single cell — "y= -4 - y= -4 - y= -4" straight across — which is
+		# how a readable map became incomprehensible in a single edit.
+		#
+		# Width-padded, too: "y=-4" is a character wider than "y=0", and that lone minus sign
+		# raggeds the right-hand edge on its own.
+		cells.append("   y=%3d" % y)
 		lines.append("  " + " ".join(cells))
 	lines.append("")
 	lines.append("  @ you    A active    s simulated    . generated    - not generated yet")

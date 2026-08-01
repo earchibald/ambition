@@ -9,7 +9,10 @@ extends CanvasLayer
 
 ## Pages, cycled with F1. The live counters are page one because that is what you want while
 ## moving; the rest answer questions you ask while standing still.
-enum Page { LIVE, HISTORY, FACTIONS, MAP }
+## HIDDEN is a real page, not an absence. Cycling round to it dismisses the panel entirely, so
+## one key both drives the tool and gets it out of the way — asked for during play-testing, and
+## the alternative is a second key that does nothing else.
+enum Page { LIVE, HISTORY, FACTIONS, MAP, HIDDEN }
 
 const REFRESH_INTERVAL_S: float = 0.25
 
@@ -29,6 +32,7 @@ var _panel: PanelContainer = null
 var _header: Label = null
 var _scroll: ScrollContainer = null
 var _label: Label = null
+var _minimap: MinimapView = null
 var _dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
 var _selected_row: int = -1
@@ -57,6 +61,7 @@ func _ready() -> void:
 	ECSEvents.action_rejected.connect(_on_rejected)
 	ECSEvents.entity_landed.connect(_on_landed)
 	ECSEvents.faction_decided.connect(_on_faction_decided)
+	ECSEvents.player_changed_floor.connect(_on_changed_floor)
 
 
 ## A DRAGGABLE, NON-MODAL panel rather than text painted on the screen.
@@ -86,7 +91,7 @@ func _build_panel() -> void:
 	_panel.add_child(column)
 
 	_header = Label.new()
-	_header.text = "  ☰  debug  —  drag me    [F1] page    [G] gizmos    [=/-] size"
+	_header.text = "  ☰  debug  —  drag me    [F1] page / hide    [G] gizmos    [=/-] size"
 	_header.mouse_filter = Control.MOUSE_FILTER_STOP
 	_header.add_theme_color_override("font_color", Color(0.72, 0.78, 0.95))
 	column.add_child(_header)
@@ -105,6 +110,13 @@ func _build_panel() -> void:
 	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	_label.add_theme_constant_override("outline_size", 4)
 	_scroll.add_child(_label)
+
+	# The map is DRAWN, not spelled out. See MinimapView for why the ASCII version was the wrong
+	# tool: it depended on a monospace font to line up at all, and a grid of letters is a poor
+	# answer to a spatial question in an engine that can simply draw one.
+	_minimap = MinimapView.new()
+	_minimap.visible = false
+	column.add_child(_minimap)
 	_apply_font_size()
 
 
@@ -113,7 +125,7 @@ func _build_panel() -> void:
 ## The input bridge POLLS `Input.is_action_just_pressed` rather than consuming events, so marking
 ## an event handled does not reach it. It has to ask.
 func wants_mouse() -> bool:
-	if not visible or _panel == null:
+	if not visible or _panel == null or not _panel.visible:
 		return false
 	return _panel.get_global_rect().has_point(_panel.get_global_mouse_position())
 
@@ -121,7 +133,7 @@ func wants_mouse() -> bool:
 ## Dragging is handled here rather than on the header, because the pointer routinely leaves the
 ## header's rect mid-drag and a Control only receives `_gui_input` while the pointer is inside it.
 func _input(event: InputEvent) -> void:
-	if not visible or _panel == null:
+	if not visible or _panel == null or not _panel.visible:
 		return
 	if event is InputEventMouseButton:
 		var button: InputEventMouseButton = event
@@ -156,6 +168,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	var delta: int = 0
 	if event.is_action(&"cycle_debug_page"):
 		_page = ((_page + 1) % Page.size()) as Page
+		# HIDDEN dismisses the panel rather than drawing an empty one.
+		_panel.visible = _page != Page.HIDDEN
 		_accumulator = REFRESH_INTERVAL_S
 		get_viewport().set_input_as_handled()
 		return
@@ -205,14 +219,20 @@ func _apply_font_size() -> void:
 
 
 func _process(delta: float) -> void:
-	if not visible:
+	if not visible or _panel == null or not _panel.visible:
 		return
 	_accumulator += delta
 	if _accumulator < REFRESH_INTERVAL_S:
 		return
 	_accumulator = 0.0
-	_label.text = _compose()
-	_fit_scroll()
+	var on_map: bool = _page == Page.MAP
+	_scroll.visible = not on_map
+	_minimap.visible = on_map
+	if on_map:
+		_minimap.refresh()
+	else:
+		_label.text = _compose()
+		_fit_scroll()
 
 
 func _compose() -> String:
@@ -391,6 +411,11 @@ func _on_faction_decided(faction_id: int, objective: String, declaration: String
 		_remember("faction %d -> %s" % [faction_id, objective])
 		return
 	_remember("faction %d -> %s: \"%s\"" % [faction_id, objective, declaration])
+
+
+func _on_changed_floor(from_floor: int, to_floor: int) -> void:
+	var verb: String = "descend" if to_floor < from_floor else "climb"
+	_remember("you %s to floor %d" % [verb, to_floor])
 
 
 ## A handle is not a name. Without this the feed reads "entity 4294967296 took 3.2 damage".

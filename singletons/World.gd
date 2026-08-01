@@ -132,6 +132,7 @@ func change_floor(direction: int) -> bool:
 	GameLoopManager.streaming.reset()
 	GameLoopManager.streaming.update_chunk_states(player_chunk_id, grid)
 	world_ready.emit(player_chunk_id)
+	ECSEvents.player_changed_floor.emit(target - direction, target)
 	return true
 
 

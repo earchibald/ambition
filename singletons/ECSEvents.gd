@@ -42,6 +42,11 @@ signal faction_decided(faction_id: int, objective: String, declaration: String)
 signal player_died(corpse: int, killer: int, lineage_generation: int)
 signal player_reborn(player: int, lineage_generation: int)
 
+## The player used a stairwell. A SUCCESS deserves its own signal: reporting it through
+## `action_rejected` produced "stairs refused - you are now on floor -1", which is gibberish
+## assembled from a template that only ever meant to describe failures.
+signal player_changed_floor(from_floor: int, to_floor: int)
+
 
 ## Tag arrays are `Array[StringName]`. Emitting an untyped array literal into a typed
 ## parameter fails at runtime and SILENTLY DROPS THE LISTENER, so build tags explicitly:

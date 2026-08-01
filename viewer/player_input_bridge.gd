@@ -207,12 +207,7 @@ func _push_interact(row: int) -> void:
 	# A separate key would be one more thing to document and one more thing to forget.
 	var stairs: int = World.stairs_under(row)
 	if stairs != 0:
-		if World.change_floor(stairs):
-			ECSEvents.action_rejected.emit(
-				ECSManager.handle_of(row),
-				&"stairs",
-				StringName("you are now on floor %d" % World.player_chunk_id.z)
-			)
+		World.change_floor(stairs)
 		return
 	var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
 	var target: int = GameLoopManager.picking.interact_target(
