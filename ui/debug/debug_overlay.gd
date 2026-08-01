@@ -63,6 +63,9 @@ func _ready() -> void:
 	ECSEvents.faction_decided.connect(_on_faction_decided)
 	ECSEvents.player_changed_floor.connect(_on_changed_floor)
 	ECSEvents.faction_relationship_changed.connect(_on_relationship_changed)
+	ECSEvents.spell_cast.connect(_on_spell_cast)
+	ECSEvents.spell_detonated.connect(_on_spell_detonated)
+	ECSEvents.entity_mutated.connect(_on_mutated)
 
 
 ## A DRAGGABLE, NON-MODAL panel rather than text painted on the screen.
@@ -324,6 +327,19 @@ func _compose_live() -> String:
 		[counters.get("total_perceived", 0), "perceived"],
 		[counters.get("witness_events", 0), "witnesses"],
 	])))
+	out.append(PanelFormat.row("chemistry", PanelFormat.tally([
+		[counters.get("reactions_fired", 0), "reactions"],
+		[counters.get("reaction_cooldowns", 0), "locked"],
+		["%.0fC" % counters.get("reaction_ambient_c", 0.0), "air"],
+		[counters.get("ca_gas_cells", 0), "gas cells"],
+	])))
+	out.append(PanelFormat.row("magic", PanelFormat.tally([
+		[counters.get("casts_resolved", 0), "cast"],
+		[counters.get("casts_fizzled", 0), "fizzled"],
+		[counters.get("spell_detonations", 0), "detonations"],
+		[counters.get("ephemerals_active", 0), "in flight"],
+		[counters.get("mutations", 0), "mutations"],
+	])))
 	out.append(PanelFormat.row("factions", PanelFormat.tally([
 		[counters.get("plans_made", 0), "plans"],
 		[counters.get("reason_dispatched", 0), "thoughts"],
@@ -502,6 +518,24 @@ func _on_relationship_changed(
 	_remember("faction %d is now HOSTILE to %s (%.0f)" % [faction_id, who, score])
 
 
+func _on_spell_cast(caster: int, spell_id: StringName, strain: float) -> void:
+	_remember("%s cast %s (%.1f strain)" % [_name_of(caster), spell_id, strain])
+
+
+## The detonation is a SEPARATE line from the cast. A fireball that leaves the hand and never
+## goes off is the exact failure the projectile path can have, and one combined line could not
+## tell the two apart.
+func _on_spell_detonated(_caster: int, spell_id: StringName, at: Vector3) -> void:
+	_remember("%s went off at (%.1f, %.1f)" % [spell_id, at.x, at.z])
+
+
+## A permanent change to your body earns a line of its own. It is also the moment the faction
+## consequence starts, so the feed showing it makes the delay before the village reacts legible
+## as a delay rather than as nothing happening.
+func _on_mutated(entity: int, mutation: StringName) -> void:
+	_remember("%s MUTATED — %s" % [_name_of(entity), mutation])
+
+
 func _on_changed_floor(from_floor: int, to_floor: int) -> void:
 	var verb: String = "descend" if to_floor < from_floor else "climb"
 	_remember("you %s to floor %d" % [verb, to_floor])
@@ -565,9 +599,16 @@ func _describe(row: int) -> String:
 	return "item #%d" % row
 
 
-## Selects an entity for inspection. Called by the input bridge via PickSystem.
+## Selects an entity for inspection, or clears with a negative row. Called by the input bridge
+## via PickSystem.
 func select_row(row: int) -> void:
 	_selected_row = row
+
+
+## What is currently being inspected, or -1 for nothing. The input bridge needs this to decide
+## whether a Tab press is a re-select of the same target (which clears) or a new one.
+func selected_row() -> int:
+	return _selected_row
 
 
 ## Where the player is, in BOTH coordinate systems. Every arena feature is specified in tile
@@ -709,9 +750,21 @@ func _inspect(row: int) -> String:
 				physical.quantity,
 			]
 		)
+	# Tags carry their COUNTDOWN where they have one. `Reaction_Cooldown` with no number beside it
+	# cannot be told from a lock that is stuck, which is the single most likely Sprint 4 bug and
+	# the one the inspector should be able to answer on sight.
 	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
 	if chemistry != null and not chemistry.active_tags.is_empty():
-		lines.append("tags: %s" % ", ".join(chemistry.active_tags))
+		lines.append("tags: %s" % ", ".join(_tags_with_countdowns(chemistry)))
+	if body != null and not body.mutations.is_empty():
+		lines.append("mutations: %s" % ", ".join(body.mutations))
+	if body != null and not body.exposure.is_empty():
+		lines.append("exposure: %s" % _exposure_text(body))
+	var mind: MindComponent = ECSManager.minds.get(row)
+	if mind != null and mind.active_spell != &"":
+		lines.append("bound spell: %s  (%d known runes)" % [
+			mind.active_spell, mind.known_runes.size()
+		])
 	var perception: PerceptionComponent = ECSManager.perceptions.get(row)
 	if perception != null:
 		lines.append(
@@ -733,6 +786,31 @@ func _inspect(row: int) -> String:
 	if lod != null:
 		lines.append("LoD %s" % _enum_name(ECSEnums.LoD, lod.current_state))
 	return "\n".join(lines)
+
+
+## Tag list with `(Nf)` after anything that is counting down.
+func _tags_with_countdowns(chemistry: ChemistryComponent) -> Array[String]:
+	var now: int = GameLoopManager.micro_frames
+	var out: Array[String] = []
+	for tag in chemistry.active_tags:
+		var left: int = chemistry.frames_left(tag, now)
+		out.append(String(tag) if left < 0 else "%s(%df)" % [tag, left])
+	return out
+
+
+## Exposure as a percentage of the mutation threshold, because 47.3 means nothing on its own and
+## "47%" says how close the next permanent change is.
+func _exposure_text(body: BodyComponent) -> String:
+	var parts: Array[String] = []
+	for track in body.exposure:
+		parts.append("%s %d%%" % [
+			track,
+			int(
+				100.0 * float(body.exposure[track])
+				/ WorldConstants.EXPOSURE_MUTATION_THRESHOLD
+			),
+		])
+	return ", ".join(parts)
 
 
 ## Enums printed as raw integers are unreadable, and worse, they invite guesses: `awareness 0`

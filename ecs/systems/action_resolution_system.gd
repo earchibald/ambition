@@ -12,10 +12,21 @@
 class_name ActionResolutionSystem
 extends RefCounted
 
+## How far a caster may reach for an environmental resource to Absorb. Arm's length plus a step:
+## the grimoire spec's example is casting AT a campfire, not across a room.
+const ABSORB_REACH_M: float = 3.0
+
+## Joules of absorbed environmental energy that buy one point of Strain. Deliberately large —
+## 200 kJ of campfire heat, the Absorb_Heat rune's requirement, buys 2 points against a fireball's
+## 12.5 — so absorbing is a discount and never a way to cast for free.
+const STRAIN_J_EQUIVALENT: float = 100000.0
+
 var attacks_resolved: int = 0
 var kills: int = 0
 var gibs: int = 0
 var damage_dealt: float = 0.0
+var casts_resolved: int = 0
+var casts_fizzled: int = 0
 
 ## Acts committed this tick that somebody might have seen. Drained by GameLoopManager and handed
 ## to PerceptionSystem, which owns the question of who had line of sight.
@@ -136,6 +147,87 @@ func resolve_fall(row: int, impact_speed_mps: float) -> float:
 	return damage
 
 
+## THE CAST PATH (Sprint 4 §3). Turns a compiled spell into physical ECS reality.
+##
+## Three ways to fail, and every one of them is REPORTED, because a cast that resolves silently
+## is indistinguishable from a key that was never bound — the exact failure the outcome bus was
+## added for in Sprint 1.
+##   * The spell is not in the caster's grimoire: nothing was bound.
+##   * The caster lacks the Strain: magic has no regenerating mana bar, it costs stamina
+##     (magic doc §2), and a cast you cannot pay for must say so rather than half-happening.
+##   * Absorb fizzles: the spell needed a quantified environmental resource and the world did not
+##     have enough of it (review D8).
+##
+## Returns true only if an entity was actually spawned.
+func resolve_cast(caster_row: int, spell_id: StringName, aim: Vector3) -> bool:
+	var mind: MindComponent = ECSManager.minds.get(caster_row)
+	var body: BodyComponent = ECSManager.bodies.get(caster_row)
+	var caster: int = ECSManager.handle_of(caster_row)
+	if mind == null or not mind.grimoire.has(spell_id):
+		ECSEvents.action_rejected.emit(caster, &"cast", &"no spell bound")
+		return false
+
+	var spell: CompiledSpell = mind.grimoire[spell_id]
+	# ABSORB FIRST, and only then charge Strain. Reversing the order takes stamina for a cast that
+	# then fizzles, which is the player paying for nothing and is what "the cast is wasted" in the
+	# grimoire spec must NOT be read as.
+	var absorbed: float = _absorb_for(caster_row, spell)
+	if absorbed < 0.0:
+		casts_fizzled += 1
+		ECSEvents.action_rejected.emit(caster, &"cast", &"fizzled — nothing to absorb")
+		return false
+
+	# Absorbed environmental energy pays part of the biological price (grimoire spec §2B). The
+	# discount is bounded at the full cost so a large campfire cannot make a spell free AND
+	# refund stamina.
+	var discount: float = minf(spell.strain_cost, absorbed / STRAIN_J_EQUIVALENT)
+	var strain: float = spell.strain_cost - discount
+	if body == null or body.stamina < strain:
+		ECSEvents.action_rejected.emit(caster, &"cast", &"not enough stamina")
+		return false
+	body.stamina -= strain
+
+	var origin: Vector3 = ECSManager.position_of(caster_row)
+	var heading: Vector3 = Vector3.FORWARD if aim.length() < 0.001 else aim.normalized()
+	if spell.shape == RuneLibrary.SHAPE_PROJECTILE:
+		# Spawned one radius clear of the caster, or it detonates against the hand that cast it.
+		origin += heading * (spell.radius_m + 0.6)
+	EphemeralSystem.spawn_spell(spell, origin, heading, caster)
+	casts_resolved += 1
+	ECSEvents.spell_cast.emit(caster, spell_id, strain)
+	return true
+
+
+## Absorb_Tag, with the conservation rule the review demanded (D8).
+##
+## Returns the joules taken, 0.0 when the spell absorbs nothing, and -1.0 to mean FIZZLE. The
+## quantity is consumed ATOMICALLY from one source: `HeatSourceComponent.consume` decrements
+## before this returns, so two casters resolving in the same Micro tick cannot both spend the
+## same campfire — the second finds it already drained and fizzles, which is the specified
+## behaviour rather than a race.
+##
+## The source tag is only removed when the underlying quantity crosses the extinguish threshold,
+## which is the whole point of quantifying it: ripping [Burning] off a bonfire because someone
+## drew a candle's worth of heat is the bug this design exists to prevent.
+func _absorb_for(caster_row: int, spell: CompiledSpell) -> float:
+	if spell.absorbs == &"":
+		return 0.0
+	var origin: Vector3 = ECSManager.position_of(caster_row)
+	for row in ECSManager.query(ComponentMask.HEAT_SOURCE):
+		var source: HeatSourceComponent = ECSManager.heat_sources.get(row)
+		if source == null or source.stored_energy < spell.absorb_j:
+			continue
+		if origin.distance_to(ECSManager.position_of(row)) > ABSORB_REACH_M:
+			continue
+		var taken: float = source.consume(spell.absorb_j)
+		if not source.is_lit():
+			var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
+			if chemistry != null:
+				chemistry.remove_tag(&"Burning")
+		return taken
+	return -1.0
+
+
 ## Announces an outcome. Systems resolve; the bus reports. Nothing here reads back from the UI.
 func _report(row: int, amount: float, remaining: float, cause: StringName) -> void:
 	if amount <= 0.0:
@@ -196,4 +288,6 @@ func counters() -> Dictionary:
 		"kills": kills,
 		"gibs": gibs,
 		"damage_dealt": damage_dealt,
+		"casts_resolved": casts_resolved,
+		"casts_fizzled": casts_fizzled,
 	}

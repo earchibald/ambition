@@ -1,8 +1,54 @@
 # Agent Handoff State
 
-*   **Current Branch:** `feature/sprint3.5-body-politic`, stacked on
-    `feature/sprint3-world-inspector` (PR #7), off `dev`. Sprint 3 proper is already on `dev`
-    via PR #6. PRs #7 and #8 are OPEN and UNMERGED — await human review.
+*   **Current Branch:** `feature/sprint4-the-crucible`, stacked on
+    `feature/sprint3.5-body-politic` (PR #8), itself on `feature/sprint3-world-inspector`
+    (PR #7), off `dev`. **PRs #7 and #8 are still OPEN and UNMERGED** — await human review.
+
+*   **SPRINT 4 "THE CRUCIBLE" IS IMPLEMENTED (2026-08-01). 503 tests across 32 scripts, gdlint
+    clean, boot sentinel present.** All five roadmap steps plus the Grimoire UI the scope
+    document assigns to this sprint:
+    *   **Step 5 first, as the roadmap instructs.** `Tab` now toggles: a new target inspects, the
+        same target clears, empty ground clears. That last case REVERSES the Sprint 3 player-row
+        fallback, deliberately.
+    *   **Reaction matrix.** Sorted-pair keys, INTRA/INTER/**BOTH** scope, the 60-frame
+        anti-recursion lock, energy DERIVED from the burning material rather than typed into the
+        rule table, a real ambient rise over the chunk's air, and a capped kinetic blast.
+    *   **Gas in the fluid CA**, keyed on ambient versus boiling point: gas ignores elevation and
+        dissipates, while liquid stays exactly conservative.
+    *   **Spell compiler**, with the two caps failing DIFFERENTLY on purpose — complexity refuses,
+        geometry clamps and says so. Runes, triggers, shapes, catalysts, `Absorb_Tag`
+        conservation.
+    *   **Casting** through the Sprint 1 Ephemeral primitive. The TRIGGER decides when the payload
+        fires and the SHAPE decides where, which is what makes the magic doc's Trap and its
+        fireball different spells.
+    *   **Mutation and the ecology loop**, with the faction shift propagated by gossip and
+        weighted by the WITNESS faction's own culture — the only act in the game whose severity
+        depends on who saw it.
+    *   **The Grimoire panel** (`B`), because `docs/scope_and_milestones.md` assigns Sprint 4 the
+        UI that fronts the compiler, and a compiler with no route in would have been the fifth
+        system this project shipped unreachable.
+
+*   **SIX DEFECTS FOUND AGAINST MY OWN WORK, before any external audit.** Listed because the
+    METHOD that found each one is the reusable part:
+    1.  **Four trigger runes and a Cone that did nothing.** `trigger`, `delay_s` and
+        `cone_angle_deg` were written by the compiler and read by nobody. Found by GREPPING FOR A
+        SECOND REFERENCE to every new symbol — not by any test.
+    2.  `RuneLibrary.ids_of_kind` had exactly one reference. Same grep. Deleted.
+    3.  **The mutation affinity table named four cultures that do not exist.** Every branch
+        unreachable. Same grep, then checked against `DAGGenerator.CULTURES`.
+    4.  **The documented flash-fire demo did not work.** The rule was INTER-only and a fireball
+        leaves both tags on ONE entity. Every unit test passed because they all arranged the tags
+        across two neighbours. Found by RUNNING THE DOCUMENTED PLAY ROUTE END TO END.
+    5.  **A +48% regression in the CA, the hottest loop in the build.** Found by A/B BENCHMARKING
+        AGAINST `git stash`, not by any test. Now ~10%, and stated in RUNNING.md.
+    6.  `LineageJournal.apply_to` REPLACED insight rather than merging. Pre-existing and harmless
+        until Sprint 4 made insight load-bearing; an empty journal would have left a successor
+        permanently unable to cast.
+
+*   **30 MUTATION TESTS RUN AGAINST THE NEW CODE, ALL KILLED.** Two initially survived and both
+    turned out to be BAD MUTATIONS rather than weak tests — worth re-deriving rather than
+    trusting. The harness is in the session log; the pattern is: break the fix, run the file,
+    confirm red, restore.
 
 *   **SPRINT 3 + 3.5 (2026-07-31). Green, and under adversarial audit.**
     375 tests across 28 scripts, gdlint clean, boot sentinel present.
@@ -53,11 +99,18 @@
         its own redacted output. `od` shows `"Authorization: Bearer %s" % _api_key` intact.
 
 *   **THE RECURRING DEFECT IN THIS CODEBASE IS A DOC COMMENT THAT DESCRIBES BEHAVIOUR THE CODE
-    DOES NOT HAVE.** Four instances in Sprint 3 alone: `PREFERRED_PROFESSION` (declared, never
-    read), `on_timeout` (written, never called), `_convert_to_corpse` ("for non-player entities",
-    no check), `was_recently_attacked` ("recently", no time check). Every one read as covered and
-    passed review. **Before believing a comment, grep for a second reference to the symbol.**
-    A test that calls a helper directly does not prove the production path uses it.
+    DOES NOT HAVE. Eight instances across two sprints.** Sprint 3: `PREFERRED_PROFESSION`
+    (declared, never read), `on_timeout` (written, never called), `_convert_to_corpse` ("for
+    non-player entities", no check), `was_recently_attacked` ("recently", no time check).
+    Sprint 4: `trigger` and `delay_s` (compiled, never read — four trigger runes with identical
+    behaviour), `cone_angle_deg` (a Cone that was a sphere), `ids_of_kind` (one reference),
+    and `MUTATION_AFFINITY` (naming four cultures no faction has).
+    Every one read as covered and passed review.
+    **BEFORE BELIEVING A COMMENT, GREP FOR A SECOND REFERENCE TO THE SYMBOL.** This is now the
+    single highest-yield check on this codebase; it found four of Sprint 4's six self-caught
+    defects. A test that calls a helper directly does not prove the production path uses it, and
+    a unit test that arranges its own fixture does not prove the shipped content reaches it —
+    the flash-fire demo passed every unit test and did not work.
 
 *   **SPRINT 2 COMPLETE (2026-07-31).** All six roadmap steps implemented and green:
     DAG history, world generation + tile sampler, DAG-to-ECS instantiator, LoD boundary two-way
@@ -72,9 +125,10 @@
     across boots; and Sprint 1's collision could not cross a chunk seam at all.
     STILL UNPLAYED BY A HUMAN in the world scenario — frames inspected only.
 
-*   **Active Goal:** Sprint 3 and 3.5 are implemented and documented. External and Copilot input
-    audits now exist in `docs/audits/`; the implementation audit manifest is also present. Await
-    human review of #7/#8 and triage the remaining input-spec findings before starting Sprint 4.
+*   **Active Goal:** Sprint 4 is implemented, documented and self-audited.
+    `docs/audits/OUTPUT-IMPL-AUDIT-sprint4.md` is the manifest for an external auditor — it
+    carries the claim ledger, the six self-found defects, and **thirteen DECLARED GAPS**. Await
+    human review of #7/#8, then open the Sprint 4 PR against `dev`.
 
 *   **START HERE IF YOU ARE NEW:** `RUNNING.md`. It has the exact commands to run the game, the
     control list, what every object in the test arena is there to test, how to read the debug
@@ -228,19 +282,20 @@
         reference before believing a doc comment.
 
 *   **Next Immediate Steps:**
-    1.  **Wait for the two audits.** Findings land as
-        `docs/audits/{INPUT,OUTPUT}-AUDIT-RESULT--<slug>--<stamp>.md`. Triage them before
-        writing new features; a MAJOR finding against a claim outranks any Sprint 4 task.
-    2.  **Close the declared gaps in `OUTPUT-IMPL-AUDIT` §4b**, or move them into a spec with an
-        owner. The per-faction reasoning cap (G-1) is the one with a real failure mode: one
-        faction can currently fill the global queue.
-    3.  Sprint 4 (reaction matrix, spell compiler, ephemeral casting, mutation) per
-        `docs/scope_and_milestones.md`. Do not start until #7 and #8 are merged.
-        **Roadmap Step 5 comes FIRST**: Tab must toggle. It selects and never deselects, and
-        falls back to the player row on a miss, so the LIVE panel cannot be dismissed. Every
-        Sprint 4 system is inspected through that panel, so fixing it first makes the rest of the
-        sprint faster. `DebugOverlay` already treats `_selected_row = -1` as nothing-selected;
-        only `PlayerInputBridge._select_under_cursor` needs to change.
-    4.  Close the ADR-10 perf gap. Rust/GDExtension port of the CA and the spatial hash. The
+    1.  **Play it.** Sprint 4 has never been touched by a human. Set
+        `"boot_scenario": "test_arena"` and follow the Sprint 4 table in RUNNING.md §3a: `B` to
+        build a fireball, `Q` to shoot the spore cloud, `H` to reach the mutation loop. Every
+        claim is test-covered and NONE of it is judged for feel.
+    2.  **Send `OUTPUT-IMPL-AUDIT-sprint4.md` to external auditors.** §5 Pass 4 — grep every new
+        symbol for a second reference — has now caught five instances of this codebase's
+        signature defect across two sprints and is the highest-yield check available.
+    3.  Close or scope the thirteen declared gaps in that manifest §6. G-3 (no way to learn runes
+        in play) is the one that most limits what a play-tester can reach: ten of seventeen runes
+        are currently test-only.
+    4.  **Close the SPRINT 3.5 declared gaps in `OUTPUT-IMPL-AUDIT-sprint3-and-3.5.md` §4b**, or
+        move them into a spec with an owner. Sprint 4 did not touch them. The per-faction
+        reasoning cap (G-1) is still the one with a real failure mode: one faction can fill the
+        global queue.
+    5.  Close the ADR-10 perf gap. Rust/GDExtension port of the CA and the spatial hash. The
         vendored performance skill flagged `ViewManager`'s one `MeshInstance3D` per entity as
         the next lead — the terrain already uses MultiMesh; entities do not.

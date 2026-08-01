@@ -8,6 +8,13 @@
 ## 0..1. `attenuation_db` is sound loss per tile of this material (hearing model, Sprint 1 §11).
 ## `melt`/`boil` of NAN means the material chars rather than melting cleanly — phase-change
 ## logic must not fire on it.
+##
+## `combustion_j_per_kg` (Sprint 4) is the heat of combustion, present only on materials that
+## actually burn. It exists so a flash-fire's energy is DERIVED from what is burning rather than
+## being a per-rule magic number: the reaction matrix would otherwise carry a hand-tuned joule
+## figure that is identical for a spore cloud and a wooden barn. Real values — dry biomass
+## ~18 MJ/kg, cotton ~17, sulfur ~9.3 — so the temperature rise a fire produces is arguable from
+## the physics rather than from taste.
 class_name MaterialLibrary
 extends RefCounted
 
@@ -73,6 +80,7 @@ const TABLE: Dictionary = {
 		"boil": 445.0,
 		"latent_fusion": 53000.0,
 		"latent_vapor": 1500000.0,
+		"combustion_j_per_kg": 9300000.0,
 		"acoustic_resonance": 0.3,
 		"attenuation_db": 14.0,
 		"base_value": 10.0,
@@ -113,6 +121,7 @@ const TABLE: Dictionary = {
 		"latent_fusion": 0.0,
 		"latent_vapor": 0.0,
 		"acoustic_resonance": 0.1,
+		"combustion_j_per_kg": 17000000.0,
 		"attenuation_db": 4.0,
 		"base_value": 1.0,
 		"toughness_mult": 0.3,
@@ -126,6 +135,7 @@ const TABLE: Dictionary = {
 		"latent_fusion": 0.0,
 		"latent_vapor": 0.0,
 		"acoustic_resonance": 0.2,
+		"combustion_j_per_kg": 18000000.0,
 		"attenuation_db": 10.0,
 		"base_value": 1.0,
 		"toughness_mult": 1.0,
@@ -245,6 +255,21 @@ static func toughness_mult(composition: MaterialCompositionComponent) -> float:
 		var fraction: float = float(composition.volume_fractions[material_id])
 		total += fraction * field(material_id, "toughness_mult", 1.0)
 	return maxf(0.05, total)
+
+
+## Heat of combustion for a whole body, in joules: volume-weighted over what it is made of.
+## Materials with no `combustion_j_per_kg` contribute nothing, so a stone statue in a burning
+## room releases no energy of its own.
+static func combustion_energy_j(
+	physical: PhysicalPropertyComponent, composition: MaterialCompositionComponent
+) -> float:
+	if physical == null or composition == null:
+		return 0.0
+	var per_kg: float = 0.0
+	for material_id in composition.volume_fractions:
+		var fraction: float = float(composition.volume_fractions[material_id])
+		per_kg += fraction * field(material_id, "combustion_j_per_kg", 0.0)
+	return per_kg * maxf(physical.mass_kg, 0.0)
 
 
 static func acoustic_sum(composition: MaterialCompositionComponent) -> float:

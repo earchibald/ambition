@@ -18,6 +18,13 @@ var state: ECSEnums.LoD = ECSEnums.LoD.ACTIVE
 var biome_tag: StringName = &"BIOME_TEST"
 var ambient_temperature_c: float = 20.0
 
+## ZONE-LEVEL HAZARDS (Sprint 4 §4). A whole region that is sporing, filthy, or irradiated, as
+## distinct from a tag on one entity. `MutationSystem` accrues exposure from these for anything
+## standing in the chunk, which is what makes "spend too long in a High_Filth zone" a real rule
+## rather than a description of one. Chunks are not entities, so this is chunk data and NOT a
+## ChemistryComponent (registry §6).
+var hazard_tags: Array[StringName] = []
+
 ## Tile solidity and per-tile elevation in metres (2.5D, ADR-3).
 var tile_map: PackedInt32Array = PackedInt32Array()
 var height_map: PackedFloat32Array = PackedFloat32Array()
@@ -73,6 +80,12 @@ func intern_material(material_id: StringName) -> int:
 		return existing
 	_material_ids.append(material_id)
 	return _material_ids.size() - 1
+
+
+## How many distinct materials this chunk has interned, including the empty id 0. Lets a system
+## build a per-material lookup table once per tick instead of asking per cell.
+func material_count() -> int:
+	return _material_ids.size()
 
 
 func material_name(interned: int) -> StringName:

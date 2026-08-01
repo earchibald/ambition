@@ -47,6 +47,19 @@ signal player_reborn(player: int, lineage_generation: int)
 ## assembled from a template that only ever meant to describe failures.
 signal player_changed_floor(from_floor: int, to_floor: int)
 
+## Magic, reported like everything else. A cast that resolves silently is indistinguishable from
+## one that was never registered, which is the failure mode this bus was added for in Sprint 1.
+## `reason` is empty on success and names the refusal otherwise (not enough stamina, fizzled for
+## want of an environmental resource, compilation refused).
+signal spell_bound(caster: int, spell_id: StringName, ok: bool, reason: StringName)
+signal spell_cast(caster: int, spell_id: StringName, strain: float)
+signal spell_detonated(caster: int, spell_id: StringName, at: Vector3)
+
+## A permanent physiological change. Its own signal rather than a feed line, because the faction
+## reputation path and the UI both need it and neither should have to poll `BodyComponent`.
+signal entity_mutated(entity: int, mutation: StringName)
+
+
 ## A faction's opinion of another crossed a threshold. Carries the score so the feed can say how
 ## bad it is, and `now_hostile` so it can say what changed rather than just that something did.
 signal faction_relationship_changed(

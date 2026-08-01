@@ -338,6 +338,49 @@ func spawn_creature(position: Vector3, species: StringName = &"SPC_CORPSE_RAT") 
 
 
 ## Spawns a dropped item that falls and comes to rest via the loose-item integrator.
+## A tagged lump of matter with the components a reaction needs: chemistry to react, physical and
+## material to carry energy, bounds so the SpatialHash can find it.
+func spawn_reactant(
+	at: Vector3, material_id: StringName, volume_cm3: float, tag: StringName
+) -> int:
+	var handle: int = ECSManager.allocate_entity()
+	var row: int = EH.index_of(handle)
+	ECSManager.set_position(row, at)
+	ECSManager.add_component_bit(row, ComponentMask.POSITION)
+	ECSManager.bounds[row] = BoundsComponent.new(Vector3(0.5, 0.5, 0.5))
+	ECSManager.add_component_bit(row, ComponentMask.BOUNDS)
+
+	var physical := PhysicalPropertyComponent.new()
+	physical.volume_cm3 = volume_cm3
+	var composition := MaterialCompositionComponent.new({material_id: 1.0})
+	MaterialLibrary.recompute_mass(physical, composition)
+	physical.set_temperature_c(20.0)
+	ECSManager.physicals[row] = physical
+	ECSManager.materials[row] = composition
+	ECSManager.add_component_bit(row, ComponentMask.PHYSICAL | ComponentMask.MATERIAL)
+
+	var chemistry := ChemistryComponent.new()
+	chemistry.add_tag(tag)
+	ECSManager.chemistries[row] = chemistry
+	ECSManager.add_component_bit(row, ComponentMask.CHEMISTRY)
+
+	var tags: Array[StringName] = [tag]
+	ECSEvents.emit_entity_created(handle, tags, at)
+	return handle
+
+
+## Something already alight, so the `Absorb_Heat` rune has an environmental resource to consume
+## and the quench rule has a fire to put out.
+func spawn_brazier(at: Vector3) -> int:
+	var handle: int = spawn_reactant(at, MaterialLibrary.MAT_STONE, 4000.0, &"Burning")
+	var row: int = EH.index_of(handle)
+	var source := HeatSourceComponent.new()
+	source.stored_energy = 5000000.0
+	ECSManager.heat_sources[row] = source
+	ECSManager.add_component_bit(row, ComponentMask.HEAT_SOURCE)
+	return handle
+
+
 func spawn_item(
 	position: Vector3, material_id: StringName, volume_cm3: float, quantity: int = 1
 ) -> int:

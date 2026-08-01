@@ -46,6 +46,7 @@ var collision: CollisionResolveSystem = CollisionResolveSystem.new()
 var picking: PickSystem = PickSystem.new()
 var fluids: FluidDynamicsSystem = FluidDynamicsSystem.new()
 var thermodynamics: ThermodynamicsSystem = ThermodynamicsSystem.new()
+var reactions: ReactionSystem = ReactionSystem.new()
 var ephemerals: EphemeralSystem = EphemeralSystem.new()
 var perception: PerceptionSystem = PerceptionSystem.new()
 var metabolism: MetabolismSystem = MetabolismSystem.new()
@@ -62,6 +63,8 @@ var reasoning: ReasoningQueue = ReasoningQueue.new()
 var llm: LLMResolutionSystem = LLMResolutionSystem.new()
 var death_loop: DeathLoopSystem = DeathLoopSystem.new()
 var reputation: ReputationSystem = ReputationSystem.new()
+var mutation: MutationSystem = MutationSystem.new()
+var spells: SpellCompilerSystem = SpellCompilerSystem.new()
 
 ## faction_id -> the hour it last joined the reasoning queue. Private, so it lives last.
 var _last_thought: Dictionary = {}
@@ -142,6 +145,14 @@ func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 	)
 	last_spatial_ms = float(Time.get_ticks_usec() - spatial_start) / 1000.0
 
+	# CHEMISTRY BEFORE HEAT, and both after the hash rebuild. Reactions need post-collision
+	# positions to decide what is touching what, they release energy into the chunk's air, and
+	# thermodynamics is what carries that air temperature into every body in the chunk. Running
+	# them the other way round costs a frame of latency on every fire.
+	reactions.run(micro_frames, chunk, spatial_hash)
+	# Projectiles need the tile grid to know what a wall is. Handed in per tick rather than held,
+	# because the sampler changes when the player crosses a chunk seam or a floor.
+	ephemerals.sampler = World.sampler()
 	ephemerals.run(scaled_delta, spatial_hash)
 	thermodynamics.run(scaled_delta, chunk)
 
@@ -150,11 +161,18 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	metabolism.run(chunk)
 	jobs.run(sim_ticks)
 	perception.run(chunk, spatial_hash, sim_ticks)
+	# The ecology loop. Runs BEFORE the consequence chain so a mutation gained this tick is seen
+	# this tick rather than next, and so it joins the same witness batch a murder would.
+	mutation.run(_sim_seconds(), chunk)
 	# THE CONSEQUENCE CHAIN, in order and on the Simulation tick. Combat only reports that an act
 	# happened; perception decides who was in a position to see it; reputation turns each witness
-	# into a grievance; gossip carries it to people who were not there.
-	for act in combat.witnessed_actions:
-		perception.report_crime(
+	# into a grievance; gossip carries it to people who were not there. Sprint 4 adds mutation to
+	# the same chain rather than beside it: a defilement the village never saw must not change how
+	# they treat you, for the same reason a murder in a back alley does not.
+	var acts: Array[Dictionary] = combat.witnessed_actions.duplicate()
+	acts.append_array(mutation.take_witnessed_mutations())
+	for act in acts:
+		perception.report_witnessed_act(
 			int(act["subject"]), act["action"], act["location"], chunk, spatial_hash
 		)
 	combat.witnessed_actions.clear()
@@ -167,6 +185,18 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	if World.grid != null:
 		streaming.update_chunk_states(World.player_chunk_id, World.grid)
 	_check_player_death()
+
+
+## Simulated seconds between two Simulation ticks. Derived from the FRAME COUNT, not measured:
+## ADR-9 fixes the Micro tick at 60 Hz and the Simulation tick at every 30th, so this is exact.
+## Bullet-time is included because it scales the delta every other system integrates with, and an
+## exposure clock that ignored it would accrue six times faster than the world it is timing.
+func _sim_seconds() -> float:
+	return (
+		float(WorldConstants.SIM_TICK_EVERY_N_MICRO)
+		/ float(WorldConstants.MICRO_TICK_HZ)
+		* time_scale
+	)
 
 
 ## Death is detected on the Simulation tick rather than inside the damage path, so every way of
@@ -280,6 +310,10 @@ func _apply_intent(row: int, intent: ActionIntent, _scaled_delta: float) -> void
 				ECSEvents.item_taken.emit(actor, intent.target, &"taken")
 			else:
 				ECSEvents.action_rejected.emit(actor, &"take", inventory.last_rejection)
+		ActionIntent.CAST:
+			combat.resolve_cast(row, intent.name_data, intent.vector_data)
+		ActionIntent.BIND:
+			spells.bind(row, intent.name_list)
 		ActionIntent.CONSUME:
 			var need: NeedsComponent = ECSManager.needs.get(row)
 			if need != null:
@@ -315,8 +349,9 @@ func counters() -> Dictionary:
 		"clock": GameClock.to_display_string(),
 	}
 	for system in [
-		spatial_hash, collision, picking, fluids, thermodynamics, ephemerals, perception,
-		metabolism, jobs, combat, spoilage, lod, inventory
+		spatial_hash, collision, picking, fluids, thermodynamics, reactions, ephemerals,
+		perception, metabolism, jobs, combat, spoilage, lod, inventory, mutation, reputation,
+		spells
 	]:
 		out.merge(system.counters())
 	out.merge(ECSManager.counters())

@@ -26,6 +26,43 @@ const SEVERITY: Dictionary = {
 	&"TRESPASS": -4.0,
 }
 
+## MUTATION IS NOT A CRIME, and it is the first act whose severity depends on WHO SAW IT.
+##
+## Every other entry in `SEVERITY` is a constant because murder is murder to everybody. A player
+## sprouting fungal lungs is a defilement to the Surface Village and a sign of favour to the
+## Spore-Lord's people, so the delta is looked up against the WITNESS faction's own
+## `culture_tags` (review D3). Getting this wrong in the obvious direction — one global number —
+## would make the mutation path just another way to be hated, which is the opposite of the
+## design: the environment is meant to be a skill tree with a social cost, not a penalty.
+const MUTATION_PREFIX: String = "MUTATION_"
+const MUTATION_KINSHIP: float = 14.0
+const MUTATION_REVULSION: float = -16.0
+
+## Culture tag that makes a faction welcome a given mutation track.
+##
+## THESE ARE REAL TAGS FROM `DAGGenerator.CULTURES`, and the first draft of this table was not:
+## it invented `CULTURE_FUNGAL` and three siblings that no generated faction has ever carried, so
+## every branch below it was unreachable and the whole affinity mechanism would have been a
+## constant `MUTATION_REVULSION` wearing a lookup table. That is this codebase's signature defect
+## and it was caught by grepping for a second reference rather than by any test.
+## `test_every_mutation_affinity_names_a_real_culture` now fails if the two drift apart.
+##
+## Read in play: the goblins (Raiding/Scavenging) warm to you as you rot; the Cult
+## (Ritual/Secrecy) welcomes what the arcane does to you; the Dwarves and the Human village are
+## revolted by all four.
+const MUTATION_AFFINITY: Dictionary = {
+	&"MUTATION_FUNGAL": &"Scavenging",
+	&"MUTATION_FILTH": &"Scavenging",
+	&"MUTATION_TOXIC": &"Ritual",
+	&"MUTATION_ARCANE": &"Ritual",
+}
+
+## Above this magnitude an event is worth repeating, so gossip carries it. Previously only
+## MURDER travelled, which meant a witnessed mutation — the entire propagation mechanism the
+## Sprint 4 faction shift is specified to use — would have stayed with whoever happened to be
+## looking.
+const GOSSIP_WORTHY: float = 10.0
+
 ## Relationship score bounds (registry §4).
 const SCORE_MIN: float = -100.0
 const SCORE_MAX: float = 100.0
@@ -62,9 +99,6 @@ func _record(event: WitnessEvent) -> void:
 	var subject_row: int = ECSManager.resolve(event.subject)
 	if observer_row < 0 or subject_row < 0:
 		return
-	var severity: float = float(SEVERITY.get(event.action, -5.0)) * event.confidence
-	if is_zero_approx(severity):
-		return
 
 	var witness_faction: int = _faction_of(observer_row)
 	var offender_faction: int = _faction_of(subject_row)
@@ -75,6 +109,12 @@ func _record(event: WitnessEvent) -> void:
 
 	var core: FactionCoreComponent = DAGInstantiator.faction_core(witness_faction)
 	if core == null:
+		return
+
+	# AFTER the faction lookup, not before: a mutation's severity depends on the witness's
+	# culture, so it cannot be computed until we know whose culture it is.
+	var severity: float = severity_for(event.action, core) * event.confidence
+	if is_zero_approx(severity):
 		return
 	var before: float = relationship_score(core, offender_faction)
 	adjust(core, offender_faction, severity, event.action)
@@ -88,14 +128,31 @@ func _record(event: WitnessEvent) -> void:
 
 	# The faction REMEMBERS, not just scores. The reasoner reads memory for context, and a bare
 	# number cannot tell it what happened.
+	#
+	# The text is DERIVED from the action and `core` is derived from how big the event was. The
+	# old version had one special case for MURDER and filed everything else as a theft that never
+	# travelled — so an assault was remembered wrongly AND stayed with its only witness.
 	var record: MemoryEvent = MemoryEvent.create(
-		&"WITNESSED_MURDER" if event.action == &"MURDER" else &"WITNESSED_THEFT",
+		StringName("WITNESSED_%s" % event.action),
 		event.action,
 		GameClock.total_hours(),
-		event.action == &"MURDER"
+		absf(severity) >= GOSSIP_WORTHY
 	)
 	record.subject = event.subject
 	_remember_for_faction(core, record)
+
+
+## How badly one faction takes one act. Constant for crime; culture-dependent for mutation.
+##
+## Static and public so the Grimoire, the inspector, and the tests can ask the same question the
+## system asks, rather than each re-deriving it — which is how the answers drift apart.
+static func severity_for(action: StringName, witness: FactionCoreComponent) -> float:
+	if not String(action).begins_with(MUTATION_PREFIX):
+		return float(SEVERITY.get(action, -5.0))
+	var affinity: StringName = MUTATION_AFFINITY.get(action, &"")
+	if witness != null and affinity != &"" and witness.culture_tags.has(affinity):
+		return MUTATION_KINSHIP
+	return MUTATION_REVULSION
 
 
 ## Moves one relationship and records the grievance behind it.

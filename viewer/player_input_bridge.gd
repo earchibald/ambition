@@ -68,10 +68,14 @@ func _physics_process(_delta: float) -> void:
 		_push_interact(row)
 	if not ui_has_mouse and Input.is_action_just_pressed(&"inspect"):
 		_select_under_cursor()
+	if Input.is_action_just_pressed(&"cast"):
+		_push_cast(row, last_aim)
 	if Input.is_action_just_pressed(&"debug_hurt"):
 		_debug_hurt(row)
 	if Input.is_action_just_pressed(&"debug_respawn"):
 		_debug_respawn()
+	if Input.is_action_just_pressed(&"debug_hazard"):
+		_debug_toggle_hazard()
 	if Input.is_action_just_pressed(&"slow_time"):
 		# Bullet-time scales delta, never the 60 Hz tick rate (ADR-9).
 		GameLoopManager.time_scale = 0.2 if GameLoopManager.time_scale == 1.0 else 1.0
@@ -139,6 +143,23 @@ func _push_attack(row: int, swing: Vector3) -> void:
 	intents_pushed += 1
 
 
+## Casts whatever the Grimoire last bound, aimed where the cursor points.
+##
+## The bound Action_ID lives on `MindComponent.active_spell`, not in this node. That keeps the
+## viewer stateless about magic: a cast is "fire what my mind currently holds", so a bind that
+## happened this frame is castable the next without the two nodes having to agree about anything.
+func _push_cast(row: int, aim: Vector3) -> void:
+	var mind: MindComponent = ECSManager.minds.get(row)
+	if mind == null or mind.active_spell == &"":
+		# Silence is the worst possible feedback. Say what is missing and where to fix it.
+		ECSEvents.action_rejected.emit(
+			ECSManager.handle_of(row), &"cast", &"no spell bound — press B"
+		)
+		return
+	ECSManager.push_intent(row, ActionIntent.cast(mind.active_spell, aim))
+	intents_pushed += 1
+
+
 ## DEBUG ONLY: injure the player, so the death loop can be reached at all.
 ##
 ## Sprint 3's headline feature is that death is a loop rather than a screen, and in the generated
@@ -153,6 +174,30 @@ func _debug_hurt(row: int) -> void:
 	body.health = maxf(0.0, body.health - DEBUG_HURT_AMOUNT)
 	ECSEvents.entity_damaged.emit(
 		ECSManager.handle_of(row), before - body.health, body.health, &"debug"
+	)
+
+
+## DEBUG ONLY: make the chunk you are standing in a spore field, and back again.
+##
+## Same reason `K` exists. Mutation is Sprint 4's headline consequence system, and there is no
+## naturally-occurring hazard zone anywhere in either scenario — the world generator does not
+## place them yet — so without this the entire ecology loop is unreachable from the keyboard and
+## can only be seen by reading a test. Exposure accrues at 2.0/s and the threshold is 100, so a
+## mutation lands after about fifty seconds of standing in it.
+func _debug_toggle_hazard() -> void:
+	var chunk: ChunkData = World.active_chunk
+	if chunk == null:
+		return
+	var row: int = EH.index_of(ECSManager.player_handle())
+	if chunk.hazard_tags.has(&"Spores"):
+		chunk.hazard_tags.erase(&"Spores")
+		ECSEvents.action_rejected.emit(
+			ECSManager.handle_of(row), &"hazard", &"the air clears"
+		)
+		return
+	chunk.hazard_tags.append(&"Spores")
+	ECSEvents.action_rejected.emit(
+		ECSManager.handle_of(row), &"hazard", &"the chunk fills with spores"
 	)
 
 
@@ -191,8 +236,30 @@ func _select_under_cursor() -> void:
 		World.sampler(),
 		player_row
 	)
-	# Nothing near the cursor falls back to the player, so Tab always shows something useful.
-	_overlay.select_row(EH.index_of(handle) if EH.is_valid(handle) else player_row)
+	var picked: int = EH.index_of(handle) if EH.is_valid(handle) else -1
+	_overlay.select_row(next_selection(picked, _overlay.selected_row()))
+
+
+## What Tab should select next, given what it hit and what is already selected.
+##
+## THREE BEHAVIOURS, and they have to stay distinguishable (Sprint 4 roadmap Step 5):
+##   * a NEW target   -> inspect it, with no clearing press in between;
+##   * the SAME target -> clear, restoring the unobstructed LIVE view;
+##   * empty ground    -> clear.
+##
+## That last case REVERSES a Sprint 3 decision. Tab used to fall back to the player row on a miss
+## so it "always shows something useful", which was the right fix while the complaint was a hitbox
+## that felt broken, and the wrong one once the panel grew big enough to obstruct the view: there
+## was then no press anywhere on screen that dismissed it.
+##
+## Extracted as a static because the behaviour is the whole feature and the rest of
+## `_select_under_cursor` is a camera, a viewport and a spatial hash. Testing it through those
+## would test the pick path instead — which already has its own tests — and would make the one
+## rule that matters here the hardest part to assert.
+static func next_selection(picked_row: int, selected_row: int) -> int:
+	if picked_row < 0:
+		return -1
+	return -1 if picked_row == selected_row else picked_row
 
 
 ## `E` takes what is under the cursor, or failing that the nearest thing within arm's reach.

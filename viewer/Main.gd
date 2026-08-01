@@ -31,11 +31,30 @@ func _ready() -> void:
 
 
 ## A rat to fight and a nugget to pick up, so Gate A and Gate B are reachable on boot.
+##
+## SPRINT 4 ADDS THREE TARGETS, for the same reason `K` and `R` exist: a feature with no route in
+## from the keyboard is one nobody can play-test, and this project has shipped that four times.
+## The reaction matrix needs something to react, and the arena had no spores, no volatile gas and
+## nothing burning.
+##
+## They are placed APART — further than `ReactionSystem.CONTACT_RADIUS_M` — so nothing goes off
+## on boot. The player sets them off with a spell, which makes one demo out of the Grimoire, the
+## cast path and the reaction matrix instead of three separate things to arrange.
 func _spawn_demo_contents() -> void:
 	var chunk: ChunkData = World.active_chunk
 	var spawn: Vector3 = TestArena.spawn_position(chunk)
 	World.spawn_creature(spawn + Vector3(3.0, 0.0, 0.0), &"SPC_CORPSE_RAT")
 	World.spawn_item(spawn + Vector3(1.5, 0.5, 0.0), MaterialLibrary.MAT_COPPER, 112.0, 5)
+
+	# Shoot this with a fireball: flash-fire, the biomass burns, the chunk's air warms.
+	World.spawn_reactant(
+		spawn + Vector3(0.0, 0.5, 8.0), MaterialLibrary.MAT_BIOMASS, 100.0, &"Spores"
+	)
+	# Shoot this one instead: explosion, and everything nearby is thrown outward.
+	World.spawn_reactant(
+		spawn + Vector3(6.0, 0.5, 8.0), MaterialLibrary.MAT_SULFUR, 1000.0, &"Volatile_Gas"
+	)
+	World.spawn_brazier(spawn + Vector3(-4.0, 0.5, 4.0))
 
 
 ## Fails loudly at boot rather than subtly at runtime. These are the Sprint 0 gate
@@ -66,5 +85,8 @@ func _verify_boot_contract() -> void:
 		&"overlay_text_bigger",
 		&"overlay_text_smaller",
 		&"cancel",
+		&"grimoire",
+		&"cast",
+		&"debug_hazard",
 	]:
 		assert(InputMap.has_action(action), "missing InputMap action: %s" % action)

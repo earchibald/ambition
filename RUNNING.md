@@ -58,8 +58,11 @@ place the specific test features in §3 exist.
 | `Shift` + move | **Precision** — 35% speed | For lining up on a ledge edge or a pit lip without overshooting. Full speed is for covering ground. |
 | `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
+| `B` | **Grimoire** — compose a spell | Opens the rune list. `1`-`9` add and remove runes, `Enter` binds, `Backspace` clears, `B` or `Esc` closes. The panel previews the compiled spell live — cost, radius, lifetime, and any cap that fired — and previewing costs nothing. |
+| `Q` | **Cast** the bound spell | Fires whatever the Grimoire last bound, aimed where the cursor points. Refuses out loud if nothing is bound, or if you lack the stamina. Magic costs **stamina**, not mana. |
+| `H` | **DEBUG: fill the chunk with spores** | Toggles. The only route to the mutation loop — no hazard zone occurs naturally in either scenario yet. About 50 s of standing in it produces a mutation. |
 | `E` | **Use stairs**, or interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
-| `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. **Does not toggle off** — see the NOT-built list. |
+| `Tab` | Inspect — **toggles** | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Tab the **same** target again to clear it; Tab **empty ground** to clear it. Tab a **different** target to switch straight to it, with no clearing press in between. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
 | `K` | **DEBUG: injure yourself** — 25 damage | The only way to reach death in the generated world, which has no pit, no hazard and nothing hostile. Four presses kills you. |
 | `R` | **DEBUG: run the year and respawn** | Only works once dead. Runs the Interregnum and brings in the successor, so the loop can be completed rather than pausing forever. |
@@ -120,7 +123,7 @@ Aim rotates **continuously** everywhere, including behind you and above the hori
 that never meets the ground keeps the heading the cursor implies, which is exactly the limit the
 ground intersection approaches as the ray flattens — so the two cases meet without a seam.
 
-## 3a. What to test right now — CURRENT AS OF SPRINT 3
+## 3a. What to test right now — CURRENT AS OF SPRINT 4
 
 > **Maintenance rule.** This section is rewritten at the end of every sprint, before its PR
 > opens. A play-tester should never have to work out what is finished by poking at it, and three
@@ -135,6 +138,7 @@ ground intersection approaches as the ray flattens — so the two cases meet wit
 | 2 | A generated world: 500 years of history, a nine-chunk village, factions placed by that history |
 | 3 | **Villagers walk** planned routes. **Factions decide and speak** once an in-game hour. **Death is a loop** — corpse, loot spill, control detached. **Stairs** to five dungeon floors |
 | 3.5 | **Crime has consequences.** Witnesses, grievances, per-faction reputation, gossip that spreads over time, and factions that change what they do because of what you did |
+| 4 | **Magic you compose yourself** (`B` to build a spell, `Q` to cast it). **Chemistry that chains** — fire spreads, gas explodes, water quenches. **Your body changes** in a hazardous place, and factions judge you for it by their own culture |
 
 ### Inspecting the generated world (`F1`)
 
@@ -158,6 +162,36 @@ Two readings that look wrong and are not:
 - **`wealth 1155 units, materialized as stacks`** — an Active faction's ledger is *empty*,
   because promotion spent it into physical piles. The inspector reports the total from whichever
   side currently holds it, so a village you are standing in never reads as destitute.
+
+### The Sprint 4 checks
+
+**Use `test_arena` for these.** Set `"boot_scenario": "test_arena"` in `debug_config.json`. The
+generated village has no spores, no volatile gas and nothing burning; the arena is where the
+Sprint 4 props are placed. They sit apart from each other on purpose, so nothing goes off before
+you do it.
+
+Where they are, relative to your spawn point:
+
+| Prop | Offset from spawn | What it is for |
+|---|---|---|
+| Spore cloud | 8 m **ahead** (+Z) | Shoot it: flash-fire |
+| Volatile gas | 8 m ahead, 6 m **right** | Shoot it: explosion |
+| Brazier | 4 m ahead, 4 m **left** | Already alight. Fuel for `Absorb_Heat`, and a fire for water to quench |
+
+| Check | How | What it proves |
+|---|---|---|
+| **You can build a spell** | `B`. Press the numbers for `On_Cast`, `On_Impact`, `Projectile`, `Add_Temperature`, `Apply_Burning`. The panel prints the compiled line — `r1.5m v18 ttl3.0s strain 20.0 +Burning` — as you go | The compiler, and the Dry Run: this preview is the same pure code a real Bind runs, and it costs nothing |
+| **The cognitive cap refuses** | Keep adding runes past a total cost of 15. The preview turns red: `will not compile — exceeds cognitive limits` | The complexity gate. Your budget is `Rune_Stability x 1.5`, and a starting adventurer has 10 |
+| **The geometric cap clamps** | It cannot be reached with the starting runes — the over-sized ones are not in your grimoire yet. `tests/test_spellcraft.gd` covers it | The two caps fail **differently** on purpose: complexity refuses, geometry overrides and tells you it did |
+| **Casting costs you** | `Enter` to bind, then `Q`. Watch the stamina bar drop by the strain figure | Magic has no mana bar. It is paid for out of the body |
+| **A miss still expires** | Cast at open floor. `magic` shows `1 in flight`, then it goes off at the end of its range | The TTL sweep. An ephemeral that never expires is a leak with a radius |
+| **The flash-fire** | Aim at the spore cloud, `Q`. It catches; `chemistry` shows a reaction; the room's `air` figure climbs | The reaction matrix, and energy derived from what is burning rather than typed into a table |
+| **The explosion** | Aim at the volatile gas instead. It is consumed, and the rat is thrown clear | The same matrix, a different rule, a visibly different outcome |
+| **It cannot loop** | Watch `chemistry` after a reaction: `locked` is non-zero for 60 frames. Tab a participant — its tags read `Reaction_Cooldown(43f)` | The anti-recursion lock, counting down where you can see it |
+| **Your body changes** | `H`, then stand still for about a minute. Tab yourself: `exposure: FUNGAL 62%` climbs, then the feed prints `you MUTATED — Fungal_Lungs` | The ecology loop. Exposure, the threshold, and a permanent change |
+| **The mutation is a trade** | After it lands, your **stamina bar is shorter** — max stamina fell by 20 — and you now resist spores | Every mutation costs something, or a hazard is a farm |
+| **Factions judge you by their own culture** | With a mutation, walk into view of a villager. `F1` FACTIONS: a Farming/Trade culture moves **against** you, a Raiding/Scavenging one moves **toward** you | The mutation shift is gossip-propagated reputation, not a hivemind — and it is the only act in the game whose severity depends on who saw it |
+| **Tab toggles** | Tab a villager, read the panel, Tab the same villager again — the panel goes. Tab a second villager directly and it switches without a clearing press | Sprint 4 Step 5, the playability defect carried over from Sprint 3 |
 
 ### The Sprint 3 checks
 
@@ -190,39 +224,74 @@ authored test geometry there and none of it exists in a generated village. Set
 
 ### Claims in this file are checked against the code
 
-Every capability above was verified against the implementation before being written down, and the
-audit removed two claims that were not true:
+Every capability above was verified against the implementation before being written down, and
+`tests/test_grimoire_ui.gd` runs the two Sprint 4 demos end to end — bind a fireball, shoot the
+spore cloud, watch the room warm — so if those instructions go stale the suite goes red. That is
+deliberate: this file is a contract, and a contract nothing checks is a wish.
+
+Corrections earlier audits forced, kept as a record of the failure mode:
 
 - *"Take fatal damage"* was listed as a Sprint 3 check while the generated world contained **no
   pit, no hazard and nothing hostile**. There was no way to reach the death loop at all, and no
   way to leave it once reached, because the Interregnum had no keyboard trigger. `K` and `R` now
-  exist for exactly that reason.
+  exist for exactly that reason — and `H` was added in Sprint 4 before the same thing could
+  happen to mutation.
 - *"Hit a villager and it becomes a slab"* implied one hit. Villagers have 100 HP and a melee
   swing does roughly 35, so it takes about three.
 
 If something here does not work as described, that is a bug in the code or in this file — report
 it either way.
 
-### NOT built yet — as of Sprint 3
+### NOT built yet — as of Sprint 4
 
-Not bugs. Listed so play-testing stops rediscovering them:
+**ONE list, rewritten every sprint, never appended to.** Not bugs. Listed so play-testing stops
+rediscovering them.
+
+**World and threat**
 
 - **No guards, no arrest, no combat response.** A faction that hates you will FORTIFY and hold a
-  grudge, but nobody comes after you. Hostile action against the player is Sprint 4 and later.
-- **No respawn UI.** `R` triggers the Interregnum from the keyboard, and it works, but there is
-  no fade, no "One Year Passes" card, and no death screen — you simply have control again.
-- **Nothing in the world can kill you.** No hazards, no hostile creatures outside the arena. `K`
-  exists so the death loop is reachable; a real threat is Sprint 4 and later.
-
+  grudge, but nobody comes after you.
+- **Nothing in the world attacks you.** No hostile creatures outside the arena, and no naturally
+  occurring hazard zones — which is why `K` exists to reach death and `H` exists to reach
+  mutation. Both are debug keys standing in for content.
 - **No loot placement.** Faction stockpiles materialize at anchors; nothing else is scattered.
 - **The doorway is a gap, not a door.** No door entities or openable fixtures exist.
 - **No ceilings.** Floors are 2.5D planes (ADR-3), so "indoors" is not a concept the renderer
   expresses yet.
+
+**Magic**
+
+- **The Grimoire is a keyboard list, not the node graph.** The drag-and-drop editor, the Dry Run
+  **hologram** (a 3D wireframe preview in a SubViewport) and the translation-cipher minigame from
+  `inventory_and_grimoire_mechanics_specification.md` §2 are a UI sprint. The Dry Run's *logic*
+  is built — the panel previews the real compiled spell — but it is text, not wireframes.
+- **No overclocking and no mishap table.** A spell you cannot afford is refused; it cannot be
+  force-compiled into an `[Unstable]` one that rolls d100 on cast. Spec'd in the grimoire doc,
+  not built.
+- **You cannot learn new runes in play.** `MindComponent.known_runes` is seeded with seven and
+  nothing in the world grants more. The ruined libraries the DAG places are not readable yet, so
+  the runes that exist to be excavated — `Great_Aura`, `Heavy_Projectile`, `On_Proximity`,
+  `On_Timer`, `Cone`, `Apply_Filth`, `Apply_Spores`, `Absorb_Heat`, `Chill`, `Remove_Wet` — are
+  reachable only from tests.
+- **Spells have no visual.** A cast spawns a real entity that moves, collides and applies its
+  payload, and `ViewManager` draws it as an ordinary box. No particles, no light, no trail.
+- **NPCs do not cast.** The compiler is reachable by any mind; only the player's is driven.
+
+**Chemistry**
+
+- **Four reaction rules**, not a content library: fire+gas, fire+spores, fire+water, and the
+  self-quench. Enough to prove the matrix; not a game's worth of chemistry.
+- **Heat does not ignite.** There is no ignition-temperature model, so `Add_Temperature` alone
+  will not set a flammable thing alight — a spell has to say `Apply_Burning`.
+- **Gas is temperature-driven only.** A material becomes gaseous when the chunk's ambient passes
+  its boiling point. There is no separate gas emission, no pressure, and no ventilation.
+
+**Body and interface**
+
+- **Four mutations, one per hazard track.** The table is a worked example, not a content set.
+- **No respawn UI.** `R` triggers the Interregnum and it works, but there is no fade, no "One
+  Year Passes" card, and no death screen — you simply have control again.
 - **No inventory screen.** A successful `E` reports in the event feed and nowhere else.
-- **`Tab` does not toggle.** It selects; it never deselects. Pressing it on empty ground falls
-  back to inspecting you rather than clearing, so once the inspection panel is up there is no way
-  to get the unobstructed LIVE view back short of cycling `F1` off and on. Fixed first thing in
-  Sprint 4 (roadmap Step 5).
 
 ### What is in the arena, and what each thing is there to test
 
@@ -234,6 +303,9 @@ rule, so "walking around" is a real test pass:
 | Spawn, tile (8, 32) | You, the cyan box | — |
 | ~3 m east | A **red** box: a corpse rat, 8 HP | Melee, the energy damage model, the gib threshold |
 | ~1.5 m east | A **gold** box: 5 copper nuggets | `TAKE` intent, the loose-item integrator, inventory volume |
+| 8 m ahead (+Z) | A **spore cloud** — 0.1 kg of biomass tagged `Spores` | The flash-fire rule, combustion energy derived from material, the ambient rise |
+| 8 m ahead, 6 m right | A **volatile gas pocket** — sulfur tagged `Volatile_Gas` | The explosion rule, the blast impulse, and `consumes` destroying a reactant |
+| 4 m ahead, 4 m left | A **brazier**, already `Burning`, holding 5 MJ | `Absorb_Heat`'s environmental resource, and a fire for water to quench |
 | Tile x=24, full height | Interior wall with a 2-tile doorway at y=32-33 | Wall sliding, and line-of-sight occlusion |
 | Tiles (40-49, 40-49) | Ledge raised 0.4 m | The step-up rule — you should climb it without jumping |
 | Tiles (40-45, 12-17) | Pit, 2.5 m deep | Drop handling and fall damage |
@@ -420,7 +492,7 @@ godot --headless -s addons/gut/gut_cmdln.gd \
 `tests/invariants/`, `tests/perf/` and `tests/soak/` are silently skipped and the run reports
 green having never opened them.
 
-Expected: **25 scripts, 307 tests, 307 passing**. Under three seconds.
+Expected: **32 scripts, 503 tests, 503 passing**. Under six seconds.
 
 One file at a time, which is what you want while iterating:
 
@@ -443,7 +515,11 @@ godot --headless -s addons/gut/gut_cmdln.gd -gtest=res://tests/test_fluid_dynami
 | `test_behaviour.gd` | Utility scoring, hysteresis, the job latch, need-driven preemption |
 | `test_inventory_and_lod.gd` | Container volume, LoD transitions, conservation across them |
 | `test_viewer_visibility.gd` | That you can actually **see** it — see §5 |
-| `test_playtest_regressions.gd` | Every defect a human found by playing that the suite had missed |
+| `test_playtest_regressions.gd` | Every defect a human found by playing that the suite had missed, including the `Tab` toggle |
+| `test_reactions.gd` | The reaction matrix: sorted-pair keys, INTRA/INTER/BOTH scope, the anti-recursion lock and its expiry, derived combustion energy, the ambient rise and its cap, the blast, and gas in the fluid grid |
+| `test_spellcraft.gd` | The compiler (both caps, and that they fail differently), trigger precedence, the cone wedge, casting, strain, projectile/aura/timer/proximity behaviour, and `Absorb_Tag` conservation including the double-spend |
+| `test_mutation.gd` | Exposure, the threshold and its unconditional reset, the mutation table's real stat effects, resistance, culture-dependent severity, and that mutations reset on death while insight carries |
+| `test_grimoire_ui.gd` | The **route in**: key press to intent to spell in the world, plus the two demos this file tells you to run |
 | `test_camera_and_motion.gd` | Deadzone arithmetic, fixed-timestep interpolation, the aim sweep |
 | `test_dag_history.gd` | Bounded generation, reproducibility, conquest wealth conservation |
 | `test_world_generation.gd` | Per-chunk determinism, gate connectivity, the tile sampler, anchors |
@@ -494,19 +570,36 @@ godot --headless -s addons/gut/gut_cmdln.gd \
   -gtest=res://tests/perf/test_micro_tick_benchmark.gd -gexit
 ```
 
-Measured on an M5 Max **debug** build:
+Measured on an M5 Max **debug** build, Sprint 4:
 
 ```
-PERF  entities=   50  micro(collision+hash)= 0.875 ms  budget=8.0 ms  ok
-PERF  entities=  500  micro(collision+hash)= 4.831 ms  budget=8.0 ms  ok
-PERF  entities= 1500  micro(collision+hash)=13.661 ms  budget=8.0 ms  OVER
-PERF  CA cells= 3844   3.194 ms  0.831 us/cell  -> 20k cells would cost 16.6 ms
-PERF  spatial hash rebuild, 1500 entities = 1.014 ms
+PERF  entities=   50  micro(collision+hash)= 1.279 ms  budget=8.0 ms  ok
+PERF  entities=  500  micro(collision+hash)= 7.926 ms  budget=8.0 ms  ok
+PERF  entities= 1500  micro(collision+hash)=22.978 ms  budget=8.0 ms  OVER
+PERF  CA cells= 3844   4.135 ms  1.076 us/cell  -> 20k cells would cost 21.5 ms
+PERF  spatial hash rebuild, 1500 entities = 1.149 ms
+PERF  reactions, 500 reactive entities = 1.333 ms/tick  budget=8.0 ms  ok
+PERF  ephemerals, 200 auras = 0.472 ms/tick
 ```
 
-**Sprint 1 does not meet the ADR-10 Micro budget at the 1,500-entity target.** Scaling is linear;
-the constant is too high. Do not "fix" this by lowering the entity cap. The agreed response is to
-port the CA and the spatial hash to Rust/GDExtension. See `STATE.md`.
+**The build does not meet the ADR-10 Micro budget at the 1,500-entity target.** Scaling is
+linear; the constant is too high. Do not "fix" this by lowering the entity cap. The agreed
+response is to port the CA and the spatial hash to Rust/GDExtension. See `STATE.md`.
+
+Three things about these numbers, because a benchmark that is not read honestly is worse than
+none:
+
+- **The collision figures are higher than the Sprint 1 record (13.7 ms at 1,500) and Sprint 4 did
+  not cause it.** Measured both ways with `git stash`: 22.3 ms with Sprint 4 and 22.7 ms without.
+  It is this machine on this day. The earlier figure was recorded elsewhere and should not be
+  compared against directly.
+- **Sprint 4 did cost the fluid CA about 10%** — 0.97 to 1.07 us/cell, measured the same way. The
+  first version cost **+48%**, because the gas check was a function call per cell inside the
+  hottest loop in the build; it is now a table built once per tick with a `_any_gas` early-out
+  that a normal 20 C room never indexes.
+- **The two new 60 Hz systems are now benchmarked**, because ADR-10's whole lesson is that an
+  unmeasured budget is a wrong one. The reaction figure is a worst case: 500 entities, every one
+  of them reactive, none on cooldown.
 
 ## 7. Git workflow
 

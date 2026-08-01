@@ -219,8 +219,14 @@ static func attenuation_between(from: Vector3, to: Vector3, chunk: ChunkData) ->
 	return total
 
 
-## A crime becomes reputation data ONLY through a witness. There is no global crime flag.
-func report_crime(
+## An act becomes reputation data ONLY through a witness. There is no global crime flag.
+##
+## RENAMED from `report_crime` in Sprint 4. The function never looked at the action it was given
+## — it resolves line of sight and confidence and nothing else — but the name said "crime", and
+## Sprint 4 routes a MUTATION through it, which is not a crime and for some factions is a
+## welcome. A name that describes the caller's intent rather than the function's job is how a
+## reader ends up believing a guard exists that does not.
+func report_witnessed_act(
 	subject_row: int, action: StringName, location: Vector3, chunk: ChunkData, hash: SpatialHash
 ) -> int:
 	var witnesses: int = 0
@@ -260,9 +266,11 @@ func _write_memory(observer_row: int, event: WitnessEvent) -> void:
 	var memory: MemoryComponent = ECSManager.memories.get(observer_row)
 	if memory == null:
 		return
-	var kind: StringName = &"WITNESSED_THEFT"
-	if event.action == &"MURDER":
-		kind = &"WITNESSED_MURDER"
+	# DERIVED from the action rather than a two-branch ladder. The old version had exactly one
+	# special case for MURDER and filed everything else — an assault, a trespass, a Sprint 4
+	# mutation — as WITNESSED_THEFT, so a villager who watched you break someone's arm remembered
+	# a robbery. Nothing read the text closely enough for it to matter until the reasoner did.
+	var kind: StringName = StringName("WITNESSED_%s" % event.action)
 	var record: MemoryEvent = MemoryEvent.create(
 		kind, event.action, GameClock.total_hours(), event.is_actionable()
 	)

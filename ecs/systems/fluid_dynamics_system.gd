@@ -12,23 +12,60 @@
 ## FLOW USES INTEGER HYSTERESIS. Without `FLOW_MIN_DIFF`, two equal-elevation neighbours holding
 ## 1 and 0 units enter a permanent 2-cycle: both stay dirty forever, so every puddle edge in the
 ## world becomes a permanent budget consumer and the dirty set never drains.
+##
+## GAS IS THE SAME GRID AT A DIFFERENT TEMPERATURE (Sprint 4 §1). A material is gaseous when the
+## chunk's ambient temperature is at or above its boiling point — so heating a room past 100 C
+## turns its puddles into steam without a second grid, a second buffer, or a second conservation
+## contract. Two behaviours change, and only two:
+##   * ELEVATION STOPS MATTERING. Liquid flows downhill; gas fills whatever volume it is in. The
+##     height term is dropped from the head comparison, so steam climbs a ledge that water pools
+##     below.
+##   * IT DISSIPATES. Gas thins out and eventually vanishes. This is a DELIBERATE break in the
+##     conservation invariant, and it is confined to gaseous cells: the LoD conservation property
+##     asserted since Sprint 2 still holds exactly for liquids, which is what it was written
+##     about. A gas that conserved would be a permanent fog bank the player could never clear.
 class_name FluidDynamicsSystem
 extends RefCounted
+
+## Fraction of a gaseous cell's volume lost per fluid tick. 12% at 15 Hz halves a cloud in about
+## 0.4 s and clears it in ~2 s, which is long enough to see and short enough not to accumulate.
+const GAS_DISSIPATION: float = 0.12
+
+## Below this a gaseous cell is rounded away rather than left to decay by fractions forever.
+const GAS_MIN_UNITS: int = 2
 
 # --- Observability ---
 var cell_updates: int = 0
 var dirty_cell_count: int = 0
 var budget_exhausted: bool = false
 var pumped_units: int = 0
+var gas_cells: int = 0
+var dissipated_units: int = 0
 
 ## Reused scratch so a tick allocates nothing.
 var _touched: PackedInt32Array = PackedInt32Array()
+
+## Interned material id -> 1 when it is gaseous at this tick's ambient temperature. Rebuilt once
+## per tick, because ambient changes and boiling points do not.
+##
+## THIS IS A TABLE, NOT A FUNCTION CALL, and the difference was measured. The first version asked
+## `_is_gaseous()` per processed cell — a call plus a Dictionary probe plus a `MaterialLibrary`
+## lookup — inside the hottest loop in the build. It cost **+48%**: 0.85 to 1.25 us/cell, which
+## at ADR-10's 20,000-cell figure is 17 ms becoming 25 ms, against an 8 ms budget for ALL Micro
+## systems. A flat array index plus the `_any_gas` early-out costs nothing measurable, and the
+## overwhelmingly common case — a 20 C room where nothing boils — never indexes it at all.
+var _gas_by_id: PackedByteArray = PackedByteArray()
+## False when nothing in this chunk is gaseous, which is almost always. One bool test per cell.
+var _any_gas: bool = false
 
 
 func run(chunk: ChunkData) -> void:
 	cell_updates = 0
 	budget_exhausted = false
 	pumped_units = 0
+	gas_cells = 0
+	dissipated_units = 0
+	_build_gas_table(chunk)
 	_pump_flood_buffer(chunk)
 
 	var volume: PackedInt32Array = chunk.volume_map
@@ -67,7 +104,15 @@ func run(chunk: ChunkData) -> void:
 		# grid doubles every tick. `available` is decremented as we go, so the cell can never
 		# promise more than it owns.
 		var available: int = here
-		var height_units: float = heights[idx] * float(WorldConstants.MAX_CELL_VOLUME)
+		# Gas ignores elevation entirely — that is the whole difference between a puddle and a
+		# cloud. The height term is zeroed rather than the neighbour loop being branched, so the
+		# flow arithmetic stays byte-identical for both and exactly ONE behaviour changes.
+		var is_gas: bool = _any_gas and _gas_by_id[chunk.material_map[idx]] == 1
+		if is_gas:
+			gas_cells += 1
+		var height_units: float = 0.0
+		if not is_gas:
+			height_units = heights[idx] * float(WorldConstants.MAX_CELL_VOLUME)
 		var moved_any: bool = false
 
 		# Four orthogonal neighbours. The apron guarantees all four are in range, so there is no
@@ -83,10 +128,13 @@ func run(chunk: ChunkData) -> void:
 			if chunk.tile_map[other] == ChunkData.TILE_SOLID:
 				continue
 			var head_here: float = float(available) + height_units
-			var head_other: float = (
-				float(volume[other] + delta[other])
-				+ heights[other] * float(WorldConstants.MAX_CELL_VOLUME)
-			)
+			# BOTH sides drop the height term for gas, not just the source. Comparing a gas
+			# source's zeroed head against a liquid-style neighbour head would make a cloud
+			# refuse to climb rather than climb freely — the bug the zeroing exists to avoid.
+			var other_height: float = 0.0
+			if not is_gas:
+				other_height = heights[other] * float(WorldConstants.MAX_CELL_VOLUME)
+			var head_other: float = float(volume[other] + delta[other]) + other_height
 			var difference: int = int(head_here - head_other)
 			if difference < WorldConstants.FLOW_MIN_DIFF:
 				continue
@@ -120,6 +168,63 @@ func run(chunk: ChunkData) -> void:
 		assert(volume[index] >= 0, "fluid volume went negative — outflow exceeded the cell")
 		if volume[index] > 0:
 			chunk.dirty_cells[index] = true
+
+	_dissipate_gas(chunk, to_process)
+
+
+## Gas thins out. Runs over the cells PROCESSED this tick, not over the surviving dirty set.
+##
+## The distinction is the whole correctness of this pass. Phase 1 drops a cell from the dirty set
+## the moment it stops flowing — that is what makes a settling puddle provably drain — so a gas
+## cloud that has finished spreading is already gone from the set by the time this runs. Iterating
+## the survivors left exactly the residue that had stopped moving, permanently, which is the fog
+## bank this feature exists to avoid. Gaseous cells are re-marked here instead, so a cloud keeps
+## decaying after it stops flowing and only leaves the set when it is empty.
+##
+## THIS IS THE ONE PLACE THE GRID IS NOT CONSERVATIVE, and it is deliberate. Everything else in
+## this file exists to make volume exactly conservative; the LoD conservation property test stays
+## valid because it is written about liquids.
+func _dissipate_gas(chunk: ChunkData, processed: Array) -> void:
+	if not _any_gas:
+		return
+	for idx in processed:
+		var units: int = chunk.volume_map[idx]
+		if units <= 0 or not _is_gaseous(chunk, chunk.material_map[idx]):
+			continue
+		# At least one unit, or a cell of 8 decays by 0.96 -> 0 and sits there forever.
+		var lost: int = maxi(1, int(float(units) * GAS_DISSIPATION))
+		if units - lost < GAS_MIN_UNITS:
+			lost = units
+		chunk.volume_map[idx] = units - lost
+		dissipated_units += lost
+		if chunk.volume_map[idx] > 0:
+			chunk.dirty_cells[idx] = true
+
+
+## Which of this chunk's interned materials are gases AT THIS TEMPERATURE. Boiling point comes
+## from the material library, so this is the same physics the thermodynamics phase model uses
+## rather than a second, disagreeing notion of what "gas" means. A `NAN` boil means the material
+## chars instead of boiling and is never gaseous.
+##
+## Built once per tick. A chunk has a handful of materials and tens of thousands of cells.
+func _build_gas_table(chunk: ChunkData) -> void:
+	var count: int = chunk.material_count()
+	if _gas_by_id.size() < count:
+		_gas_by_id.resize(count)
+	_any_gas = false
+	# Id 0 means "no material" and is never a gas.
+	_gas_by_id[0] = 0
+	for interned in range(1, count):
+		var boil: float = MaterialLibrary.field(chunk.material_name(interned), "boil", NAN)
+		var gaseous: bool = not is_nan(boil) and chunk.ambient_temperature_c >= boil
+		_gas_by_id[interned] = 1 if gaseous else 0
+		_any_gas = _any_gas or gaseous
+
+
+## Table lookup, guarded by the early-out. Kept as a named function only because it is called
+## from three places; it inlines to an array index.
+func _is_gaseous(_chunk: ChunkData, interned: int) -> bool:
+	return _any_gas and interned < _gas_by_id.size() and _gas_by_id[interned] == 1
 
 
 ## The Flood Buffer: pumps a bounded volume per tick so promoting a flooded chunk cannot
@@ -185,4 +290,6 @@ func counters() -> Dictionary:
 		"ca_dirty_cells": dirty_cell_count,
 		"ca_budget_exhausted": budget_exhausted,
 		"ca_pumped_units": pumped_units,
+		"ca_gas_cells": gas_cells,
+		"ca_dissipated": dissipated_units,
 	}
