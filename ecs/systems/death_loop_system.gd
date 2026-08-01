@@ -134,7 +134,11 @@ func _spill_inventory(player_row: int, corpse_row: int) -> void:
 
 ## A year passes. Ledgers and counters only.
 func run_interregnum(bootstrapper: Bootstrapper, grid: WorldGrid) -> void:
-	bootstrapper._run_interregnum()
+	# The test arena has no bootstrapper and no grid — it is one hand-authored chunk with no
+	# history to age. The taxes below still apply to whatever entities exist, so a death in the
+	# arena completes its loop rather than crashing on a null.
+	if bootstrapper != null:
+		bootstrapper._run_interregnum()
 	_levy_entropy_tax()
 	_cap_swarms(grid)
 	_collect_junk()

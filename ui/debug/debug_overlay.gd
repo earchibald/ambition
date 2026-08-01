@@ -119,7 +119,15 @@ func _compose() -> String:
 func _compose_live() -> String:
 	var counters: Dictionary = GameLoopManager.counters()
 	var lines: Array[String] = []
-	lines.append("%s  |  scenario %s" % [counters["clock"], World.scenario])
+	lines.append(
+		"%s  |  scenario %s  |  %d fps (%.1f ms/frame)"
+		% [
+			counters["clock"],
+			World.scenario,
+			Engine.get_frames_per_second(),
+			1000.0 / maxf(float(Engine.get_frames_per_second()), 1.0),
+		]
+	)
 	lines.append(_player_location())
 	lines.append(_cursor_location())
 	lines.append(_vitals())
@@ -381,7 +389,7 @@ func _cursor_location() -> String:
 ## The chunk under the cursor, so the readout describes the tile it names.
 func _owner_for(camera: Camera3D) -> ChunkData:
 	var mouse: Vector2 = get_viewport().get_mouse_position()
-	var hit: Dictionary = GameLoopManager.picking.ground_hit(
+	var hit: Dictionary = GameLoopManager.picking.cursor_ground(
 		camera.project_ray_origin(mouse), camera.project_ray_normal(mouse), World.sampler()
 	)
 	return null if not hit["hit"] else World.chunk_containing(hit["point"])
@@ -393,7 +401,7 @@ func _cursor_tile(_chunk: ChunkData, camera: Camera3D) -> Vector2i:
 	var mouse: Vector2 = get_viewport().get_mouse_position()
 	# Marched through the SAMPLER, so the readout stays correct across a chunk seam rather than
 	# reporting "outside chunk" the moment the cursor leaves the player's own chunk.
-	var hit: Dictionary = GameLoopManager.picking.ground_hit(
+	var hit: Dictionary = GameLoopManager.picking.cursor_ground(
 		camera.project_ray_origin(mouse), camera.project_ray_normal(mouse), World.sampler()
 	)
 	if not hit["hit"]:

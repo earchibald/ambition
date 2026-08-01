@@ -58,6 +58,8 @@ func _verify_boot_contract() -> void:
 		&"attack",
 		&"attack_secondary",
 		&"inspect",
+		&"debug_hurt",
+		&"debug_respawn",
 		&"cycle_debug_page",
 		&"slow_time",
 		&"toggle_gizmos",
