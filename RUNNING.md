@@ -133,7 +133,8 @@ ground intersection approaches as the ray flattens — so the two cases meet wit
 |---|---|
 | 1 | Movement, wall sliding, step-up, falling, melee, pickup, the fluid CA, the debug overlay |
 | 2 | A generated world: 500 years of history, a nine-chunk village, factions placed by that history |
-| 3 | **Villagers walk** planned routes. **Factions decide and speak** once an in-game hour. **Death is a loop** — corpse, loot spill, control detached |
+| 3 | **Villagers walk** planned routes. **Factions decide and speak** once an in-game hour. **Death is a loop** — corpse, loot spill, control detached. **Stairs** to five dungeon floors |
+| 3.5 | **Crime has consequences.** Witnesses, grievances, per-faction reputation, gossip that spreads over time, and factions that change what they do because of what you did |
 
 ### Inspecting the generated world (`F1`)
 
@@ -147,7 +148,7 @@ Press `F1` to cycle the pages. A **fifth press dismisses the panel** entirely:
 |---|---|
 | **LIVE** | The counters. What the engine is doing right now |
 | **CHRONICLE** | The 500 years that produced this world — who was founded, who conquered whom, in which year |
-| **FACTIONS** | Every living faction: name, population (abstract vs embodied), culture, current objective and mood, wealth, home chunk, and the last thing it said |
+| **FACTIONS** | Every living faction: population (abstract vs embodied), culture, current objective and mood, wealth, home chunk, **how they feel about you and why**, and the last thing they said |
 | **MAP** | A **drawn** chunk map of your floor: green active, blue simulated, grey generated, near-black unexplored, with your position, faction anchors and the stairwell marked. Colour-coded legend below it |
 
 Two readings that look wrong and are not:
@@ -166,6 +167,7 @@ Boot the `world` scenario (the default) and watch the overlay:
 |---|---|---|
 | The village walks | Watch `movers` climb above zero, and `paths_requested` tick as they re-plan | Grid A*, the job planner, and the locomotion tiers |
 | You can go underground | Walk to tile (34, 32), press `E`. The map title reads `FLOOR -1` | Floor transitions, lazy dungeon generation, and the floor-filtered spatial query |
+| Crime has consequences | Kill a villager in view of another. The feed prints the hostility turn; `F1` FACTIONS shows `toward you` going red with the grievance listed | The full chain: combat reports, perception decides who saw, reputation records, gossip spreads, the reasoner reacts |
 | Villagers notice you | Stand near one. `perceived (N total)` climbs; Tab it and awareness reads `SUSPICIOUS(1)` | Sight cones, LoS marching, and awareness tiering |
 | They avoid walls | Watch a villager cross the village without clipping a building | Active movers are collided by the same system that moves you |
 | Factions think | Wait ~10 real seconds for a Macro tick. The feed prints `faction N -> OBJECTIVE: "..."` | The reasoner, the queue, and the validation gate |
@@ -205,10 +207,8 @@ it either way.
 
 Not bugs. Listed so play-testing stops rediscovering them:
 
-- **Nothing reacts to you.** Villagers DO perceive you — watch `perceived (N total)` climb, and
-  Tab one to see its awareness rise to `SUSPICIOUS`. But nothing is done with that: killing one
-  produces a corpse and no alarm, grudge, or reputation change. The consequence layer is
-  unowned until Sprint 3.5.
+- **No guards, no arrest, no combat response.** A faction that hates you will FORTIFY and hold a
+  grudge, but nobody comes after you. Hostile action against the player is Sprint 4 and later.
 - **No respawn UI.** `R` triggers the Interregnum from the keyboard, and it works, but there is
   no fade, no "One Year Passes" card, and no death screen — you simply have control again.
 - **Nothing in the world can kill you.** No hazards, no hostile creatures outside the arena. `K`

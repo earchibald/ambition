@@ -55,6 +55,7 @@ var planner: FactionPlanner = FactionPlanner.new()
 var reasoning: ReasoningQueue = ReasoningQueue.new()
 var llm: LLMResolutionSystem = LLMResolutionSystem.new()
 var death_loop: DeathLoopSystem = DeathLoopSystem.new()
+var reputation: ReputationSystem = ReputationSystem.new()
 
 
 func _ready() -> void:
@@ -140,6 +141,16 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	metabolism.run(chunk)
 	jobs.run(sim_ticks)
 	perception.run(chunk, spatial_hash, sim_ticks)
+	# THE CONSEQUENCE CHAIN, in order and on the Simulation tick. Combat only reports that an act
+	# happened; perception decides who was in a position to see it; reputation turns each witness
+	# into a grievance; gossip carries it to people who were not there.
+	for act in combat.witnessed_actions:
+		perception.report_crime(
+			int(act["subject"]), act["action"], act["location"], chunk, spatial_hash
+		)
+	combat.witnessed_actions.clear()
+	reputation.run(perception)
+	reputation.spread_gossip(spatial_hash)
 	lod.run(World.player_chunk_id)
 	# Chunk streaming rides the Simulation tick, not the Micro tick: promoting a chunk spawns
 	# stockpiles and pumps fluid, and doing that 60 times a second would be both wasteful and

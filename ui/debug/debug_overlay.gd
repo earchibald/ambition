@@ -62,6 +62,7 @@ func _ready() -> void:
 	ECSEvents.entity_landed.connect(_on_landed)
 	ECSEvents.faction_decided.connect(_on_faction_decided)
 	ECSEvents.player_changed_floor.connect(_on_changed_floor)
+	ECSEvents.faction_relationship_changed.connect(_on_relationship_changed)
 
 
 ## A DRAGGABLE, NON-MODAL panel rather than text painted on the screen.
@@ -487,6 +488,18 @@ func _on_faction_decided(faction_id: int, objective: String, declaration: String
 		_remember("faction %d -> %s" % [faction_id, objective])
 		return
 	_remember("faction %d -> %s: \"%s\"" % [faction_id, objective, declaration])
+
+
+## Turning hostile is a story beat, not a statistic. It gets its own line.
+func _on_relationship_changed(
+	faction_id: int, about_faction: int, score: float, now_hostile: bool
+) -> void:
+	if not now_hostile:
+		return
+	var who: String = "you" if about_faction == WorldConstants.PLAYER_FACTION_ID else (
+		"faction %d" % about_faction
+	)
+	_remember("faction %d is now HOSTILE to %s (%.0f)" % [faction_id, who, score])
 
 
 func _on_changed_floor(from_floor: int, to_floor: int) -> void:

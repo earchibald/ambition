@@ -47,6 +47,12 @@ signal player_reborn(player: int, lineage_generation: int)
 ## assembled from a template that only ever meant to describe failures.
 signal player_changed_floor(from_floor: int, to_floor: int)
 
+## A faction's opinion of another crossed a threshold. Carries the score so the feed can say how
+## bad it is, and `now_hostile` so it can say what changed rather than just that something did.
+signal faction_relationship_changed(
+	faction_id: int, about_faction: int, score: float, now_hostile: bool
+)
+
 
 ## Tag arrays are `Array[StringName]`. Emitting an untyped array literal into a typed
 ## parameter fails at runtime and SILENTLY DROPS THE LISTENER, so build tags explicitly:

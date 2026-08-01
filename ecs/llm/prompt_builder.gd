@@ -70,7 +70,12 @@ static func build_context(core: FactionCoreComponent, generator: DAGGenerator) -
 		"name": "Faction %d" % core.faction_id if node == null else String(node.name),
 		"population": core.abstract_population,
 		"culture": core.culture_tags.map(func(t: StringName) -> String: return String(t)),
-		"food": int(core.abstract_wealth_ledger.get(MaterialLibrary.MAT_BIOMASS, 0)),
+		# Counted from WHEREVER it lives. Reading the ledger alone reports zero for any faction
+		# whose chunk is Active, because promotion spent it into stacks — so every village the
+		# player could see looked like it was starving.
+		"food": ChunkStreamingSystem.owned_material_total(
+			core.faction_id, MaterialLibrary.MAT_BIOMASS
+		),
 		"strength": strength_of(core),
 		"recently_attacked": _was_recently_attacked(core),
 		"memories": salient_memories(core),
@@ -133,13 +138,17 @@ static func valid_targets(core: FactionCoreComponent, generator: DAGGenerator) -
 ## A single comparable number, so "can we take them" is one division rather than a policy.
 static func strength_of(core: FactionCoreComponent) -> float:
 	return float(core.abstract_population) + float(
-		core.abstract_wealth_ledger.get(MaterialLibrary.MAT_IRON, 0)
+		ChunkStreamingSystem.owned_material_total(core.faction_id, MaterialLibrary.MAT_IRON)
 	) * 0.05
 
 
+## True when this faction has a fresh memory of being wronged. Read from faction memory rather
+## than from the relationship score, because a score says WHO you dislike and a memory says
+## whether something just happened — and "fortify NOW" is a response to the second.
 static func _was_recently_attacked(core: FactionCoreComponent) -> bool:
 	for memory in core.faction_memory:
-		if String(memory.get("text", "")).contains("attacked"):
+		var kind: String = String(memory.get("text", ""))
+		if kind.contains("MURDER") or kind.contains("ASSAULT") or kind.contains("attacked"):
 			return true
 	return false
 

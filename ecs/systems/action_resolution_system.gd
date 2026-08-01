@@ -17,6 +17,10 @@ var kills: int = 0
 var gibs: int = 0
 var damage_dealt: float = 0.0
 
+## Acts committed this tick that somebody might have seen. Drained by GameLoopManager and handed
+## to PerceptionSystem, which owns the question of who had line of sight.
+var witnessed_actions: Array[Dictionary] = []
+
 
 ## Weapon-tip speed. DECOUPLED from body velocity, which is what fixes the zero-damage bug. A
 ## forward lunge adds a capped charge bonus rather than being the sole source of damage.
@@ -92,6 +96,13 @@ func resolve_melee(
 	# hit produce INVESTIGATE rather than omniscient combat.
 	_emit_impact_noise(target_row, effective)
 	_report(target_row, damage, target.health, &"gib" if effective > threshold else &"melee")
+	# WITNESSABLE. There is no global crime flag: this only says the act happened somewhere, and
+	# perception decides who — if anyone — was in a position to see it.
+	witnessed_actions.append({
+		"subject": attacker_row,
+		"action": &"MURDER" if not target.is_alive() else &"ASSAULT",
+		"location": ECSManager.position_of(target_row),
+	})
 
 	if not target.is_alive():
 		kills += 1
