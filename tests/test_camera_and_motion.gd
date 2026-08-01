@@ -204,3 +204,73 @@ func test_a_new_visual_does_not_interpolate_from_the_origin() -> void:
 	var spawn := Vector3(30.0, 0.9, 30.0)
 	view._on_entity_created(EH.make(9, 1), [&"Item"] as Array[StringName], spawn)
 	assert_eq(view.visual_position_of(9), spawn, "the first frame draws it where it spawned")
+
+
+## WASD IS BODY-RELATIVE. `W` walks along whatever direction the character faces; `A`/`D` strafe
+## across it. Camera-relative WASD was effectively world-axis-locked, because the rig never
+## rotates, so "forward" meant a fixed compass bearing no matter where you pointed.
+func test_w_walks_along_the_direction_the_body_faces() -> void:
+	# raw.y is NEGATIVE for W, because get_vector treats move_forward as the negative axis.
+	var pressing_w := Vector2(0.0, -1.0)
+	for facing in [Vector3.FORWARD, Vector3.BACK, Vector3.LEFT, Vector3.RIGHT]:
+		var moved: Vector3 = PlayerInputBridge.movement_from(pressing_w, facing)
+		assert_almost_eq(
+			moved.normalized().dot(facing.normalized()),
+			1.0,
+			0.001,
+			"facing %v, W walks that way" % facing
+		)
+
+
+func test_s_walks_backwards() -> void:
+	var moved: Vector3 = PlayerInputBridge.movement_from(Vector2(0.0, 1.0), Vector3.FORWARD)
+	assert_almost_eq(
+		moved.normalized().dot(Vector3.FORWARD), -1.0, 0.001, "S is the opposite of W"
+	)
+
+
+## Getting the cross product backwards swaps A and D — trivially wrong, and easy to ship.
+func test_d_strafes_to_the_bodys_right() -> void:
+	# Facing -Z (Godot's forward), the body's right hand points toward +X.
+	var moved: Vector3 = PlayerInputBridge.movement_from(Vector2(1.0, 0.0), Vector3.FORWARD)
+	assert_almost_eq(moved.x, 1.0, 0.001, "D strafes to +X when facing -Z")
+	assert_almost_eq(moved.z, 0.0, 0.001, "and does not drift forwards or back")
+
+
+func test_a_and_d_are_opposites_at_every_facing() -> void:
+	for degrees in [0, 37, 90, 143, 180, 271]:
+		var angle: float = deg_to_rad(float(degrees))
+		var facing := Vector3(sin(angle), 0.0, -cos(angle))
+		var left: Vector3 = PlayerInputBridge.movement_from(Vector2(-1.0, 0.0), facing)
+		var right: Vector3 = PlayerInputBridge.movement_from(Vector2(1.0, 0.0), facing)
+		assert_almost_eq(
+			left.dot(right), -1.0, 0.001, "A and D oppose each other at %d degrees" % degrees
+		)
+
+
+## Strafing must be perpendicular to facing, or A/D creep forwards and the body drifts.
+func test_strafing_never_moves_you_forwards() -> void:
+	for degrees in [0, 45, 90, 200, 330]:
+		var angle: float = deg_to_rad(float(degrees))
+		var facing := Vector3(sin(angle), 0.0, -cos(angle))
+		var strafe: Vector3 = PlayerInputBridge.movement_from(Vector2(1.0, 0.0), facing)
+		assert_almost_eq(
+			strafe.dot(facing), 0.0, 0.001, "strafe is perpendicular at %d degrees" % degrees
+		)
+
+
+## Movement stays in the XZ plane. A facing with vertical component must not launch the player.
+func test_movement_is_always_flat() -> void:
+	var moved: Vector3 = PlayerInputBridge.movement_from(
+		Vector2(1.0, -1.0), Vector3(0.3, 0.9, -0.3)
+	)
+	assert_almost_eq(moved.y, 0.0, 0.001, "WASD never moves you vertically")
+
+
+## A degenerate facing must produce no movement rather than a NaN direction.
+func test_a_degenerate_facing_produces_no_movement() -> void:
+	assert_eq(
+		PlayerInputBridge.movement_from(Vector2(1.0, -1.0), Vector3.UP),
+		Vector3.ZERO,
+		"straight up has no horizontal heading, so there is nowhere to walk"
+	)

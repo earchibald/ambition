@@ -54,7 +54,7 @@ place the specific test features in §3 exist.
 
 | Key | Action | What it does in the ECS |
 |---|---|---|
-| `W` `A` `S` `D` | Move — **7 m/s** | Pushes a `MOVE` **intent** onto entity 0's action queue. Camera-relative on the XZ plane. Pressing W does not move you; the ECS decides what W means. |
+| `W` `A` `S` `D` | Move — **7 m/s**, body-relative | `W` walks along the direction you FACE; `A`/`D` strafe across it. Facing comes from the mouse cursor, so the mouse steers and WASD drives. Pushes a `MOVE` **intent**; pressing W does not move you, the ECS decides what W means. |
 | `Shift` + move | **Precision** — 35% speed | For lining up on a ledge edge or a pit lip without overshooting. Full speed is for covering ground. |
 | `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
@@ -65,7 +65,11 @@ place the specific test features in §3 exist.
 | `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
 | `Esc` | Cancel | Mapped, not yet consumed. |
 
-There is no mouse-look. The camera is a fixed-orientation third-person rig with a **deadzone**:
+**The mouse is your steering.** The character turns to face the cursor — watch the yellow nose —
+and `W` follows that heading wherever it points. `A` and `D` strafe perpendicular to it, so you
+can circle a target while still facing it. The camera itself never rotates.
+
+The camera is a fixed-orientation third-person rig with a **deadzone**:
 it does not move at all while you stay within 5 m of its focus point, and outside that it moves
 exactly far enough to put you back on the boundary. It never smooths and never rotates.
 
