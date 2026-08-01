@@ -50,6 +50,8 @@ var lod: LoDSystem = LoDSystem.new()
 var inventory: InventorySystem = InventorySystem.new()
 var streaming: ChunkStreamingSystem = ChunkStreamingSystem.new()
 var economy: GrayBoxSystem = GrayBoxSystem.new()
+var locomotion: LocomotionSystem = LocomotionSystem.new()
+var planner: FactionPlanner = FactionPlanner.new()
 
 
 func _physics_process(delta: float) -> void:
@@ -93,6 +95,9 @@ func _physics_process(delta: float) -> void:
 ## frame sees post-collision positions.
 func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 	ECSManager.flush_structural_changes()
+	# Steering first: it writes velocity, and the collision pass below integrates it. Running it
+	# after would leave every NPC one frame behind its own decision.
+	locomotion.run(scaled_delta, World.sampler())
 	_apply_intents(scaled_delta)
 	collision.run(scaled_delta, World.sampler(), spatial_hash)
 	# Geometry decides WHO landed and how fast; the energy model decides what that costs. Falls
@@ -133,6 +138,19 @@ func _run_macro_tick(chunk: ChunkData) -> void:
 	spoilage.run(chunk)
 	# The off-screen economy. Ledger integers only — it may not create a single entity.
 	economy.run()
+	_replan_factions()
+
+
+## Every faction re-decides what its people are doing, once an in-game hour.
+##
+## Macro cadence on purpose: an objective is an hour-scale decision, and re-planning at the 2 Hz
+## Simulation rate would fight the job latch and re-path the whole village 120 times an hour.
+func _replan_factions() -> void:
+	if World.grid == null:
+		return
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[row]
+		planner.assign(planner.plan(core.current_objective, core.faction_id, World.grid))
 
 
 ## Pops each entity's queued intents and turns them into velocity or an action.

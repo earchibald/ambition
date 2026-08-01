@@ -32,6 +32,7 @@ const HEAT_SOURCE: int = 1 << 22
 const LOOSE_ITEM: int = 1 << 23
 const MIND: int = 1 << 24
 const FACTION_CORE: int = 1 << 25
+const LOCOMOTION: int = 1 << 26
 
 # --- Common composite queries, named so call sites stay readable. ---
 
@@ -81,6 +82,7 @@ static func describe(mask: int) -> String:
 		[LOOSE_ITEM, "LooseItem"],
 		[MIND, "Mind"],
 		[FACTION_CORE, "FactionCore"],
+		[LOCOMOTION, "Locomotion"],
 	]:
 		if mask & int(entry[0]) != 0:
 			names.append(String(entry[1]))

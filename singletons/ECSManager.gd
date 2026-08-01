@@ -72,6 +72,9 @@ var loose_items: Dictionary = {}
 var player_inputs: Dictionary = {}
 ## One per faction, on a macro-entity that owns no position. THE abstract wealth ledger.
 var faction_cores: Dictionary = {}
+## Routes in progress. A component, not system state, so a Simulated mover keeps its progress
+## across a LoD demotion instead of restarting from its anchor (review G4).
+var locomotions: Dictionary = {}
 
 ## Pending ActionIntents per row. Popped by the Micro tick.
 var action_queues: Dictionary = {}
@@ -126,6 +129,7 @@ func _register_all_registries() -> void:
 		loose_items,
 		player_inputs,
 		faction_cores,
+		locomotions,
 		action_queues,
 	]:
 		_registries.append(registry)
