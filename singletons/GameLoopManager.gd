@@ -78,6 +78,34 @@ func _ready() -> void:
 	var remote: OpenAICompatibleProvider = OpenAICompatibleProvider.create_if_configured(self)
 	if remote != null:
 		reasoning.provider = remote
+	_connect_event_trace()
+
+
+## The structured trace records the OUTCOME bus (debugging spec §3). Wired here — the one place
+## with a view of every signal — and gated inside `EventTrace.record`, so a disabled trace costs
+## a boolean per event. The dump-on-death is the spec's dump-on-failure, at the granularity the
+## build has: the run ending IS the failure a play session traces toward.
+func _connect_event_trace() -> void:
+	ECSEvents.entity_died.connect(func(entity: int, cause: StringName) -> void:
+		EventTrace.record(&"combat", &"died", entity, String(cause)))
+	ECSEvents.entity_damaged.connect(
+		func(entity: int, amount: float, _left: float, cause: StringName) -> void:
+			EventTrace.record(&"combat", &"damaged", entity, "%s %.1f" % [cause, amount]))
+	ECSEvents.spell_cast.connect(func(caster: int, spell_id: StringName, _strain: float) -> void:
+		EventTrace.record(&"magic", &"cast", caster, String(spell_id)))
+	ECSEvents.spell_detonated.connect(func(caster: int, spell_id: StringName, _at: Vector3) -> void:
+		EventTrace.record(&"magic", &"detonated", caster, String(spell_id)))
+	ECSEvents.entity_mutated.connect(func(entity: int, mutation: StringName) -> void:
+		EventTrace.record(&"mutation", &"mutated", entity, String(mutation)))
+	ECSEvents.faction_decided.connect(
+		func(faction_id: int, objective: String, _say: String) -> void:
+			EventTrace.record(&"reasoning", &"decided", faction_id, objective))
+	ECSEvents.faction_schism.connect(func(parent: int, splinter: int, _count: int) -> void:
+		EventTrace.record(&"social", &"schism", parent, "splinter %d" % splinter))
+	ECSEvents.player_died.connect(func(_corpse: int, _killer: int, generation: int) -> void:
+		EventTrace.record(&"death", &"player_died", 0, "generation %d" % generation)
+		if DebugFlags.event_trace_enabled:
+			print("event trace dumped: %s" % EventTrace.dump_to_file("death")))
 
 
 func _physics_process(delta: float) -> void:
@@ -150,7 +178,7 @@ func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 	# positions to decide what is touching what, they release energy into the chunk's air, and
 	# thermodynamics is what carries that air temperature into every body in the chunk. Running
 	# them the other way round costs a frame of latency on every fire.
-	reactions.run(micro_frames, chunk, spatial_hash)
+	reactions.run(micro_frames, chunk, spatial_hash, combat)
 	# Projectiles need the tile grid to know what a wall is. Handed in per tick rather than held,
 	# because the sampler changes when the player crosses a chunk seam or a floor.
 	ephemerals.sampler = World.sampler()
@@ -335,20 +363,44 @@ func _apply_intent(row: int, intent: ActionIntent, _scaled_delta: float) -> void
 			# Report the outcome either way. A pickup that silently fails a volume or tag filter
 			# is indistinguishable from a pickup that was never attempted.
 			var actor: int = ECSManager.handle_of(row)
-			if inventory.try_insert(row, intent.target):
+			if _try_read(row, intent.target):
+				pass
+			elif inventory.try_insert(row, intent.target):
 				ECSEvents.item_taken.emit(actor, intent.target, &"taken")
 			else:
 				ECSEvents.action_rejected.emit(actor, &"take", inventory.last_rejection)
 		ActionIntent.CAST:
 			combat.resolve_cast(row, intent.name_data, intent.vector_data)
 		ActionIntent.BIND:
-			spells.bind(row, intent.name_list)
+			spells.bind(row, intent.name_list, intent.scalar_data > 0.5)
 		ActionIntent.CONSUME:
 			var need: NeedsComponent = ECSManager.needs.get(row)
 			if need != null:
 				MetabolismSystem.consume_meal(need)
 		_:
 			pass
+
+
+## Interacting with an `Inscribed` object READS it instead of pocketing it (declared gap G-3:
+## no way to learn runes in play). Returns false for everything else so the normal take path
+## runs. Reading is repeatable and idempotent — a lectern is a book, not a consumable.
+func _try_read(reader_row: int, target: int) -> bool:
+	var target_row: int = ECSManager.resolve(target)
+	if target_row < 0:
+		return false
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(target_row)
+	if chemistry == null or not chemistry.has_tag(&"Inscribed"):
+		return false
+	var mind: MindComponent = ECSManager.minds.get(reader_row)
+	var item: LooseItemComponent = ECSManager.loose_items.get(target_row)
+	if mind == null or item == null:
+		return false
+	var learned: Array[StringName] = []
+	for rune_id in item.inscribed_runes:
+		if mind.learn_rune(rune_id):
+			learned.append(rune_id)
+	ECSEvents.runes_learned.emit(ECSManager.handle_of(reader_row), learned)
+	return true
 
 
 ## Minimum world corner the spatial grid covers: one chunk out from the player's chunk.

@@ -81,6 +81,7 @@ const TABLE: Dictionary = {
 		"latent_fusion": 53000.0,
 		"latent_vapor": 1500000.0,
 		"combustion_j_per_kg": 9300000.0,
+		"ignition_c": 232.0,
 		"acoustic_resonance": 0.3,
 		"attenuation_db": 14.0,
 		"base_value": 10.0,
@@ -122,6 +123,7 @@ const TABLE: Dictionary = {
 		"latent_vapor": 0.0,
 		"acoustic_resonance": 0.1,
 		"combustion_j_per_kg": 17000000.0,
+		"ignition_c": 250.0,
 		"attenuation_db": 4.0,
 		"base_value": 1.0,
 		"toughness_mult": 0.3,
@@ -136,6 +138,7 @@ const TABLE: Dictionary = {
 		"latent_vapor": 0.0,
 		"acoustic_resonance": 0.2,
 		"combustion_j_per_kg": 18000000.0,
+		"ignition_c": 280.0,
 		"attenuation_db": 10.0,
 		"base_value": 1.0,
 		"toughness_mult": 1.0,
@@ -270,6 +273,16 @@ static func combustion_energy_j(
 		var fraction: float = float(composition.volume_fractions[material_id])
 		per_kg += fraction * field(material_id, "combustion_j_per_kg", 0.0)
 	return per_kg * maxf(physical.mass_kg, 0.0)
+
+
+## Autoignition point of the dominant material, or NAN for materials that cannot ignite (the
+## ignition model, declared gap G-7: heat alone could not set a flammable thing alight, so a
+## spell had to SAY `Apply_Burning` and a forge fire could never light the woodpile beside it).
+## Volume-weighting makes no sense for a threshold, so the DOMINANT material decides.
+static func ignition_c(composition: MaterialCompositionComponent) -> float:
+	if composition == null:
+		return NAN
+	return field(composition.dominant_material(), "ignition_c", NAN)
 
 
 static func acoustic_sum(composition: MaterialCompositionComponent) -> float:

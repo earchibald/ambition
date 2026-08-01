@@ -24,6 +24,18 @@ func insight_in(topic: StringName) -> int:
 	return int(insight.get(topic, 0))
 
 
+## Learning a rune is ALSO learning about runes: each new one deepens `Rune_Stability`, which is
+## the complexity budget the Spell Compiler gates on. This is the growth loop declared gaps G-3
+## and the insight audit both named as missing — every insight value was frozen at its seed, so
+## the knowledge-driven progression the magic doc §4 describes could never progress.
+func learn_rune(rune_id: StringName) -> bool:
+	if known_runes.has(rune_id) or not RuneLibrary.exists(rune_id):
+		return false
+	known_runes.append(rune_id)
+	insight[&"Rune_Stability"] = insight_in(&"Rune_Stability") + 2
+	return true
+
+
 ## Run 1 seeds a "Field Primer" so a new player is not blind: the Lens gates DETAIL, never
 ## PRESENCE (ui_ux section 2).
 ##

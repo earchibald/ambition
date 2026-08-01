@@ -41,6 +41,11 @@ static var boot_scenario: StringName = &"world"
 ## render; the default is the live counters.
 static var boot_overlay_page: int = 0
 
+## Micro ticks the ADR-20 soak harness should run before dumping metrics and exiting. Zero means
+## "not a soak run". Set ONLY by `--soak=<n>`; deliberately absent from the config file and from
+## `snapshot()`.
+static var soak_ticks: int = 0
+
 static var _loaded: bool = false
 
 ## Flags the command line overrode this run. A CLI override is for ONE run: without this,
@@ -92,6 +97,11 @@ static func _apply_command_line() -> void:
 		elif arg == "--no-overlay":
 			_cli_overrides["tick_counters_enabled"] = tick_counters_enabled
 			tick_counters_enabled = false
+		elif arg.begins_with("--soak="):
+			# ADR-20's headless soak entry point: run N ticks, dump a metrics CSV, gate against
+			# the committed baseline. CLI-only by nature — never loaded from or saved to the
+			# config file, because a persisted soak would make every future boot a soak.
+			soak_ticks = maxi(0, int(arg.trim_prefix("--soak=")))
 
 
 ## The debugging spec requires that logs be writable under `user://`. Fail loudly here rather

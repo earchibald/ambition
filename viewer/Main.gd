@@ -33,6 +33,20 @@ func _ready() -> void:
 	print("debug config: %s" % DebugFlags.config_path_for_humans())
 	# Printed LAST, so its presence means every check above completed.
 	print(BOOT_SENTINEL)
+	_maybe_run_soak()
+
+
+## ADR-20's soak harness: `--soak=<n>` runs n Micro ticks headless, dumps every counter to a
+## CSV under `user://debug_traces/`, gates the DETERMINISTIC integer metrics against the
+## committed baseline, and exits nonzero on drift. The gate is the deliverable: "did any metric
+## leave its band" against a committed file, not a human squinting at a log.
+func _maybe_run_soak() -> void:
+	if DebugFlags.soak_ticks <= 0:
+		return
+	GameLoopManager.set_physics_process(false)
+	for _tick in DebugFlags.soak_ticks:
+		GameLoopManager._physics_process(1.0 / 60.0)
+	get_tree().quit(SoakGate.run_and_report(DebugFlags.soak_ticks))
 
 
 ## A rat to fight and a nugget to pick up, so Gate A and Gate B are reachable on boot.
@@ -60,6 +74,14 @@ func _spawn_demo_contents() -> void:
 		spawn + Vector3(6.0, 0.5, 8.0), MaterialLibrary.MAT_SULFUR, 1000.0, &"Volatile_Gas"
 	)
 	World.spawn_brazier(spawn + Vector3(-4.0, 0.5, 4.0))
+
+	# The library lectern: `E` to read, and every rune in the build becomes castable. Ten of
+	# seventeen runes were reachable only from tests (gap G-3); in the arena — the room where
+	# everything is supposed to be testable — the whole rune set is one interaction away.
+	var all_runes: Array[StringName] = []
+	for rune_id in RuneLibrary.RUNES:
+		all_runes.append(rune_id)
+	World.spawn_lectern(spawn + Vector3(-2.0, 0.5, 2.0), all_runes)
 
 
 ## Fails loudly at boot rather than subtly at runtime. These are the Sprint 0 gate
@@ -93,5 +115,8 @@ func _verify_boot_contract() -> void:
 		&"grimoire",
 		&"cast",
 		&"debug_hazard",
+		&"free_camera",
+		&"debug_spawn_rat",
+		&"debug_spawn_item",
 	]:
 		assert(InputMap.has_action(action), "missing InputMap action: %s" % action)

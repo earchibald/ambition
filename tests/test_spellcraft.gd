@@ -290,7 +290,8 @@ func test_a_cast_spawns_an_ephemeral_and_charges_strain() -> void:
 
 func test_a_cast_you_cannot_pay_for_is_refused() -> void:
 	var spell: CompiledSpell = _bind(_fireball())
-	ECSManager.bodies[_player_row].stamina = 1.0
+	var body: BodyComponent = ECSManager.bodies[_player_row]
+	body.strain = body.max_stamina
 	assert_false(
 		GameLoopManager.combat.resolve_cast(_player_row, spell.spell_id, Vector3.FORWARD),
 		"a cast you cannot pay for does not half-happen"
@@ -300,9 +301,11 @@ func test_a_cast_you_cannot_pay_for_is_refused() -> void:
 func test_a_refused_cast_costs_nothing() -> void:
 	var spell: CompiledSpell = _bind(_fireball())
 	var body: BodyComponent = ECSManager.bodies[_player_row]
-	body.stamina = 1.0
+	body.strain = body.max_stamina
 	GameLoopManager.combat.resolve_cast(_player_row, spell.spell_id, Vector3.FORWARD)
-	assert_almost_eq(body.stamina, 1.0, 0.001, "no stamina was taken for the cast that did not run")
+	assert_almost_eq(
+		body.strain, body.max_stamina, 0.001, "no strain was added by the cast that did not run"
+	)
 
 
 ## The roadmap's success state: the fireball travels, hits something, applies its tag, and
@@ -322,6 +325,10 @@ func test_a_fireball_travels_burns_what_it_hits_and_dies() -> void:
 			hit = true
 			break
 	assert_true(hit, "the projectile reached the target and applied its catalyst")
+	# The detonation leaves a NOISE ephemeral behind on purpose — the bang outlives the bolt so
+	# unseen listeners can INVESTIGATE. Let its half-second TTL lapse before asserting cleanup.
+	for _echo in 31:
+		ephemerals.run(1.0 / 60.0, _rebuild_hash())
 	assert_eq(
 		ECSManager.query(ComponentMask.EPHEMERAL).size(), 0, "and deleted itself on impact"
 	)
@@ -364,8 +371,8 @@ func test_an_aura_applies_its_tag_to_everything_it_covers() -> void:
 	var ephemerals := EphemeralSystem.new()
 	ephemerals.sampler = World.sampler()
 	ephemerals.run(1.0 / 60.0, _rebuild_hash())
-	assert_true(ECSManager.chemistries[near].has_tag(&"Water"), "inside the radius")
-	assert_false(ECSManager.chemistries[far].has_tag(&"Water"), "25 m away is not inside 4 m")
+	assert_true(ECSManager.chemistries[near].has_tag(&"Wet"), "inside the radius")
+	assert_false(ECSManager.chemistries[far].has_tag(&"Wet"), "25 m away is not inside 4 m")
 
 
 # --- Absorb_Tag conservation (review D8) -------------------------------------------------------
@@ -536,11 +543,11 @@ func test_a_timer_spell_waits_out_its_delay() -> void:
 	ephemerals.sampler = World.sampler()
 	for _frame in 30:
 		ephemerals.run(1.0 / 60.0, _rebuild_hash())
-	assert_false(ECSManager.chemistries[target].has_tag(&"Water"), "half a second in, nothing yet")
+	assert_false(ECSManager.chemistries[target].has_tag(&"Wet"), "half a second in, nothing yet")
 
 	for _frame in 200:
 		ephemerals.run(1.0 / 60.0, _rebuild_hash())
-	assert_true(ECSManager.chemistries[target].has_tag(&"Water"), "the fuse ran out")
+	assert_true(ECSManager.chemistries[target].has_tag(&"Wet"), "the fuse ran out")
 
 
 ## A cone is a wedge. Something behind the caster is inside the RADIUS and outside the ANGLE, and

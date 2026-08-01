@@ -36,12 +36,18 @@ var los_failures: int = 0
 var targets_perceived: int = 0
 var witness_events_created: int = 0
 var noise_events_consumed: int = 0
+var sight_blocked_by_smoke: int = 0
 var budget_exhausted: bool = false
 
 ## Sorted-pair key -> bool, cleared each tick. Halves cost in clustered scenes, which is exactly
 ## the worst case.
 var _los_cache: Dictionary = {}
 var _pending_witnesses: Array[WitnessEvent] = []
+## Smoke and steam clouds this tick, as [position, radius] pairs. Collected once per run: the
+## Sprint 1 scaffolding requires "steam/smoke block or attenuate visibility" and it never did —
+## `GridDDA`'s own comment said "handled by the caller" and the caller handled nothing. Clouds
+## are the gas AURAS reactions and boiling produce; a sight line crossing one is blocked.
+var _vision_clouds: Array[Array] = []
 ## Round-robin cursor so tiered observers are visited fairly rather than always the same prefix.
 var _cursor: int = 0
 
@@ -55,6 +61,7 @@ func run(chunk: ChunkData, hash: SpatialHash, sim_tick: int) -> void:
 	noise_events_consumed = 0
 	budget_exhausted = false
 	_los_cache.clear()
+	_collect_vision_clouds()
 
 	var observers: PackedInt32Array = ECSManager.query(ComponentMask.PERCEIVER)
 	if observers.is_empty():
@@ -133,8 +140,38 @@ func _line_of_sight(
 	los_marches += 1
 	total_los_marches += 1
 	var visible: bool = GridDDA.has_line_of_sight(from, to, chunk)
+	if visible and _crosses_a_cloud(from, to):
+		sight_blocked_by_smoke += 1
+		visible = false
 	_los_cache[key] = visible
 	return visible
+
+
+func _collect_vision_clouds() -> void:
+	_vision_clouds.clear()
+	for row in ECSManager.query(ComponentMask.EPHEMERAL):
+		var ephemeral: EphemeralComponent = ECSManager.ephemerals[row]
+		for tag in ephemeral.applies_tags:
+			if tag == &"Smoke" or tag == &"Steam":
+				_vision_clouds.append([ECSManager.position_of(row), ephemeral.radius_m])
+				break
+
+
+## Segment-versus-sphere, on the flat plane sight already works in. Cheap enough to run inside
+## the cached LoS path because there are at most a handful of clouds at once (auras have
+## mandatory TTLs) and the check is arithmetic, not a march.
+func _crosses_a_cloud(from: Vector3, to: Vector3) -> bool:
+	for cloud in _vision_clouds:
+		var centre: Vector3 = cloud[0]
+		var radius: float = float(cloud[1])
+		var segment: Vector3 = to - from
+		var length_sq: float = segment.length_squared()
+		var t: float = 0.0
+		if length_sq > 0.0001:
+			t = clampf((centre - from).dot(segment) / length_sq, 0.0, 1.0)
+		if (from + segment * t).distance_to(centre) <= radius:
+			return true
+	return false
 
 
 func _facing_of(row: int) -> Vector3:
@@ -150,33 +187,51 @@ func _facing_of(row: int) -> Vector3:
 ## The old spec said only "applies wall/material attenuation" with no formula, no falloff, no
 ## threshold, and no attenuation field, so its own mandated test could not be written.
 func _process_noise(chunk: ChunkData, hash: SpatialHash) -> void:
-	var emitter_rows: PackedInt32Array = ECSManager.query(ComponentMask.SENSORY_EMITTER)
+	# LOUDEST FIRST, as the scaffolding's own constant comment specifies. Row order let a quiet
+	# footstep on a low row displace a nearby explosion when the per-tick event cap bit.
+	var by_loudness: Array[Array] = []
+	for source_row in ECSManager.query(ComponentMask.SENSORY_EMITTER):
+		var emitter: SensoryEmitterComponent = ECSManager.emitters[source_row]
+		if emitter.noise_radius_m > 0.0:
+			by_loudness.append([-emitter.noise_radius_m, source_row])
+	by_loudness.sort()
+
 	var processed: int = 0
-	for i in emitter_rows.size():
+	for entry in by_loudness:
 		if processed >= MAX_NOISE_EVENTS_PER_TICK:
 			break
-		var source_row: int = emitter_rows[i]
+		var source_row: int = int(entry[1])
 		var emitter: SensoryEmitterComponent = ECSManager.emitters[source_row]
-		if emitter.noise_radius_m <= 0.0:
-			continue
 		processed += 1
 		noise_events_consumed += 1
 		var source_pos: Vector3 = ECSManager.position_of(source_row)
+
+		# NEAREST FIRST, and the listener cap counts LISTENERS WHO HEARD. Bucket order consumed
+		# the 16 slots on candidates who merely had ears, in arbitrary spatial order, so the
+		# people closest to an explosion could be the ones who missed it.
 		var listeners: PackedInt32Array = hash.query_radius(source_pos, MAX_HEARING_RANGE_M)
-		var heard: int = 0
+		var by_distance: Array[Array] = []
 		for j in listeners.size():
-			if heard >= MAX_LISTENERS_PER_EVENT:
-				break
 			var listener_row: int = listeners[j]
 			if listener_row == source_row:
 				continue
-			var perception: PerceptionComponent = ECSManager.perceptions.get(listener_row)
-			if perception == null:
+			if ECSManager.perceptions.get(listener_row) == null:
 				continue
-			heard += 1
+			by_distance.append(
+				[source_pos.distance_squared_to(ECSManager.position_of(listener_row)), listener_row]
+			)
+		by_distance.sort()
+
+		var heard: int = 0
+		for pair in by_distance:
+			if heard >= MAX_LISTENERS_PER_EVENT:
+				break
+			var listener_row: int = int(pair[1])
+			var perception: PerceptionComponent = ECSManager.perceptions.get(listener_row)
 			var listener_pos: Vector3 = ECSManager.position_of(listener_row)
 			if not can_hear(emitter, perception, source_pos, listener_pos, chunk):
 				continue
+			heard += 1
 			# Heard but not seen: INVESTIGATE the location, never jump straight to combat on an
 			# unseen target.
 			if perception.awareness_state == ECSEnums.AwarenessState.UNAWARE:
@@ -296,5 +351,6 @@ func counters() -> Dictionary:
 		"targets_perceived": targets_perceived,
 		"witness_events": witness_events_created,
 		"noise_events": noise_events_consumed,
+		"sight_blocked_by_smoke": sight_blocked_by_smoke,
 		"perception_budget_exhausted": budget_exhausted,
 	}

@@ -60,7 +60,23 @@ func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) 
 ## arrives last, into a world that is already running.
 func _boot_generated_world(seed_value: int) -> ChunkData:
 	boot_report = Bootstrapper.new()
-	boot_report.execute_boot_sequence(seed_value)
+	# Per-phase timing, printed every boot (scope doc §7: "Print a per-phase breakdown so a
+	# regression is actionable"). The stopwatch lives HERE because ADR-20 bans wall-clock reads
+	# inside `ecs/`; the bootstrapper reports phase completions and this closure times the gaps.
+	var phase_started: Array[int] = [Time.get_ticks_usec()]
+	boot_report.on_phase = func(phase: StringName) -> void:
+		var now: int = Time.get_ticks_usec()
+		print("boot phase %-12s %6.1f ms" % [phase, float(now - phase_started[0]) / 1000.0])
+		phase_started[0] = now
+	# THE PRE-WARM RUNS REAL SIMULATION TICKS. The injection point existed so a test could drive
+	# it — and the shipped boot passed NOTHING, so `pre_warm_ticks_run` counted to 100 while zero
+	# ticks ran and the roadmap's success state ("NPCs are already working when the player gains
+	# control") was false every boot. The test proved the injection point; nothing proved the
+	# production wiring, which is this codebase's signature defect at boot scale.
+	boot_report.execute_boot_sequence(seed_value, false, func(_gravity_suppressed: bool) -> void:
+		var home: ChunkData = boot_report.grid.chunk_at(Vector3i.ZERO)
+		GameLoopManager._run_sim_tick(home)
+	)
 	grid = boot_report.grid
 	chunks = grid.chunks
 	# The village centre is the player's chunk, and it is Active from the first frame.
@@ -417,6 +433,17 @@ func spawn_reactant(
 
 	var tags: Array[StringName] = [tag]
 	ECSEvents.emit_entity_created(handle, tags, at)
+	return handle
+
+
+## A readable stand: interact (`E`) to learn what is inscribed on it. Too heavy to pick up —
+## `capacity` refusal is not how it works; the `Inscribed` tag reroutes the TAKE intent into a
+## read before the inventory is ever consulted.
+func spawn_lectern(at: Vector3, runes: Array[StringName]) -> int:
+	var handle: int = spawn_item(at, MaterialLibrary.MAT_STONE, 40000.0, 1)
+	var row: int = EH.index_of(handle)
+	ECSManager.chemistries[row].add_tag(&"Inscribed")
+	ECSManager.loose_items[row].inscribed_runes = runes.duplicate()
 	return handle
 
 

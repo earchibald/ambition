@@ -46,6 +46,11 @@ var phases_run: Array[StringName] = []
 var pre_warm_ticks_run: int = 0
 var interregnum_months_run: int = 0
 
+## Notified with each phase name as it COMPLETES. The scope doc requires a per-phase breakdown
+## so a 30-second regression is actionable, and ADR-20 forbids this file from reading the clock
+## — so the caller (a singleton, outside `ecs/`) owns the stopwatch and this owns the callback.
+var on_phase: Callable = Callable()
+
 
 ## Builds a world. `sim_tick` is injected rather than reached for, so the Pre-Warm can be driven
 ## by a test without standing up the whole game loop.
@@ -128,6 +133,8 @@ func _snap_loose_items_to_ground() -> void:
 func _phase(phase: StringName, work: Callable) -> void:
 	work.call()
 	phases_run.append(phase)
+	if on_phase.is_valid():
+		on_phase.call(phase)
 
 
 func counters() -> Dictionary:

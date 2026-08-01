@@ -25,6 +25,11 @@ var ambient_temperature_c: float = 20.0
 ## ChemistryComponent (registry §6).
 var hazard_tags: Array[StringName] = []
 
+## One-shot flag for prop spawning at first promotion (a ruined library's lectern). The same
+## transaction-flag pattern as `wealth_materialized`: promotion is re-entrant, prop spawning
+## must not be, or every visit to a chunk grows another lectern.
+var props_spawned: bool = false
+
 ## Tile solidity and per-tile elevation in metres (2.5D, ADR-3).
 var tile_map: PackedInt32Array = PackedInt32Array()
 var height_map: PackedFloat32Array = PackedFloat32Array()

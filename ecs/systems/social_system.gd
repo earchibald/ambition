@@ -458,11 +458,23 @@ func _deliver(caravan: Dictionary, carrier_row: int) -> void:
 	)
 
 
+## A courier: a hauler by preference, anyone by necessity. Routine WORK is interruptible — in a
+## pre-warmed world EVERY citizen is latched onto some personal routine at all times, so a rule
+## that only conscripts the completely idle dispatches nothing, ever (found the moment the
+## Pre-Warm actually ran at boot). Meals and sleep are not interruptible: a courier who starved
+## on the road is a worse outcome than a caravan that leaves at dawn.
 func _idle_hauler(faction_id: int) -> int:
 	var fallback: int = -1
 	for row in FactionPlanner.members_of(faction_id):
 		var job: JobComponent = ECSManager.jobs.get(row)
-		if job != null and (job.is_latched() or job.current_action == &"TradeMission"):
+		if job != null and job.current_action == &"TradeMission" and job.is_latched():
+			continue
+		var conscriptable: bool = (
+			job == null
+			or not job.is_latched()
+			or job.current_action == ActionIntent.WORK
+		)
+		if not conscriptable:
 			continue
 		var profession: ProfessionComponent = ECSManager.professions.get(row)
 		if profession != null and profession.profession == &"Prof_Hauler":

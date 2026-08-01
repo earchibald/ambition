@@ -28,6 +28,10 @@ const MAX_LISTED: int = 9
 var _panel: PanelContainer = null
 var _label: RichTextLabel = null
 var _selected: Array[StringName] = []
+## Overclock armed (grimoire spec §2C): the next bind FORCES a compile past the complexity
+## refusal and permanently brands the spell [Unstable]. Toggled with O, off after each bind —
+## overclocking is a decision per spell, not a mode you forget you are in.
+var _overclock: bool = false
 var _last_result: String = ""
 var _open: bool = false
 
@@ -96,6 +100,9 @@ func _handle_key(key: InputEventKey) -> void:
 		_toggle(code - KEY_1)
 	elif code == KEY_ENTER or code == KEY_KP_ENTER:
 		_request_bind()
+	elif code == KEY_O:
+		_overclock = not _overclock
+		_refresh()
 	elif code == KEY_BACKSPACE:
 		_selected.clear()
 		_refresh()
@@ -127,7 +134,8 @@ func _request_bind() -> void:
 	if row < 0:
 		return
 	# A REQUEST, not a write. The compiler runs on the next Micro tick and answers on the bus.
-	ECSManager.push_intent(row, ActionIntent.bind(_selected))
+	ECSManager.push_intent(row, ActionIntent.bind(_selected, _overclock))
+	_overclock = false
 
 
 func _known() -> Array[StringName]:
@@ -172,7 +180,10 @@ func _refresh() -> void:
 func _compose() -> Array[String]:
 	var mind: MindComponent = _mind()
 	var out: Array[String] = []
-	out.append("[b]GRIMOIRE[/b]   [1-9] add/remove   [Enter] bind   [Backspace] clear   [B] close")
+	out.append(
+		"[b]GRIMOIRE[/b]   [1-9] add/remove   [Enter] bind   [O] overclock"
+		+ "   [Backspace] clear   [B] close"
+	)
 	if mind == null:
 		out.append("[color=#e08f8f]no mind to read[/color]")
 		return out
@@ -196,6 +207,13 @@ func _compose() -> Array[String]:
 			SpellCompilerSystem.complexity_budget(mind), mind.insight_in(&"Rune_Stability")
 		]
 	)
+	if _overclock:
+		# The spec's "jagged and red Bind button", at this panel's fidelity: the warning IS the
+		# button state, and it names the price.
+		out.append(
+			"  [color=#e05050][b]OVERCLOCK ARMED[/b] — bind will force past the limit"
+			+ " and brand the spell UNSTABLE[/color]"
+		)
 	out.append_array(_preview(mind))
 	if _last_result != "":
 		out.append("")

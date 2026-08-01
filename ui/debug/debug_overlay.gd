@@ -38,6 +38,8 @@ var _drag_offset: Vector2 = Vector2.ZERO
 var _selected_row: int = -1
 var _accumulator: float = 0.0
 var _feed: Array[String] = []
+## Worst micro-tick duration since the panel last redrew, fed by the per-frame signal.
+var _worst_micro_ms: float = 0.0
 var _remembered_names: Dictionary = {}
 var _page: Page = Page.LIVE
 var _lmb_presses: int = 0
@@ -74,6 +76,8 @@ func _ready() -> void:
 	ECSEvents.spell_cast.connect(_on_spell_cast)
 	ECSEvents.spell_detonated.connect(_on_spell_detonated)
 	ECSEvents.entity_mutated.connect(_on_mutated)
+	ECSEvents.runes_learned.connect(_on_runes_learned)
+	ECSEvents.tick_completed.connect(_on_tick_completed)
 
 
 ## A DRAGGABLE, NON-MODAL panel rather than text painted on the screen.
@@ -306,6 +310,11 @@ func _compose_live() -> String:
 	out.append(PanelFormat.row("micro", PanelFormat.against_budget(
 		float(counters["last_micro_ms"]), float(counters["micro_budget_ms"]), "ms"
 	)))
+	# Fed by the `tick_completed` SIGNAL, which fires every frame — the poll above samples
+	# whichever frame the overlay happened to redraw on, so a 12 ms spike between redraws was
+	# invisible. The signal existed for overlays since Sprint 0 and had zero listeners.
+	out.append(PanelFormat.row("worst", "%.2f ms since last redraw" % _worst_micro_ms))
+	_worst_micro_ms = 0.0
 	out.append(PanelFormat.row("other", PanelFormat.tally([
 		["%.2f" % counters["last_sim_ms"], "sim"],
 		["%.2f" % counters["last_fluid_ms"], "fluid"],
@@ -590,6 +599,23 @@ func _on_caravan_arrived(
 
 func _on_caravan_lost(from_faction: int, to_faction: int) -> void:
 	_remember("caravan: faction %d -> %d LOST on the road" % [from_faction, to_faction])
+
+
+func _on_tick_completed(
+	tick_class: StringName, duration_ms: float, _entities: int
+) -> void:
+	if tick_class == &"micro":
+		_worst_micro_ms = maxf(_worst_micro_ms, duration_ms)
+
+
+func _on_runes_learned(_reader: int, runes: Array) -> void:
+	if runes.is_empty():
+		_remember("you read the inscription — nothing new")
+		return
+	var names: Array[String] = []
+	for rune in runes:
+		names.append(String(rune))
+	_remember("LEARNED: %s" % ", ".join(names))
 
 
 func _on_changed_floor(from_floor: int, to_floor: int) -> void:

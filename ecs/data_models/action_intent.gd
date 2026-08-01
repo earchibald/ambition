@@ -33,9 +33,12 @@ var name_list: Array[StringName] = []
 
 
 ## A bind request: compile these runes and register the result as an Action_ID.
-static func bind(runes: Array[StringName]) -> ActionIntent:
+## `overclock` rides in `scalar_data` (1.0 = forced compile, grimoire spec §2C). That field was
+## declared in Sprint 1 and read by nothing until this; a bool-shaped payload finally exists.
+static func bind(runes: Array[StringName], overclock: bool = false) -> ActionIntent:
 	var intent := create(BIND)
 	intent.name_list = runes.duplicate()
+	intent.scalar_data = 1.0 if overclock else 0.0
 	return intent
 
 

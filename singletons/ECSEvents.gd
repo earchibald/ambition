@@ -65,6 +65,10 @@ signal spell_detonated(caster: int, spell_id: StringName, at: Vector3)
 ## reputation path and the UI both need it and neither should have to poll `BodyComponent`.
 signal entity_mutated(entity: int, mutation: StringName)
 
+## Something Inscribed was read. `runes` holds only the NEWLY learned ids — an empty array means
+## "you already knew all of this", which is worth reporting distinctly from silence.
+signal runes_learned(reader: int, runes: Array)
+
 
 ## A faction's opinion of another crossed a threshold. Carries the score so the feed can say how
 ## bad it is, and `now_hostile` so it can say what changed rather than just that something did.

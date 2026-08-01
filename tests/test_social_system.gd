@@ -17,6 +17,10 @@ var village: FactionCoreComponent
 func before_each() -> void:
 	GameLoopManager.set_physics_process(false)
 	World.boot_scenario(World.SCENARIO_WORLD, SEED)
+	# MID-MORNING, pinned. The GameClock is an autoload that other test files advance, and the
+	# caravan dispatcher rightly refuses to conscript sleepers — so without this the trade tests
+	# passed or failed depending on which suites ran BEFORE them and left the village in bed.
+	GameClock.hour = 10
 	social = SocialSystem.new()
 	village = DAGInstantiator.faction_core(_village_faction_id())
 

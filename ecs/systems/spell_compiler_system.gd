@@ -42,6 +42,7 @@ const CAP_TTL: StringName = &"lifetime"
 var compiles_attempted: int = 0
 var compiles_rejected: int = 0
 var caps_enforced: int = 0
+var overclocked_compiles: int = 0
 var last_failure: StringName = REASON_NONE
 
 
@@ -55,7 +56,7 @@ static func complexity_budget(mind: MindComponent) -> float:
 
 ## Returns `{ok: bool, spell: CompiledSpell, reason: StringName}`. `spell` is null when `ok` is
 ## false, and `reason` is empty when it is true.
-func compile(rune_ids: Array, mind: MindComponent) -> Dictionary:
+func compile(rune_ids: Array, mind: MindComponent, overclock: bool = false) -> Dictionary:
 	compiles_attempted += 1
 	var problem: StringName = _structural_problem(rune_ids, mind)
 	if problem != REASON_NONE:
@@ -68,7 +69,14 @@ func compile(rune_ids: Array, mind: MindComponent) -> Dictionary:
 		_absorb_rune(spell, rune_id)
 
 	if float(spell.complexity) > complexity_budget(mind):
-		return _refuse(REASON_TOO_COMPLEX)
+		# OVERCLOCKING (grimoire spec §2C, declared gap G-2): the refusal can be FORCED past,
+		# and the price is a permanent [Unstable] brand — every cast of this spell rolls the
+		# d100 mishap table in `ActionResolutionSystem`. Structural problems above are never
+		# forceable: a spell with no shape is not risky, it is not a spell.
+		if not overclock:
+			return _refuse(REASON_TOO_COMPLEX)
+		spell.unstable = true
+		overclocked_compiles += 1
 
 	_apply_geometric_caps(spell)
 	spell.strain_cost = float(spell.complexity) * WorldConstants.STRAIN_PER_COMPLEXITY
@@ -86,10 +94,10 @@ func compile(rune_ids: Array, mind: MindComponent) -> Dictionary:
 ##
 ## Reports through the bus either way, because a Bind button that does nothing visible on failure
 ## is the same defect as a cast that resolves silently.
-func bind(caster_row: int, rune_ids: Array) -> Dictionary:
+func bind(caster_row: int, rune_ids: Array, overclock: bool = false) -> Dictionary:
 	var mind: MindComponent = ECSManager.minds.get(caster_row)
 	var caster: int = ECSManager.handle_of(caster_row)
-	var result: Dictionary = compile(rune_ids, mind)
+	var result: Dictionary = compile(rune_ids, mind, overclock)
 	if not result["ok"]:
 		ECSEvents.spell_bound.emit(caster, &"", false, result["reason"])
 		return result
@@ -214,4 +222,5 @@ func counters() -> Dictionary:
 		"spells_compiled": compiles_attempted - compiles_rejected,
 		"spells_rejected": compiles_rejected,
 		"spell_caps_enforced": caps_enforced,
+		"spells_overclocked": overclocked_compiles,
 	}

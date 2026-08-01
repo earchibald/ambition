@@ -72,25 +72,31 @@ func test_the_reaction_key_does_not_depend_on_tag_order() -> void:
 
 func test_a_rule_is_found_from_either_side() -> void:
 	var forward: Dictionary = ReactionSystem.rule_for(
-		&"Burning", &"Water", ReactionSystem.SCOPE_INTER
+		&"Burning", &"Wet", ReactionSystem.SCOPE_INTER
 	)
 	var backward: Dictionary = ReactionSystem.rule_for(
-		&"Water", &"Burning", ReactionSystem.SCOPE_INTER
+		&"Wet", &"Burning", ReactionSystem.SCOPE_INTER
 	)
 	assert_false(forward.is_empty(), "the quench rule exists")
 	assert_eq(forward, backward, "authoring order does not change which rule is found")
 
 
-## Scope is part of the identity, not a hint. Burning+Water is an INTER rule; asking for it as
-## INTRA must find nothing, or a torch extinguishes itself for being near a puddle.
+## Scope is part of the identity, not a hint. The index is keyed on (pair, scope): a lookup
+## under a scope a rule was not registered for must find nothing. Every current rule is BOTH —
+## the audit killed the last INTER-only rule, whose single-entity blind spot broke the water
+## spell — so the pin is that the LOOKUP is scope-keyed, not that any rule is scope-limited.
 func test_scope_is_part_of_the_rule_identity() -> void:
 	assert_true(
-		ReactionSystem.rule_for(&"Burning", &"Water", ReactionSystem.SCOPE_INTRA).is_empty(),
-		"the INTER quench rule is not reachable as an INTRA rule"
+		ReactionSystem.rule_for(&"Burning", &"Wet", &"NEITHER").is_empty(),
+		"an unregistered scope finds nothing"
 	)
 	assert_false(
 		ReactionSystem.rule_for(&"Burning", &"Wet", ReactionSystem.SCOPE_INTRA).is_empty(),
-		"the self-quench rule IS an INTRA rule"
+		"the quench reaches a soaked burning entity (self-quench)"
+	)
+	assert_false(
+		ReactionSystem.rule_for(&"Burning", &"Wet", ReactionSystem.SCOPE_INTER).is_empty(),
+		"and a burning entity beside a puddle (neighbour quench)"
 	)
 
 
@@ -113,7 +119,7 @@ func test_a_torch_beside_a_puddle_is_extinguished() -> void:
 	var torch: int = _spawn(Vector3(4.0, 0.0, 4.0), MaterialLibrary.MAT_CLOTH, 500.0)
 	var puddle: int = _spawn(Vector3(4.5, 0.0, 4.0), MaterialLibrary.MAT_WATER, 1000.0)
 	_tag(torch, &"Burning")
-	_tag(puddle, &"Water")
+	_tag(puddle, &"Wet")
 
 	_run(1)
 	assert_false(
@@ -126,7 +132,7 @@ func test_reactants_out_of_contact_do_not_react() -> void:
 	var torch: int = _spawn(Vector3(4.0, 0.0, 4.0), MaterialLibrary.MAT_CLOTH, 500.0)
 	var puddle: int = _spawn(Vector3(12.0, 0.0, 4.0), MaterialLibrary.MAT_WATER, 1000.0)
 	_tag(torch, &"Burning")
-	_tag(puddle, &"Water")
+	_tag(puddle, &"Wet")
 
 	var system: ReactionSystem = _run(1)
 	assert_eq(system.reactions_fired, 0, "8 metres apart is not touching")
@@ -252,7 +258,7 @@ func test_quenching_a_fire_cools_the_room() -> void:
 	var torch: int = _spawn(Vector3(4.0, 0.0, 4.0), MaterialLibrary.MAT_CLOTH, 500.0)
 	var puddle: int = _spawn(Vector3(4.5, 0.0, 4.0), MaterialLibrary.MAT_WATER, 1000.0)
 	_tag(torch, &"Burning")
-	_tag(puddle, &"Water")
+	_tag(puddle, &"Wet")
 
 	var system: ReactionSystem = _run(1)
 	assert_lt(system.energy_released_j, 0.0, "the reaction consumed energy rather than making it")
@@ -449,10 +455,13 @@ func test_a_self_igniting_cloud_still_releases_its_combustion_energy() -> void:
 	assert_gt(_chunk.ambient_temperature_c, before, "and the room got warmer for it")
 
 
-## The self-quench rule stays INTRA-only. If it went dual-scope, a torch would put itself out for
-## standing beside a puddle it is not touching, which is the distinction scope exists to draw.
-func test_the_self_quench_rule_is_not_promoted_to_inter() -> void:
-	assert_true(
+## REVERSED by the 2026-08-01 audit, and the reversal is the pin now. This test used to assert
+## the self-quench rule was INTRA-only, on the worry that a torch would put itself out for
+## standing NEAR a puddle — but INTER already requires CONTACT_RADIUS_M, so "near" was never in
+## reach, and the INTER half being missing was exactly why the starting water spell could not
+## put out a fire it hit. Touching water quenches, from either side of the pair.
+func test_touching_water_quenches_from_either_side() -> void:
+	assert_false(
 		ReactionSystem.rule_for(&"Burning", &"Wet", ReactionSystem.SCOPE_INTER).is_empty(),
-		"BOTH is applied per rule, not to the whole table"
+		"a burning thing TOUCHING a wet thing is quenched"
 	)

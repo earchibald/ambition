@@ -38,6 +38,37 @@ var absorb_j: float = 0.0
 ## "WARN: Radius > 15m" instead of silently handing back a different spell than was authored.
 var caps_applied: Array[StringName] = []
 
+## Branded at FORCED compile time (grimoire spec §2C) and never cleared: an Unstable spell rolls
+## the d100 mishap table on every cast for as long as it exists. Permanence is the spec's word
+## ("permanently brands the spell"), and it is what makes overclocking a debt rather than a fee.
+var unstable: bool = false
+
+
+## A per-cast copy, for mishaps that mutate geometry. An Over-Pressure roll doubles the RADIUS
+## OF THIS CAST — mutating the grimoire's stored spell would ratchet it bigger on every mishap.
+func clone() -> CompiledSpell:
+	var copy := CompiledSpell.new()
+	copy.spell_id = spell_id
+	copy.runes = runes.duplicate()
+	copy.complexity = complexity
+	copy.strain_cost = strain_cost
+	copy.trigger = trigger
+	copy.shape = shape
+	copy.radius_m = radius_m
+	copy.speed_mps = speed_mps
+	copy.ttl_s = ttl_s
+	copy.expansion_mps = expansion_mps
+	copy.delay_s = delay_s
+	copy.cone_angle_deg = cone_angle_deg
+	copy.applies_tags = applies_tags.duplicate()
+	copy.removes_tags = removes_tags.duplicate()
+	copy.energy_j = energy_j
+	copy.absorbs = absorbs
+	copy.absorb_j = absorb_j
+	copy.caps_applied = caps_applied.duplicate()
+	copy.unstable = unstable
+	return copy
+
 
 func was_capped() -> bool:
 	return not caps_applied.is_empty()

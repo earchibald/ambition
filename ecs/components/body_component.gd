@@ -6,6 +6,12 @@ var max_health: float = 100.0
 var health: float = 100.0
 var stamina: float = 100.0
 var max_stamina: float = 100.0
+## Accumulated casting Strain (magic doc §2): "temporary damage to the caster's Max_Stamina...
+## until they rest". Kept SEPARATE from `max_stamina` so mutations that move the base and
+## strain that dents it cannot corrupt each other — the effective ceiling is derived, never
+## stored. Sprint 4 charged CURRENT stamina instead, and since nothing in the build restored
+## stamina at all, a new adventurer could cast the starting fireball five times per life, ever.
+var strain: float = 0.0
 var strength: float = 10.0
 ## Multiplies the gib threshold. Armour raises it; soft creatures lower it. Sourced from the
 ## creature schema's `structural_toughness`.
@@ -18,6 +24,11 @@ var exposure: Dictionary = {}
 
 func is_alive() -> bool:
 	return health > 0.0
+
+
+## What the body can actually hold right now: the base ceiling minus casting strain.
+func effective_max_stamina() -> float:
+	return maxf(0.0, max_stamina - strain)
 
 
 func skill(name: StringName) -> float:

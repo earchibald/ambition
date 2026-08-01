@@ -144,6 +144,11 @@ func _detonate(row: int, ephemeral: EphemeralComponent, hash: SpatialHash) -> vo
 	ECSEvents.spell_detonated.emit(
 		ephemeral.source_entity, StringName(ephemeral.payload.get("spell_id", &"")), centre
 	)
+	# A detonation is LOUD. `spawn_noise` shipped in Sprint 1 documented as "how an unseen impact
+	# produces INVESTIGATE rather than omniscient combat" and had zero callers — so every
+	# explosion in the build was silent to everyone not looking at it. The noise outlives the
+	# spell by design: the ephemeral dies this frame, the ringing ears do not.
+	EphemeralSystem.spawn_noise(centre, radius * 4.0, 0.5, ephemeral.source_entity)
 
 
 func _apply_aura(row: int, ephemeral: EphemeralComponent, hash: SpatialHash) -> void:
@@ -243,6 +248,11 @@ static func spawn_aura(
 	ephemeral.source_entity = source
 	ECSManager.ephemerals[row] = ephemeral
 	ECSManager.add_component_bit(row, ComponentMask.EPHEMERAL)
+	# Announced to the viewer: a smoke cloud that blocks NPC sight while being invisible to the
+	# PLAYER would be the perception system cheating in reverse.
+	var visual_tags: Array[StringName] = [&"Aura"]
+	visual_tags.append_array(tags)
+	ECSEvents.emit_entity_created(handle, visual_tags, position)
 	return handle
 
 
@@ -287,7 +297,10 @@ static func spawn_spell(
 	ECSManager.ephemerals[row] = ephemeral
 	ECSManager.add_component_bit(row, ComponentMask.EPHEMERAL)
 
-	var tags: Array[StringName] = [&"Kinetic_Ephemeral"]
+	# The payload tags ride along so the viewer can colour the bolt by WHAT IT DOES (declared
+	# gap G-4: a cast spawned an ordinary box, indistinguishable from a dropped crate).
+	var tags: Array[StringName] = [&"Kinetic_Ephemeral", &"Spell"]
+	tags.append_array(spell.applies_tags)
 	ECSEvents.emit_entity_created(handle, tags, position)
 	return handle
 

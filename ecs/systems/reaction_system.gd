@@ -75,20 +75,15 @@ const RULES: Array[Dictionary] = [
 		"gas": &"Smoke",
 	},
 	{
-		"tags": [&"Burning", &"Water"],
-		"scope": SCOPE_INTER,
-		"adds": [],
-		"removes": [&"Burning"],
-		"burns": &"",
-		"consumes": [],
-		"blast_radius_m": 0.0,
-		"blast_impulse_ns": 0.0,
-		"gas": &"Steam",
-	},
-	{
-		# INTRA: a thing that is both alight and soaked puts ITSELF out. No neighbour involved.
+		# THE QUENCH, and there is exactly ONE word for water: `Wet`. The build shipped with two —
+		# `Apply_Water` applied the tag `Water`, the world's phase model and MAT_WATER's innate
+		# tags said `Wet`, and this table keyed one rule on each — so the only water spell in the
+		# game could not put out a fire it hit (the pair landed on ONE entity and the Water rule
+		# was INTER-only), which is the identical single-entity blind spot as the spore fix above,
+		# found by an audit in the rule the implementer did not think to re-check. SCOPE_BOTH and
+		# one vocabulary close both holes at once.
 		"tags": [&"Burning", &"Wet"],
-		"scope": SCOPE_INTRA,
+		"scope": SCOPE_BOTH,
 		"adds": [],
 		"removes": [&"Burning", &"Wet"],
 		"burns": &"",
@@ -98,6 +93,27 @@ const RULES: Array[Dictionary] = [
 		"gas": &"Steam",
 	},
 ]
+
+## Result tags LAPSE. `Burning`, `Explosion` and `Smoke` were added with no expiry, so every
+## survivor of an explosion carried `Explosion` forever, every smoke-touched entity stayed smoky
+## for the run, and a thing set alight burned eternally with no fuel model — three permanent
+## flags wearing event names. Frames at 60 Hz.
+const RESULT_TAG_LIFETIME_FRAMES: Dictionary = {
+	&"Burning": 900,
+	&"Explosion": 120,
+	&"Smoke": 600,
+}
+
+## The fire model (the other half of declared gap G-7, undeclared until the audit: `Burning`
+## damaged nothing, consumed nothing and never went out). Per Micro frame, a burning entity
+## heats its own surface, warms the chunk air, conducts into whatever it touches, and — if it is
+## made of something combustible — takes damage until it burns out or dies.
+const FIRE_SELF_HEAT_W: float = 15000.0
+const FIRE_AIR_HEAT_W: float = 40000.0
+const BURN_DPS: float = 4.0
+const BURN_CONTACT_AREA_M2: float = 0.25
+## Burning entities processed per tick. Bounds the per-frame hash queries in a burning crowd.
+const MAX_BURNING_PER_TICK: int = 16
 
 ## Latent heat of vaporisation of water, J/kg. Quenching a fire costs this much energy per
 ## kilogram boiled off, which is why water works and why the room gets damp rather than cold.
@@ -113,6 +129,16 @@ var cooldowns_held: int = 0
 var tags_expired: int = 0
 var energy_released_j: float = 0.0
 var ambient_delta_c: float = 0.0
+## Cumulative, like the mutation counters: fires are rare events and a per-tick reset reads as
+## zero on every overlay frame that matters.
+var ignitions: int = 0
+var burn_deaths: int = 0
+var sources_exhausted: int = 0
+
+## Shares the thermodynamics conduction model rather than inventing a second one. This is the
+## production caller `conduct_pair` never had: a fully-tested, stability-analysed body-to-body
+## conduction path shipped in Sprint 1 and NEVER RAN — a fire could not heat the thing beside it.
+var _thermo: ThermodynamicsSystem = ThermodynamicsSystem.new()
 
 
 ## Sorted-pair key for two tags. `A+B` and `B+A` produce the same string, which is the entire
@@ -145,17 +171,19 @@ static func _build_index() -> void:
 ## One pass over the Active chemistry set. Expiry first, then INTRA, then INTER — expiry first
 ## because a cooldown that lapsed last frame must not block this frame's reaction, and a lock
 ## that outlives its own deadline by a tick is indistinguishable in play from one that is stuck.
-func run(micro_frame: int, chunk: ChunkData, hash: SpatialHash) -> void:
+func run(
+	micro_frame: int, chunk: ChunkData, hash: SpatialHash,
+	combat: ActionResolutionSystem = null
+) -> void:
 	reactions_fired = 0
 	cooldowns_held = 0
 	energy_released_j = 0.0
 	ambient_delta_c = 0.0
 	tags_expired = _expire_all(micro_frame)
 
+	var burn_budget: int = MAX_BURNING_PER_TICK
 	var rows: PackedInt32Array = ECSManager.query(ComponentMask.CHEMISTRY)
 	for i in rows.size():
-		if reactions_fired >= MAX_REACTIONS_PER_TICK:
-			return
 		var row: int = rows[i]
 		# `.get`, NOT `[row]`. A rule with a `consumes` clause destroys an entity mid-pass, and the
 		# row list was snapshotted before that happened — indexing would crash on the corpse of a
@@ -163,11 +191,118 @@ func run(micro_frame: int, chunk: ChunkData, hash: SpatialHash) -> void:
 		var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
 		if chemistry == null:
 			continue
+		# Combustion runs BEFORE the cooldown gate: the lock stops reactions re-triggering, and a
+		# fire that pauses for 60 frames after every event reads as a fire that flickers off.
+		if chemistry.has_tag(&"Burning") and burn_budget > 0:
+			burn_budget -= 1
+			_burn_tick(row, chemistry, micro_frame, chunk, hash, combat)
+		elif _should_ignite(row, chemistry):
+			ignitions += 1
+			chemistry.add_tag(
+				&"Burning", micro_frame + int(RESULT_TAG_LIFETIME_FRAMES[&"Burning"])
+			)
 		if chemistry.has_tag(COOLDOWN_TAG):
 			cooldowns_held += 1
 			continue
+		if reactions_fired >= MAX_REACTIONS_PER_TICK:
+			continue
 		if not _react_intra(row, chemistry, micro_frame, chunk):
 			_react_inter(row, chemistry, micro_frame, chunk, hash)
+
+
+## Autoignition (declared gap G-7): hot enough IS alight, for materials with an ignition point.
+## This is what lets a forge fire spread to the woodpile with no spell involved.
+func _should_ignite(row: int, chemistry: ChemistryComponent) -> bool:
+	if chemistry.has_tag(&"Wet"):
+		return false
+	var physical: PhysicalPropertyComponent = ECSManager.physicals.get(row)
+	if physical == null:
+		return false
+	var threshold: float = MaterialLibrary.ignition_c(ECSManager.materials.get(row))
+	return not is_nan(threshold) and physical.temperature_c() >= threshold
+
+
+## One frame of being on fire. Self-heat, air heat, conduction into contacts, damage to
+## combustible bodies, and the heat-source fuel drain that lets a brazier BURN DOWN.
+func _burn_tick(
+	row: int,
+	chemistry: ChemistryComponent,
+	micro_frame: int,
+	chunk: ChunkData,
+	hash: SpatialHash,
+	combat: ActionResolutionSystem
+) -> void:
+	var dt: float = 1.0 / float(WorldConstants.MICRO_TICK_HZ)
+	var physical: PhysicalPropertyComponent = ECSManager.physicals.get(row)
+	var source: HeatSourceComponent = ECSManager.heat_sources.get(row)
+
+	if source != null:
+		# A fuelled fire spends its fuel. `output_j_per_tick` was declared, documented and read
+		# by nothing, so a lit brazier burned forever for free.
+		var released: float = source.consume(source.output_j_per_tick)
+		_heat_the_air(chunk, released)
+		if not source.is_lit():
+			chemistry.remove_tag(&"Burning")
+			sources_exhausted += 1
+			return
+	else:
+		_heat_the_air(chunk, FIRE_AIR_HEAT_W * dt)
+
+	if physical != null:
+		ThermodynamicsSystem.apply_surface_energy(
+			physical, ECSManager.materials.get(row), FIRE_SELF_HEAT_W * dt,
+			_exposed_area_cm2(row)
+		)
+		# The source's ceiling is real now: a brazier is hot, not unboundedly hot.
+		if source != null and physical.temperature_c() > source.max_temperature:
+			physical.set_temperature_c(source.max_temperature)
+		_conduct_to_contacts(row, physical, hash, dt)
+
+	_char_the_body(row, micro_frame, combat)
+
+
+## Fire spreads by TOUCH, through the same conduction model everything else uses. This is the
+## production wire `ThermodynamicsSystem.conduct_pair` shipped without.
+func _conduct_to_contacts(
+	row: int, physical: PhysicalPropertyComponent, hash: SpatialHash, dt: float
+) -> void:
+	if hash == null:
+		return
+	var neighbours: PackedInt32Array = hash.query_radius(
+		ECSManager.position_of(row), CONTACT_RADIUS_M
+	)
+	for i in neighbours.size():
+		var other: int = neighbours[i]
+		if other == row:
+			continue
+		var theirs: PhysicalPropertyComponent = ECSManager.physicals.get(other)
+		if theirs != null:
+			_thermo.conduct_pair(physical, theirs, BURN_CONTACT_AREA_M2, dt)
+
+
+## Fire hurts what can burn. Stone survives standing in it; flesh and wood do not. Damage is
+## reported once a second rather than sixty times, or one fire fills the whole outcome feed.
+func _char_the_body(row: int, micro_frame: int, combat: ActionResolutionSystem) -> void:
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body == null or not body.is_alive():
+		return
+	if MaterialLibrary.combustion_energy_j(
+		ECSManager.physicals.get(row), ECSManager.materials.get(row)
+	) <= 0.0:
+		return
+	var dt: float = 1.0 / float(WorldConstants.MICRO_TICK_HZ)
+	body.health = maxf(0.0, body.health - BURN_DPS * dt)
+	if micro_frame % WorldConstants.MICRO_TICK_HZ == 0:
+		ECSEvents.entity_damaged.emit(
+			ECSManager.handle_of(row), BURN_DPS, body.health, &"burning"
+		)
+	if body.is_alive() or row == WorldConstants.PLAYER_INDEX:
+		# The player's death has one owner: the Simulation tick's death check and DeathLoopSystem.
+		return
+	burn_deaths += 1
+	ECSEvents.entity_died.emit(ECSManager.handle_of(row), &"burned")
+	if combat != null:
+		combat._convert_to_corpse(row)
 
 
 func _expire_all(micro_frame: int) -> int:
@@ -265,7 +400,13 @@ func _fire(
 		for tag in rule["removes"]:
 			chemistry.remove_tag(tag)
 		for tag in rule["adds"]:
-			chemistry.add_tag(tag)
+			# Result tags carry their lifetime. Without this, `Explosion` was a permanent flag on
+			# every survivor and `Burning` was eternal fire with no fuel.
+			var lifetime: int = int(RESULT_TAG_LIFETIME_FRAMES.get(tag, 0))
+			if lifetime > 0:
+				chemistry.add_tag(tag, micro_frame + lifetime)
+			else:
+				chemistry.add_tag(tag)
 		# THE LOCK. Applied to every participant, including one that was only removed FROM, so a
 		# quench cannot be re-run against the same pair on the very next frame.
 		chemistry.add_tag(COOLDOWN_TAG, deadline)
@@ -369,6 +510,9 @@ func _blast(rule: Dictionary, centre: Vector3) -> void:
 	var impulse: float = float(rule["blast_impulse_ns"])
 	if radius <= 0.0 or impulse <= 0.0:
 		return
+	# Chemistry is loud. An unseen explosion turns nearby heads (INVESTIGATE), which is the
+	# perception contract every other violent event already honours.
+	EphemeralSystem.spawn_noise(centre, radius * 4.0, 0.5, EH.INVALID)
 	for row in ECSManager.query(ComponentMask.MOVER):
 		var offset: Vector3 = ECSManager.position_of(row) - centre
 		var distance: float = offset.length()
@@ -408,4 +552,7 @@ func counters() -> Dictionary:
 		"reaction_energy_j": energy_released_j,
 		"reaction_ambient_c": ambient_delta_c,
 		"tags_expired": tags_expired,
+		"ignitions": ignitions,
+		"burn_deaths": burn_deaths,
+		"heat_sources_exhausted": sources_exhausted,
 	}

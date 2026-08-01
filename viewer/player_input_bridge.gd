@@ -55,6 +55,10 @@ func _physics_process(_delta: float) -> void:
 	# 35% speed — the ECS keeps one movement law and the viewer just asks for less of it.
 	if Input.is_action_pressed(&"precision_move"):
 		direction *= WorldConstants.PRECISION_SPEED_SCALE
+	# While the free camera flies, WASD belongs to the CAMERA and the body stands still. A zero
+	# intent is still pushed so the player halts rather than gliding on their last velocity.
+	if _rig() != null and _rig().free_flight:
+		direction = Vector3.ZERO
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
 
@@ -79,6 +83,12 @@ func _physics_process(_delta: float) -> void:
 	if Input.is_action_just_pressed(&"slow_time"):
 		# Bullet-time scales delta, never the 60 Hz tick rate (ADR-9).
 		GameLoopManager.time_scale = 0.2 if GameLoopManager.time_scale == 1.0 else 1.0
+	if Input.is_action_just_pressed(&"free_camera"):
+		_toggle_free_camera(row)
+	if Input.is_action_just_pressed(&"debug_spawn_rat"):
+		_spawn_at_cursor(row, &"rat")
+	if Input.is_action_just_pressed(&"debug_spawn_item"):
+		_spawn_at_cursor(row, &"item")
 
 
 ## WASD in the BODY's frame, not the camera's.
@@ -158,6 +168,48 @@ func _push_cast(row: int, aim: Vector3) -> void:
 		return
 	ECSManager.push_intent(row, ActionIntent.cast(mind.active_spell, aim))
 	intents_pushed += 1
+
+
+func _rig() -> CameraRig:
+	return null if _camera == null else _camera.get_parent() as CameraRig
+
+
+## DEBUG ONLY (`F8`): detach the camera and survey the world. Half of the scope doc's "free
+## camera + spawn console" Sprint 1 deliverable, which never shipped — "without a spawn console
+## you cannot reproduce a single success state on demand" was the roadmap's own warning.
+func _toggle_free_camera(row: int) -> void:
+	var rig: CameraRig = _rig()
+	if rig == null:
+		return
+	var flying: bool = rig.toggle_free_flight()
+	ECSEvents.action_rejected.emit(
+		ECSManager.handle_of(row), &"camera",
+		&"free camera ON — WASD flies, F8 returns" if flying else &"camera follows you again"
+	)
+
+
+## DEBUG ONLY (`F9`/`F10`): the spawn console's other half. Spawns a rat or a copper stack at
+## the cursor's ground point, so any combat or pickup scenario is reproducible on demand
+## without editing a scene.
+func _spawn_at_cursor(row: int, kind: StringName) -> void:
+	if _camera == null or World.active_chunk == null:
+		return
+	var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
+	var ground: Dictionary = GameLoopManager.picking.cursor_ground(
+		_camera.project_ray_origin(mouse),
+		_camera.project_ray_normal(mouse),
+		World.sampler()
+	)
+	if not bool(ground.get("hit", false)):
+		ECSEvents.action_rejected.emit(
+			ECSManager.handle_of(row), &"spawn", &"point at the ground first"
+		)
+		return
+	var at: Vector3 = ground["point"] + Vector3(0.0, 0.5, 0.0)
+	if kind == &"rat":
+		World.spawn_creature(at, &"SPC_CORPSE_RAT")
+	else:
+		World.spawn_item(at, MaterialLibrary.MAT_COPPER, 112.0, 5)
 
 
 ## DEBUG ONLY: injure the player, so the death loop can be reached at all.

@@ -45,6 +45,7 @@ var wealth_taxed: int = 0
 var swarms_capped: int = 0
 var junk_collected: int = 0
 var grudges_decayed: int = 0
+var dag_nodes_compacted: int = 0
 
 
 ## Entity 0's health reached zero. Returns the corpse handle.
@@ -151,6 +152,10 @@ func run_interregnum(bootstrapper: Bootstrapper, grid: WorldGrid) -> void:
 	# arena completes its loop rather than crashing on a null.
 	if bootstrapper != null:
 		bootstrapper._run_interregnum()
+		# ADR-12's slow-cadence DAG compaction, at the cadence the spec names: each interregnum.
+		# Without it the history graph grew monotonically for the life of a save.
+		if bootstrapper.generator != null:
+			dag_nodes_compacted += bootstrapper.generator.compact()
 	_levy_entropy_tax()
 	# Breed BEFORE the junk sweep: the filth that feeds the rats is the same filth the sweep is
 	# about to collect, and a year's vermin bloom is caused by the mess as it stood at death,
@@ -256,6 +261,11 @@ func _collect_junk() -> void:
 			continue
 		if ECSManager.ownerships.has(row):
 			continue
+		# Inscribed stone survives a year of neglect. The lecterns are the only route into rune
+		# knowledge in the generated world; a janitor pass deleting libraries at 40% per death
+		# would make progression regress at random.
+		if chemistry != null and chemistry.active_tags.has(&"Inscribed"):
+			continue
 		# ADR-20: the RNG stream, never a bare randf, or the soak harness cannot reproduce a run.
 		if RNGService.randf_in(&"economy") < UNOWNED_DECAY_CHANCE:
 			doomed.append(row)
@@ -316,4 +326,5 @@ func counters() -> Dictionary:
 		"interregnum_swarms_capped": swarms_capped,
 		"interregnum_junk_collected": junk_collected,
 		"interregnum_grudges_decayed": grudges_decayed,
+		"interregnum_dag_compacted": dag_nodes_compacted,
 	}

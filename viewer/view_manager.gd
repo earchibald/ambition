@@ -171,6 +171,10 @@ func _style(node: Node3D, tags: Array) -> void:
 	var mesh_node: MeshInstance3D = node
 	# Each visual needs its OWN mesh and material. A pooled node handed back with the previous
 	# occupant's mesh would repaint every entity that ever shared it.
+	if tags.has(&"Spell") or tags.has(&"Aura"):
+		_style_ephemeral(mesh_node, tags)
+		_fit_nose(mesh_node, false)
+		return
 	var box := BoxMesh.new()
 	var colour: Color
 	var wears_a_nose: bool = false
@@ -199,6 +203,39 @@ func _style(node: Node3D, tags: Array) -> void:
 	box.material = material
 	mesh_node.mesh = box
 	_fit_nose(mesh_node, wears_a_nose)
+
+
+## Magic and gas get SPHERES, glowing or hazy by payload (declared gap G-4: a cast spawned an
+## ordinary box, so a fireball in flight was indistinguishable from a thrown crate). Colour
+## comes from what the thing DOES — the payload tags ride along on the created event — so the
+## viewer never invents a meaning the ECS does not have.
+func _style_ephemeral(mesh_node: MeshInstance3D, tags: Array) -> void:
+	var sphere := SphereMesh.new()
+	var material := StandardMaterial3D.new()
+	if tags.has(&"Aura"):
+		sphere.radius = 1.2
+		sphere.height = 2.4
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		var haze := Color(0.85, 0.85, 0.9, 0.35)
+		if tags.has(&"Smoke"):
+			haze = Color(0.25, 0.24, 0.22, 0.55)
+		elif tags.has(&"Spores"):
+			haze = Color(0.45, 0.65, 0.25, 0.45)
+		material.albedo_color = haze
+	else:
+		sphere.radius = 0.25
+		sphere.height = 0.5
+		var glow := Color(0.65, 0.4, 0.95)
+		if tags.has(&"Burning") or tags.has(&"Apply_Burning"):
+			glow = Color(1.0, 0.45, 0.1)
+		elif tags.has(&"Wet"):
+			glow = Color(0.25, 0.55, 1.0)
+		material.albedo_color = glow
+		material.emission_enabled = true
+		material.emission = glow
+		material.emission_energy_multiplier = 2.0
+	sphere.material = material
+	mesh_node.mesh = sphere
 
 
 ## A cube looks identical from all four sides, so rotating one communicates nothing. The nose is

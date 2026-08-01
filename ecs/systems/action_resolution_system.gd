@@ -9,6 +9,15 @@
 ## a 0.4 kg rat gibs (threshold 65 J); a 70 kg human takes 35 hp and needs three hits
 ## (threshold 2,040 J); an armoured knight needs ~11 hits; a 500 kg boulder at 20 m/s gibs
 ## anything. A stationary player still deals the full 106 J.
+##
+## CROSS-LoD BOUNDARY COMBAT (Sprint 2 scaffolding §229 asks for the branch to be STATED here):
+## actions resolve in the ATTACKER's LoD, and the chosen branch is (b) — a hostile action from a
+## Simulated chunk into an Active one resolves ABSTRACTLY at ledger scale, never by
+## force-promoting the target chunk. Force-promotion (a) hands any distant faction a lever that
+## spikes the frame budget on demand. Today NO action crosses a seam at all: melee requires
+## reach, and hostile engagement targets only spatial-hash neighbours, which are same-floor and
+## Active by construction. The branch is recorded now so the first cross-seam feature inherits a
+## decision instead of an accident.
 class_name ActionResolutionSystem
 extends RefCounted
 
@@ -27,6 +36,7 @@ var gibs: int = 0
 var damage_dealt: float = 0.0
 var casts_resolved: int = 0
 var casts_fizzled: int = 0
+var mishaps_rolled: int = 0
 
 ## Acts committed this tick that somebody might have seen. Drained by GameLoopManager and handed
 ## to PerceptionSystem, which owns the question of who had line of sight.
@@ -121,8 +131,34 @@ func resolve_melee(
 		# listener resolves the entity after the Corpse tag is set, and the log reads
 		# "corpse #1 DIED" — which describes the aftermath, not the event.
 		ECSEvents.entity_died.emit(ECSManager.handle_of(target_row), &"melee")
+		_grant_kill_insight(attacker_row, target_row)
 		_convert_to_corpse(target_row)
 	return damage
+
+
+## Knowledge-driven growth (magic doc §4: killing and studying a creature deepens Insight).
+## Every insight value in the build was FROZEN at its Field Primer seed — nothing incremented
+## any key in play — so the Tactical Lens gates and the Rune_Stability budget were constants
+## wearing a progression system's name. A kill teaches you about what the thing was made of.
+func _grant_kill_insight(attacker_row: int, target_row: int) -> void:
+	var mind: MindComponent = ECSManager.minds.get(attacker_row)
+	var composition: MaterialCompositionComponent = ECSManager.materials.get(target_row)
+	if mind == null or composition == null:
+		return
+	var topic: StringName = _insight_topic_for(composition.dominant_material())
+	mind.insight[topic] = mind.insight_in(topic) + 1
+
+
+static func _insight_topic_for(material_id: StringName) -> StringName:
+	match material_id:
+		MaterialLibrary.MAT_BIOMASS, MaterialLibrary.MAT_BLOOD:
+			return &"Biomass"
+		MaterialLibrary.MAT_IRON:
+			return &"Iron"
+		MaterialLibrary.MAT_WATER:
+			return &"Water"
+		_:
+			return &"Biomass"
 
 
 ## Falls reuse the same energy model rather than inventing a second damage system.
@@ -182,20 +218,79 @@ func resolve_cast(caster_row: int, spell_id: StringName, aim: Vector3) -> bool:
 	# refund stamina.
 	var discount: float = minf(spell.strain_cost, absorbed / STRAIN_J_EQUIVALENT)
 	var strain: float = spell.strain_cost - discount
-	if body == null or body.stamina < strain:
-		ECSEvents.action_rejected.emit(caster, &"cast", &"not enough stamina")
+	# STRAIN DAMAGES THE CEILING, NOT THE TANK (magic doc §2: "temporary damage to the caster's
+	# Max_Stamina... until they rest"). Charging current stamina — the Sprint 4 shipping
+	# behaviour — was the wrong quantity, and with no recovery path anywhere in the build it made
+	# the starting fireball castable five times per LIFE. The refusal fires when the body has no
+	# ceiling left to dent; recovery is `MetabolismSystem`'s rest pass.
+	if body == null or body.strain + strain > body.max_stamina:
+		ECSEvents.action_rejected.emit(caster, &"cast", &"too strained — rest first")
 		return false
-	body.stamina -= strain
+	body.strain += strain
+	body.stamina = minf(body.stamina, body.effective_max_stamina())
+
+	# THE MISHAP TABLE (grimoire spec §2C, declared gap G-2). An [Unstable] spell rolls d100 on
+	# every cast; the roll only ever changes HOW the cast goes wrong, never whether stamina and
+	# strain were spent — the spec's whole point is that forcing the compile buys risk, not a
+	# discount.
+	var to_cast: CompiledSpell = spell
+	if spell.unstable:
+		to_cast = _roll_mishap(caster_row, spell)
 
 	var origin: Vector3 = ECSManager.position_of(caster_row)
 	var heading: Vector3 = Vector3.FORWARD if aim.length() < 0.001 else aim.normalized()
-	if spell.shape == RuneLibrary.SHAPE_PROJECTILE:
+	if to_cast.shape == RuneLibrary.SHAPE_PROJECTILE:
 		# Spawned one radius clear of the caster, or it detonates against the hand that cast it.
-		origin += heading * (spell.radius_m + 0.6)
-	EphemeralSystem.spawn_spell(spell, origin, heading, caster)
+		origin += heading * (to_cast.radius_m + 0.6)
+	if to_cast != spell and to_cast.shape == RuneLibrary.SHAPE_SELF:
+		# Syntax Inversion: the spell goes off ON the caster, whatever was aimed at.
+		origin = ECSManager.position_of(caster_row)
+	EphemeralSystem.spawn_spell(to_cast, origin, heading, caster)
 	casts_resolved += 1
 	ECSEvents.spell_cast.emit(caster, spell_id, strain)
 	return true
+
+
+## One d100 roll on the mishap table, from the seeded `magic` stream (ADR-8/ADR-20 — a mishap
+## must reproduce from the run's seed). Returns the spell to actually cast, cloned when the
+## mishap mutates geometry or target, because mutating the grimoire's copy would ratchet.
+##   01-50  Success with Blood: casts perfectly; the strain cost is ALSO taken from health.
+##   51-85  Over-Pressure: the geometric bounds double, up to the 15 m engine cap.
+##   86-100 Syntax Inversion: the target logic reverses — the spell resolves on the caster.
+func _roll_mishap(caster_row: int, spell: CompiledSpell) -> CompiledSpell:
+	mishaps_rolled += 1
+	var roll: int = RNGService.randi_range_in(&"magic", 1, 100)
+	if roll <= 50:
+		_mishap_wound(caster_row, spell.strain_cost, &"Bleeding")
+		return spell
+	if roll <= 85:
+		var swollen: CompiledSpell = spell.clone()
+		swollen.radius_m = minf(spell.radius_m * 2.0, WorldConstants.MAX_SPELL_RADIUS_M)
+		swollen.caps_applied.append(&"mishap: over-pressure")
+		return swollen
+	var inverted: CompiledSpell = spell.clone()
+	inverted.shape = RuneLibrary.SHAPE_SELF
+	inverted.speed_mps = 0.0
+	inverted.caps_applied.append(&"mishap: syntax inversion")
+	return inverted
+
+
+## THE MERCY CAP: no mishap may reduce Entity 0 below 1 HP. The excess is not forgiven — it
+## converts into a trauma tag ([Arcane_Burn] / [Bleeding]) that cripples the rest recovery in
+## `MetabolismSystem`, which is the spec's "cheap permadeath becomes expensive convalescence".
+func _mishap_wound(row: int, amount: float, trauma: StringName) -> void:
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body == null:
+		return
+	var floor_hp: float = 1.0 if row == WorldConstants.PLAYER_INDEX else 0.0
+	var dealt: float = minf(amount, maxf(0.0, body.health - floor_hp))
+	body.health -= dealt
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
+	if chemistry != null:
+		chemistry.add_tag(trauma)
+		if amount > dealt:
+			chemistry.add_tag(&"Arcane_Burn")
+	_report(row, dealt, body.health, &"mishap")
 
 
 ## Absorb_Tag, with the conservation rule the review demanded (D8).
@@ -295,4 +390,5 @@ func counters() -> Dictionary:
 		"damage_dealt": damage_dealt,
 		"casts_resolved": casts_resolved,
 		"casts_fizzled": casts_fizzled,
+		"mishaps_rolled": mishaps_rolled,
 	}

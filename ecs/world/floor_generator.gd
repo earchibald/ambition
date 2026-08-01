@@ -160,6 +160,16 @@ static func _generate_ruins(chunk: ChunkData, rng: RandomNumberGenerator) -> voi
 	# older, wetter and less picked-over.
 	chunk.swarm_population = rng.randi_range(0, 3) + mini(3, absi(chunk.chunk_id.z))
 
+	# NATURAL HAZARD ZONES (declared gap G-11): worldgen placed none, so the `H` debug key was a
+	# stand-in for content that did not exist and the whole mutation loop was unreachable in
+	# play. Spore groves from floor -2, toxic seeps deeper — the environment-as-skill-tree the
+	# mutation doc designs around, scaling with the depth that already scales everything else.
+	var depth: int = absi(chunk.chunk_id.z)
+	if depth >= 2 and rng.randf() < 0.35:
+		chunk.hazard_tags.append(&"Spores")
+	if depth >= 4 and rng.randf() < 0.25:
+		chunk.hazard_tags.append(&"Toxic")
+
 	# Chain every room to the previous one. A chain is a spanning tree, so no room can be
 	# stranded — which is the failure mode that makes generated floors unplayable.
 	for i in range(1, centres.size()):

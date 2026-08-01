@@ -23,6 +23,10 @@ extends Node3D
 ## the 2.5 m pit read as different heights rather than as the same flat shape.
 const FOLLOW_OFFSET := Vector3(0.0, 11.0, 9.0)
 
+## Free-flight pan speed. Fast enough to cross a chunk in a few seconds, because the whole
+## point of a survey camera is going where the player is not.
+const FREE_FLY_SPEED_MPS: float = 18.0
+
 ## How far the player may move from the focus point before the camera moves at all, in metres.
 ## Ordinary walking and small course corrections should cost no camera motion whatsoever.
 @export var deadzone_radius_m: float = 5.0
@@ -32,6 +36,11 @@ const FOLLOW_OFFSET := Vector3(0.0, 11.0, 9.0)
 @export var deadzone_height_m: float = 2.0
 
 @export var camera: Camera3D
+
+## Free camera (`F8`, scope doc §9: "free camera + spawn console" was a Sprint 1 debug
+## deliverable that never shipped). While flying, WASD pans the CAMERA and the player stands
+## still — the input bridge checks this flag and withholds movement intents.
+var free_flight: bool = false
 
 var _focus: Vector3 = Vector3.ZERO
 var _initialised: bool = false
@@ -49,8 +58,20 @@ func _ready() -> void:
 		camera.look_at_from_position(FOLLOW_OFFSET, Vector3.ZERO, Vector3.UP)
 
 
+func toggle_free_flight() -> bool:
+	free_flight = not free_flight
+	# Re-snap onto the player when flight ends, rather than deadzone-walking home from wherever
+	# the survey wandered.
+	if not free_flight:
+		_initialised = false
+	return free_flight
+
+
 func _process(_delta: float) -> void:
 	if not World.booted:
+		return
+	if free_flight:
+		_fly(_delta)
 		return
 	var row: int = ECSManager.resolve(ECSManager.player_handle())
 	if row < 0:
@@ -65,6 +86,15 @@ func _process(_delta: float) -> void:
 		_initialised = true
 	_focus = pull_focus(_focus, target)
 	global_position = _focus + FOLLOW_OFFSET
+
+
+## World-axis pan. A survey camera does not need body-relative controls; it needs to go where
+## you point it, at a predictable bearing.
+func _fly(delta: float) -> void:
+	var raw: Vector2 = Input.get_vector(
+		&"move_left", &"move_right", &"move_forward", &"move_back"
+	)
+	global_position += Vector3(raw.x, 0.0, raw.y) * FREE_FLY_SPEED_MPS * delta
 
 
 ## Moves the focus the minimum distance that brings `target` back inside the deadzone. Horizontal

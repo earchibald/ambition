@@ -132,7 +132,11 @@ const RUNES: Dictionary = {
 	&"Apply_Water": {
 		"kind": KIND_CATALYST,
 		"complexity": 1,
-		"params": {"apply_tag": &"Water"},
+		# `Wet`, NOT `Water`. The build had two words for water — the rune said `Water`, the
+		# phase model and MAT_WATER's innate tags said `Wet` — and the reaction table keyed one
+		# rule on each, so the starting water spell could not quench the fire it hit. One
+		# vocabulary, the world's.
+		"params": {"apply_tag": &"Wet"},
 	},
 	&"Apply_Filth": {
 		"kind": KIND_CATALYST,
