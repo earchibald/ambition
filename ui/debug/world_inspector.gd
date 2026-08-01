@@ -27,13 +27,37 @@ static func history_text() -> String:
 			"No history: this is the test arena, which has none by design.\n"
 			+ "Boot the `world` scenario to see one."
 		)
-	var lines: Array[String] = ["--- THE CHRONICLE (%d events) ---" % generator.chronicle.size()]
+	var lines: Array[String] = [
+		PanelFormat.heading("the chronicle"),
+		PanelFormat.muted("  %d events across %d years" % [
+			generator.chronicle.size(), generator.year_of(DAGGenerator.MAX_EPOCHS)
+		]),
+		"",
+	]
 	var start: int = maxi(0, generator.chronicle.size() - MAX_CHRONICLE_LINES)
 	if start > 0:
-		lines.append("  ... %d earlier events ..." % start)
+		lines.append(PanelFormat.muted("  ... %d earlier events ..." % start))
 	for i in range(start, generator.chronicle.size()):
-		lines.append("  " + generator.chronicle[i])
+		lines.append("  " + _dress_event(generator.chronicle[i]))
 	return "\n".join(lines)
+
+
+## Splits "Year 150: X conquered Y." into a dim year and a bright sentence, and tints the verb.
+##
+## The chronicle used to be a wall of identical grey lines, so finding the conquests — the events
+## that actually shaped the world you are standing in — meant reading all of them.
+static func _dress_event(event: String) -> String:
+	var colon: int = event.find(":")
+	if colon < 0:
+		return PanelFormat.plain(event)
+	var when: String = event.substr(0, colon + 1)
+	var what: String = event.substr(colon + 1).strip_edges()
+	var body: String = PanelFormat.plain(what)
+	if what.contains("conquered"):
+		body = PanelFormat.bad(what)
+	elif what.contains("forged"):
+		body = PanelFormat.accent(what)
+	return "%s %s" % [PanelFormat.muted(when.rpad(10)), body]
 
 
 ## Who is alive, what they own, and what they have decided.
@@ -46,7 +70,10 @@ static func factions_text() -> String:
 		return "No factions. The test arena has none; boot the `world` scenario."
 
 	var generator: DAGGenerator = _generator()
-	var lines: Array[String] = ["--- FACTIONS (%d) ---" % rows.size()]
+	var lines: Array[String] = [
+		PanelFormat.heading("factions"),
+		PanelFormat.muted("  %d alive" % rows.size()),
+	]
 	for row in rows:
 		var core: FactionCoreComponent = ECSManager.faction_cores[row]
 		var node: DAGNode = null if generator == null else generator.node_by_id(core.dag_node_id)
@@ -54,23 +81,29 @@ static func factions_text() -> String:
 			"faction %d" % core.faction_id if node == null else String(node.name)
 		)
 		var bodies: int = FactionPlanner.members_of(core.faction_id).size()
-		lines.append(
-			"%s  [id %d]  anchor %s" % [title, core.faction_id, core.anchor_chunk_id]
-		)
-		lines.append(
-			"    pop %d abstract / %d embodied    %s"
-			% [core.abstract_population, bodies, ", ".join(core.culture_tags)]
-		)
-		lines.append(
-			"    doing %s (%s)   wealth %s"
-			% [
-				ECSEnums.Objective.keys()[core.current_objective],
-				ECSEnums.Emotion.keys()[core.current_emotion],
-				_describe_wealth(core),
-			]
-		)
+		lines.append("")
+		lines.append("  %s %s" % [
+			PanelFormat.accent(title), PanelFormat.muted("#%d" % core.faction_id)
+		])
+		lines.append(PanelFormat.row("  people", PanelFormat.tally([
+			[core.abstract_population, "abstract"],
+			[bodies, "embodied"],
+		])))
+		lines.append(PanelFormat.row(
+			"  culture", PanelFormat.muted(", ".join(core.culture_tags))
+		))
+		lines.append(PanelFormat.row("  doing", "%s %s" % [
+			PanelFormat.plain(ECSEnums.Objective.keys()[core.current_objective]),
+			PanelFormat.muted("(%s)" % ECSEnums.Emotion.keys()[core.current_emotion]),
+		]))
+		lines.append(PanelFormat.row("  wealth", PanelFormat.plain(_describe_wealth(core))))
+		lines.append(PanelFormat.row(
+			"  home", PanelFormat.muted("chunk %s" % core.anchor_chunk_id)
+		))
 		if core.last_declaration != "":
-			lines.append('    "%s"' % core.last_declaration)
+			lines.append('    [i]%s"%s"[/i]' % [
+				"[color=#%s]" % PanelFormat.VALUE, core.last_declaration
+			])
 	return "\n".join(lines)
 
 

@@ -31,7 +31,7 @@ const MAX_PANEL_SCREEN_FRACTION: float = 0.8
 var _panel: PanelContainer = null
 var _header: Label = null
 var _scroll: ScrollContainer = null
-var _label: Label = null
+var _label: RichTextLabel = null
 var _minimap: MinimapView = null
 var _dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
@@ -103,10 +103,14 @@ func _build_panel() -> void:
 	_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
 	column.add_child(_scroll)
 
-	_label = Label.new()
+	# RICH TEXT, not a plain Label: the panel needs per-value colour and that is the only way to
+	# get it without one Control per row.
+	_label = RichTextLabel.new()
+	_label.bbcode_enabled = true
+	_label.fit_content = true
+	_label.scroll_active = false
+	_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	# The panel supplies contrast now, but the outline is kept: the panel is translucent so busy
-	# terrain still shows through behind the text.
 	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	_label.add_theme_constant_override("outline_size", 4)
 	_scroll.add_child(_label)
@@ -211,8 +215,13 @@ func _apply_font_size() -> void:
 	mono.font_names = PackedStringArray(
 		["JetBrains Mono", "SF Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
 	)
-	_label.add_theme_font_override("font", mono)
-	_label.add_theme_font_size_override("font_size", DebugFlags.overlay_font_size)
+	# RichTextLabel keys its fonts by role. `normal_font` and `bold_font` must BOTH be set, or a
+	# [b] heading silently falls back to a proportional face and the columns under it stop
+	# lining up — which is the exact failure the monospace switch was made to fix.
+	for role in ["normal_font", "bold_font", "italics_font", "mono_font"]:
+		_label.add_theme_font_override(role, mono)
+	_label.add_theme_font_size_override("normal_font_size", DebugFlags.overlay_font_size)
+	_label.add_theme_font_size_override("bold_font_size", DebugFlags.overlay_font_size)
 	if _header != null:
 		_header.add_theme_font_override("font", mono)
 		_header.add_theme_font_size_override("font_size", DebugFlags.overlay_font_size)
@@ -252,80 +261,147 @@ func _compose() -> String:
 
 func _compose_live() -> String:
 	var counters: Dictionary = GameLoopManager.counters()
-	var lines: Array[String] = []
-	lines.append(
-		"%s  |  scenario %s  |  %d fps (%.1f ms/frame)"
-		% [
-			counters["clock"],
-			World.scenario,
-			Engine.get_frames_per_second(),
-			1000.0 / maxf(float(Engine.get_frames_per_second()), 1.0),
+	var fps: float = maxf(float(Engine.get_frames_per_second()), 1.0)
+	var out: Array[String] = []
+
+	out.append(PanelFormat.heading("world"))
+	out.append(PanelFormat.row("time", PanelFormat.plain(String(counters["clock"]))))
+	out.append(PanelFormat.row("scenario", PanelFormat.accent(String(World.scenario))))
+	out.append(PanelFormat.row(
+		"frame",
+		"%s %s" % [
+			PanelFormat.plain("%d fps" % int(fps)),
+			PanelFormat.muted("(%.1f ms)" % (1000.0 / fps)),
 		]
-	)
-	lines.append(_player_location())
-	lines.append(_cursor_location())
-	lines.append(_vitals())
-	lines.append(_mouse_state())
-	lines.append(
-		"micro %.2fms / %.1fms budget%s   sim %.2fms   fluid %.2fms   spatial %.2fms" % [
-			counters["last_micro_ms"],
-			counters["micro_budget_ms"],
-			"  << OVER" if counters["over_micro_budget"] else "",
-			counters["last_sim_ms"],
-			counters["last_fluid_ms"],
-			counters["last_spatial_ms"],
-		]
-	)
-	lines.append(
-		"entities alive %d (active %d / cap %d)   rows %d   free %d" % [
-			counters["alive_count"],
-			counters.get("lod_active_entities", 0),
-			WorldConstants.ACTIVE_ENTITY_HARD_CAP,
-			counters["row_capacity"],
-			counters["free_rows"],
-		]
-	)
-	lines.append(
-		"movers %d  substeps %d  tile-hits %d  entity-hits %d" % [
-			counters.get("movers_processed", 0),
-			counters.get("substeps_run", 0),
-			counters.get("tile_collisions", 0),
-			counters.get("entity_collisions", 0),
-		]
-	)
-	lines.append(
-		"CA updates %d  dirty %d%s   pumped %d" % [
-			counters.get("ca_cell_updates", 0),
-			counters.get("ca_dirty_cells", 0),
-			"  << BUDGET" if counters.get("ca_budget_exhausted", false) else "",
-			counters.get("ca_pumped_units", 0),
-		]
-	)
-	lines.append(
-		"LoS %d/tick (%d total)  perceived %d/tick (%d total)  witnesses %d" % [
-			counters.get("los_marches", 0),
-			counters.get("total_los_marches", 0),
-			counters.get("targets_perceived", 0),
-			counters.get("total_perceived", 0),
-			counters.get("witness_events", 0),
-		]
-	)
-	lines.append(
-		"stale-handle rejections %d   destroys %d   query rebuilds %d" % [
-			counters["stale_handle_rejections"],
-			counters["destroy_count"],
-			counters["query_cache_rebuilds"],
-		]
-	)
+	))
+
+	out.append(PanelFormat.heading("you"))
+	for line in _player_rows():
+		out.append(line)
+
+	out.append(PanelFormat.heading("cursor"))
+	out.append(PanelFormat.row("pointing", _cursor_value()))
+	out.append(PanelFormat.row(
+		"mouse",
+		PanelFormat.tally([
+			["LMB " + ("down" if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) else "up"), ""],
+			["RMB " + ("down" if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) else "up"), ""],
+			[_lmb_presses, "clicks"],
+		])
+	))
+
+	out.append(PanelFormat.heading("performance"))
+	out.append(PanelFormat.row("micro", PanelFormat.against_budget(
+		float(counters["last_micro_ms"]), float(counters["micro_budget_ms"]), "ms"
+	)))
+	out.append(PanelFormat.row("other", PanelFormat.tally([
+		["%.2f" % counters["last_sim_ms"], "sim"],
+		["%.2f" % counters["last_fluid_ms"], "fluid"],
+		["%.2f" % counters["last_spatial_ms"], "spatial"],
+	])))
+
+	out.append(PanelFormat.heading("world state"))
+	out.append(PanelFormat.row("entities", PanelFormat.tally([
+		[counters["alive_count"], "alive"],
+		[counters.get("lod_active_entities", 0), "active"],
+		[WorldConstants.ACTIVE_ENTITY_HARD_CAP, "cap"],
+		[counters["free_rows"], "free rows"],
+	])))
+	out.append(PanelFormat.row("movement", PanelFormat.tally([
+		[counters.get("movers_processed", 0), "movers"],
+		[counters.get("walkers", 0), "walking"],
+		[counters.get("tile_collisions", 0), "wall hits"],
+		[counters.get("entity_collisions", 0), "bumps"],
+	])))
+	out.append(PanelFormat.row("fluids", PanelFormat.tally([
+		[counters.get("ca_cell_updates", 0), "updates"],
+		[counters.get("ca_dirty_cells", 0), "dirty"],
+		[counters.get("ca_pumped_units", 0), "pumped"],
+	])))
+	out.append(PanelFormat.row("senses", PanelFormat.tally([
+		[counters.get("total_los_marches", 0), "LoS"],
+		[counters.get("total_perceived", 0), "perceived"],
+		[counters.get("witness_events", 0), "witnesses"],
+	])))
+	out.append(PanelFormat.row("factions", PanelFormat.tally([
+		[counters.get("plans_made", 0), "plans"],
+		[counters.get("reason_dispatched", 0), "thoughts"],
+		[counters.get("llm_hallucinated_targets", 0), "rejected"],
+	])))
+
+	var stale: int = int(counters["stale_handle_rejections"])
+	out.append(PanelFormat.row(
+		"handles",
+		# Stale rejections are the one counter here that should ALWAYS be zero. Anything else is
+		# a handle outliving its generation, so it earns red rather than sitting in a grey list.
+		(PanelFormat.bad("%d stale" % stale) if stale > 0 else PanelFormat.tally([
+			[stale, "stale"], [counters["destroy_count"], "destroyed"]
+		]))
+	))
+
 	if _selected_row >= 0:
-		lines.append("")
-		lines.append(_inspect(_selected_row))
+		out.append(PanelFormat.heading("inspecting"))
+		out.append(_inspect(_selected_row))
 	if not _feed.is_empty():
-		lines.append("")
-		lines.append("recent events (newest first):")
+		out.append(PanelFormat.heading("recent"))
 		for entry in _feed:
-			lines.append("  " + entry)
-	return "\n".join(lines)
+			out.append("  " + entry)
+	return "\n".join(out)
+
+
+## The player block: position, condition, and what is under their feet.
+func _player_rows() -> Array[String]:
+	var row: int = ECSManager.resolve(ECSManager.player_handle())
+	if row < 0:
+		return [PanelFormat.row("status", PanelFormat.bad("no player entity"))] as Array[String]
+
+	var position: Vector3 = ECSManager.position_of(row)
+	var chunk: ChunkData = World.chunk_containing(position)
+	var out: Array[String] = []
+	if chunk != null:
+		var tile: Vector2i = chunk.world_to_tile(position)
+		out.append(PanelFormat.row(
+			"at",
+			"%s %s" % [
+				PanelFormat.plain("tile %d, %d" % [tile.x, tile.y]),
+				PanelFormat.muted("(%.1f, %.1f, %.1f)" % [position.x, position.y, position.z]),
+			]
+		))
+		out.append(PanelFormat.row("standing", PanelFormat.plain(_tile_readout(chunk, tile))))
+
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body != null:
+		out.append(PanelFormat.row("health", PanelFormat.bar(body.health, body.max_health)))
+		out.append(PanelFormat.row("stamina", PanelFormat.bar(body.stamina, body.max_stamina)))
+
+	var velocity: Vector3 = ECSManager.velocity_of(row)
+	var state: String = PanelFormat.plain("grounded")
+	if velocity.y < -0.05:
+		state = PanelFormat.bad("FALLING %.1f m/s" % -velocity.y)
+	elif velocity.y > 0.05:
+		state = PanelFormat.plain("rising")
+	out.append(PanelFormat.row(
+		"state",
+		"%s %s" % [
+			state, PanelFormat.muted("safe fall < %.0f m/s" % WorldConstants.SAFE_FALL_MPS)
+		]
+	))
+	return out
+
+
+func _cursor_value() -> String:
+	var chunk: ChunkData = World.active_chunk
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if chunk == null or camera == null:
+		return PanelFormat.muted("no camera")
+	var tile: Vector2i = _cursor_tile(chunk, camera)
+	if tile.x < 0:
+		return PanelFormat.muted("not over the world")
+	var owner: ChunkData = _owner_for(camera)
+	return "%s %s" % [
+		PanelFormat.plain("tile %d, %d" % [tile.x, tile.y]),
+		PanelFormat.muted(_tile_readout(owner if owner != null else chunk, tile)),
+	]
 
 
 ## Health, stamina and airborne state. Fall damage was resolving correctly and reporting nowhere,

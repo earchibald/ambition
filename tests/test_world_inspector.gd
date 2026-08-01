@@ -24,7 +24,8 @@ func test_the_chronicle_is_readable() -> void:
 ## A 500-epoch run must not push the screen off the bottom.
 func test_the_chronicle_is_bounded() -> void:
 	var lines: int = WorldInspector.history_text().split("\n").size()
-	assert_lte(lines, WorldInspector.MAX_CHRONICLE_LINES + 3, "the page fits on a screen")
+	# The cap is on EVENTS; the page also carries a heading, a summary and blank spacers.
+	assert_lte(lines, WorldInspector.MAX_CHRONICLE_LINES + 6, "the page fits on a screen")
 
 
 ## THE POINT OF THE WHOLE FILE. Ledger entities are unreachable by picking, so if the inspector
@@ -33,7 +34,8 @@ func test_factions_are_listed_despite_having_no_position() -> void:
 	var text: String = WorldInspector.factions_text()
 	var expected: int = ECSManager.query(ComponentMask.FACTION_CORE).size()
 	assert_gt(expected, 0, "the world has factions")
-	assert_string_contains(text, "FACTIONS (%d)" % expected, "and all of them are listed")
+	assert_string_contains(text, "FACTIONS", "the page is titled")
+	assert_string_contains(text, "%d alive" % expected, "and all of them are counted")
 
 	for row in ECSManager.query(ComponentMask.FACTION_CORE):
 		assert_false(
@@ -44,9 +46,9 @@ func test_factions_are_listed_despite_having_no_position() -> void:
 
 func test_a_faction_entry_names_what_it_is_doing_and_where_it_lives() -> void:
 	var text: String = WorldInspector.factions_text()
-	assert_string_contains(text, "anchor", "each faction reports its home chunk")
+	assert_string_contains(text, "home", "each faction reports its home chunk")
 	assert_string_contains(text, "doing", "and its current objective")
-	assert_string_contains(text, "pop ", "and its population")
+	assert_string_contains(text, "abstract", "and its population")
 
 
 ## An Active faction's ledger is EMPTY because promotion spent it into physical stacks — the
@@ -163,6 +165,19 @@ func test_the_page_cycle_includes_a_hidden_state() -> void:
 func test_the_text_map_emits_one_row_label_per_row() -> void:
 	for line in WorldInspector.map_text().split("\n"):
 		assert_lte(line.count("y="), 1, "each row carries exactly one coordinate label")
+
+
+## Markup must not leak into the words. A stray unclosed tag swallows the rest of the page, and
+## the symptom is text simply vanishing rather than an error.
+func test_every_colour_tag_on_a_page_is_closed() -> void:
+	for page in [
+		WorldInspector.history_text(), WorldInspector.factions_text()
+	]:
+		assert_eq(
+			page.count("[color="),
+			page.count("[/color]"),
+			"every colour tag is closed"
+		)
 
 
 ## The drawn map must never generate a chunk. Marking a stairwell is positional for the same

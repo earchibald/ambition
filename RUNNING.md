@@ -238,6 +238,12 @@ rule, so "walking around" is a real test pass:
 
 ### Reading the debug overlay
 
+Colour is reserved for values measured against a threshold, so it always carries information:
+**green** inside budget, **amber** approaching it, **red** over — or, for `handles`, red the
+moment a stale rejection appears, since that counter should never be anything but zero.
+
+
+
 ```
 Spring 1 06:00  |  scenario world  |  60 fps (16.7 ms/frame)
 you: tile (8, 32)   world (8.50, 0.90, 32.50)   open  elev +0.00m  fluid 0
