@@ -320,6 +320,21 @@ func query(mask: int) -> PackedInt32Array:
 	return rows
 
 
+## Rows matching `mask` that are ALSO on the given floor.
+##
+## Floors are discrete 2.5D planes (ADR-3) stacked at the SAME world X and Z — the floor index
+## lives in `chunk_id.z`, not in the Y coordinate. So an entity on floor 0 and one on floor -1 can
+## occupy the identical world position, and the spatial hash, which is 2D, cannot tell them apart.
+## Without this filter a villager upstairs collides with you downstairs, is picked by your cursor,
+## and is perceived through solid rock.
+func rows_on_floor(mask: int, floor_index: int) -> PackedInt32Array:
+	var out := PackedInt32Array()
+	for row in query(mask):
+		if col_floor[row] == floor_index:
+			out.append(row)
+	return out
+
+
 ## Structural changes are applied immediately but the cache is only rebuilt at a tick boundary,
 ## so rows stay stable for the duration of a system pass.
 func flush_structural_changes() -> void:

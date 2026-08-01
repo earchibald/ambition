@@ -28,6 +28,17 @@ const ROOM_MAX: int = 14
 
 const VILLAGE_FLOOR: int = 0
 
+## Stairwells live on the LANDING CHUNK of each floor — chunk (0, 0, z) — at fixed tiles, so
+## descending and ascending always arrive somewhere known. ADR-3's Active set already treats the
+## landing chunk directly above and below as loaded, which is exactly what a stairwell needs.
+const LANDING_CHUNK_XY := Vector2i(0, 0)
+const STAIR_DOWN_TILE := Vector2i(34, 32)
+const STAIR_UP_TILE := Vector2i(30, 32)
+
+## How deep the stairwell goes. Matches DAGGenerator.DEEPEST_FLOOR: generating stairs to a floor
+## no faction lives on would produce an empty shaft to nowhere.
+const DEEPEST_FLOOR: int = -5
+
 
 static func generate(chunk_id: Vector3i, master_seed: int) -> ChunkData:
 	var chunk := ChunkData.new(chunk_id)
@@ -37,6 +48,7 @@ static func generate(chunk_id: Vector3i, master_seed: int) -> ChunkData:
 	else:
 		_generate_ruins(chunk, rng)
 	_open_edge_gates(chunk)
+	_place_stairwell(chunk)
 	# A freshly generated chunk is ABSTRACTED until something promotes it. ChunkData defaults to
 	# ACTIVE, which is right for the hand-authored Sprint 1 arena and wrong for everything the
 	# grid produces: it made every lazily-generated dungeon chunk claim to be Active, so the LoD
@@ -165,6 +177,34 @@ static func _open_edge_gates(chunk: ChunkData) -> void:
 ## Marks the chunk's stairwell, the only way between floors (ADR-3 landings).
 static func place_stairs(chunk: ChunkData, tile: Vector2i) -> void:
 	chunk.set_tile(tile.x, tile.y, ChunkData.TILE_STAIRS, 0.0)
+	# Carve a walkable pocket around it FIRST, then re-mark the stair itself: a stairwell
+	# generated inside a solid room is one nobody can stand on, and that failure reads as the
+	# stairs simply not working.
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			if dx == 0 and dy == 0:
+				continue
+			chunk.set_tile(tile.x + dx, tile.y + dy, ChunkData.TILE_OPEN, 0.0)
+	chunk.set_tile(tile.x, tile.y, ChunkData.TILE_STAIRS, 0.0)
+
+
+## Every landing chunk gets the stairs its depth allows: the surface has only a way down, the
+## deepest floor only a way up, everything between has both.
+static func _place_stairwell(chunk: ChunkData) -> void:
+	if chunk.chunk_id.x != LANDING_CHUNK_XY.x or chunk.chunk_id.y != LANDING_CHUNK_XY.y:
+		return
+	# CORRIDORS FIRST. `_carve_corridor` writes TILE_OPEN over everything it touches, so carving
+	# after placing would erase the stairs it was carving TO — and the failure is invisible,
+	# because the transition is keyed on tile POSITION and kept working while the tile itself
+	# silently reverted to plain floor.
+	_carve_corridor(chunk, STAIR_UP_TILE, STAIR_DOWN_TILE)
+	_carve_corridor(chunk, STAIR_DOWN_TILE, Vector2i(EDGE_GATE, EDGE_GATE))
+
+	var floor_index: int = chunk.chunk_id.z
+	if floor_index > DEEPEST_FLOOR:
+		place_stairs(chunk, STAIR_DOWN_TILE)
+	if floor_index < VILLAGE_FLOOR:
+		place_stairs(chunk, STAIR_UP_TILE)
 
 
 static func _fill(chunk: ChunkData, kind: int, material: int) -> void:

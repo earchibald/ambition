@@ -125,7 +125,11 @@ func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 
 	var spatial_start: int = Time.get_ticks_usec()
 	spatial_hash.set_origin(_active_origin(chunk))
-	spatial_hash.rebuild(ECSManager.query(ComponentMask.SPATIAL))
+	# FLOOR-FILTERED. Floors stack at the same world X/Z, so an unfiltered 2D hash makes an NPC
+	# upstairs a collision and perception neighbour of the player downstairs.
+	spatial_hash.rebuild(
+		ECSManager.rows_on_floor(ComponentMask.SPATIAL, World.player_chunk_id.z)
+	)
 	last_spatial_ms = float(Time.get_ticks_usec() - spatial_start) / 1000.0
 
 	ephemerals.run(scaled_delta, spatial_hash)

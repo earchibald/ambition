@@ -21,8 +21,13 @@ const CURSOR_STEP_M: float = 0.25
 ## How many outcome events the feed keeps. Enough to see a fight, short enough to read.
 const FEED_CAPACITY: int = 8
 
+## Tallest the panel may grow before it starts scrolling, as a fraction of the window. Leaves
+## enough of the world visible that the overlay never becomes the whole screen.
+const MAX_PANEL_SCREEN_FRACTION: float = 0.8
+
 var _panel: PanelContainer = null
 var _header: Label = null
+var _scroll: ScrollContainer = null
 var _label: Label = null
 var _dragging: bool = false
 var _drag_offset: Vector2 = Vector2.ZERO
@@ -86,13 +91,20 @@ func _build_panel() -> void:
 	_header.add_theme_color_override("font_color", Color(0.72, 0.78, 0.95))
 	column.add_child(_header)
 
+	# SCROLLABLE. The chronicle and the faction list are both longer than a screen, and a panel
+	# that simply runs off the bottom hides exactly the recent events you opened it to read.
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	column.add_child(_scroll)
+
 	_label = Label.new()
 	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# The panel supplies contrast now, but the outline is kept: the panel is translucent so busy
 	# terrain still shows through behind the text.
 	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	_label.add_theme_constant_override("outline_size", 4)
-	column.add_child(_label)
+	_scroll.add_child(_label)
 	_apply_font_size()
 
 
@@ -163,6 +175,18 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
+## Grows the panel to fit its text, up to a ceiling, then scrolls.
+##
+## A Control has no `max_size`, so the height is computed: take what the label wants, and clamp it
+## to a fraction of the viewport. Below the ceiling the panel is exactly as tall as its content
+## and there is no scrollbar to notice; above it, the wheel works.
+func _fit_scroll() -> void:
+	if _scroll == null or _label == null:
+		return
+	var ceiling: float = get_viewport().get_visible_rect().size.y * MAX_PANEL_SCREEN_FRACTION
+	_scroll.custom_minimum_size.y = minf(_label.get_combined_minimum_size().y, ceiling)
+
+
 ## MONOSPACE. The `F1` map is a grid of characters and a proportional font shreds its columns,
 ## which is what made the map "very poorly rendered and not aligned". A system monospace font is
 ## requested by name so the panel does not depend on a font asset being present.
@@ -188,6 +212,7 @@ func _process(delta: float) -> void:
 		return
 	_accumulator = 0.0
 	_label.text = _compose()
+	_fit_scroll()
 
 
 func _compose() -> String:
@@ -505,8 +530,13 @@ func _tile_readout(chunk: ChunkData, tile: Vector2i) -> String:
 	if not _in_chunk(tile):
 		return "<outside chunk>"
 	var units: int = chunk.fluid_at(tile.x, tile.y)
+	var kind: String = "open"
+	if chunk.is_solid(tile.x, tile.y):
+		kind = "SOLID"
+	elif chunk.tile_map[WorldConstants.cell_index(tile.x, tile.y)] == ChunkData.TILE_STAIRS:
+		kind = "STAIRS (press E)"
 	return "%s  elev %+.2fm  fluid %d" % [
-		"SOLID" if chunk.is_solid(tile.x, tile.y) else "open",
+		kind,
 		chunk.height_at(tile.x, tile.y),
 		units,
 	]

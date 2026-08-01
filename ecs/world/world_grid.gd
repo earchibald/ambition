@@ -48,8 +48,9 @@ func generate_village() -> void:
 		# SIMULATED, not ACTIVE: ready for Pre-Warm to run jobs across it, without paying for
 		# collision and fluid physics in chunks the player cannot see yet.
 		chunk.state = ECSEnums.LoD.SIMULATED
-	# One stairwell down, in the middle of the village.
-	FloorGenerator.place_stairs(chunk_at(Vector3i.ZERO), Vector2i(32, 32))
+	# Stairs are placed by the generator on every landing chunk, including this one, so there is
+	# nothing to add here. A second placement at a different tile used to leave an orphan stair
+	# that led nowhere.
 
 
 ## THE lookup. Generates on demand, so a dungeon floor costs nothing until something reaches it.

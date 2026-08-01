@@ -58,7 +58,7 @@ place the specific test features in §3 exist.
 | `Shift` + move | **Precision** — 35% speed | For lining up on a ledge edge or a pit lip without overshooting. Full speed is for covering ground. |
 | `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
-| `E` | Interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
+| `E` | **Use stairs**, or interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
 | `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
 | `K` | **DEBUG: injure yourself** — 25 damage | The only way to reach death in the generated world, which has no pit, no hazard and nothing hostile. Four presses kills you. |
@@ -165,6 +165,7 @@ Boot the `world` scenario (the default) and watch the overlay:
 | Check | How | What it proves |
 |---|---|---|
 | The village walks | Watch `movers` climb above zero, and `paths_requested` tick as they re-plan | Grid A*, the job planner, and the locomotion tiers |
+| You can go underground | Walk to tile (34, 32), press `E`. The map title reads `FLOOR -1` | Floor transitions, lazy dungeon generation, and the floor-filtered spatial query |
 | Villagers notice you | Stand near one. `perceived (N total)` climbs; Tab it and awareness reads `SUSPICIOUS(1)` | Sight cones, LoS marching, and awareness tiering |
 | They avoid walls | Watch a villager cross the village without clipping a building | Active movers are collided by the same system that moves you |
 | Factions think | Wait ~10 real seconds for a Macro tick. The feed prints `faction N -> OBJECTIVE: "..."` | The reasoner, the queue, and the validation gate |
@@ -212,7 +213,7 @@ Not bugs. Listed so play-testing stops rediscovering them:
   no fade, no "One Year Passes" card, and no death screen — you simply have control again.
 - **Nothing in the world can kill you.** No hazards, no hostile creatures outside the arena. `K`
   exists so the death loop is reachable; a real threat is Sprint 4 and later.
-- **No stairs.** Dungeon floors generate on demand; nothing takes you down to them.
+
 - **No loot placement.** Faction stockpiles materialize at anchors; nothing else is scattered.
 - **The doorway is a gap, not a door.** No door entities or openable fixtures exist.
 - **No ceilings.** Floors are 2.5D planes (ADR-3), so "indoors" is not a concept the renderer
@@ -337,7 +338,27 @@ Villagers in the `world` scenario do move, because a faction plans for them (Spr
 
 The full not-built-yet list lives in §3a, in one place, so it cannot drift out of date in three.
 
+### Going underground
+
+The village's landing chunk — chunk (0, 0) — has a **stairwell**. Walk to tile (34, 32); the
+cursor readout says `STAIRS (press E)`. Press `E` to descend.
+
+There are five floors below the surface. Each landing chunk has a way up and, unless it is the
+bottom, a way down. You arrive at the OPPOSITE stair from the one you used, which is where you
+would be if you had walked down — arriving on the stair you left by would put you on a tile that
+sends you straight back.
+
+The `F1` MAP page follows you: `FLOOR -2` in its title, and a fresh grid of chunks generated on
+demand as you explore.
+
+Dungeon floors are rooms-and-corridors, not village buildings, and they are **empty** — factions
+anchored down there exist as ledgers with no bodies until their chunk is promoted. Watch the
+FACTIONS page: `0 embodied` becomes a real number once you stand in their chunk.
+
 ### The debug panel
+
+It **scrolls** once its content passes 80% of the window height, so the chronicle and the faction
+list are fully readable rather than running off the bottom.
 
 It is a draggable, non-modal window rather than text painted on the corner of the screen. Grab
 its header to move it off whatever you are trying to look at. Clicking anywhere on it is

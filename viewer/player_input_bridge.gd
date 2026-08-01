@@ -203,6 +203,17 @@ func _select_under_cursor() -> void:
 func _push_interact(row: int) -> void:
 	if _camera == null or World.active_chunk == null:
 		return
+	# CONTEXT-SENSITIVE, as the spec calls for: standing on a stairwell, `E` uses the stairs.
+	# A separate key would be one more thing to document and one more thing to forget.
+	var stairs: int = World.stairs_under(row)
+	if stairs != 0:
+		if World.change_floor(stairs):
+			ECSEvents.action_rejected.emit(
+				ECSManager.handle_of(row),
+				&"stairs",
+				StringName("you are now on floor %d" % World.player_chunk_id.z)
+			)
+		return
 	var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
 	var target: int = GameLoopManager.picking.interact_target(
 		row,
