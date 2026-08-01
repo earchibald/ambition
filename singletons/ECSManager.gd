@@ -255,6 +255,29 @@ func destroy_entity(handle: int) -> bool:
 	return true
 
 
+## Retires whoever currently occupies a row and hands the slot to a successor, WITHOUT freeing
+## the row (ADR-14, ADR-19).
+##
+## Row 0 is reserved for the player forever, so the ordinary destroy path is wrong for a death:
+## it would push row 0 onto the free list and let the next allocation hand the player's reserved
+## slot to a rat. This clears the components and bumps the generation, so every handle anyone
+## still holds to the previous adventurer fails `is_alive` rather than silently resolving to
+## their replacement — which is the subtlest possible bug and the reason handles carry a
+## generation at all.
+func bump_generation(row: int) -> int:
+	assert(row >= 0 and row < _row_count, "cannot bump a row that was never allocated")
+	for registry in _registries:
+		registry.erase(row)
+	_masks[row] = ComponentMask.NONE
+	var was_alive: bool = _alive[row] == 1
+	_generations[row] += 1
+	_alive[row] = 1
+	if not was_alive:
+		alive_count += 1
+	_structure_dirty = true
+	return handle_of(row)
+
+
 # --- Component mask & query facade (ADR-13 / ADR-19) ---------------------------------------
 
 

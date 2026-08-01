@@ -37,6 +37,11 @@ signal entity_landed(entity: int, speed_mps: float, damage: float)
 ## than only what it decided — the difference between a log line and a world that talks.
 signal faction_decided(faction_id: int, objective: String, declaration: String)
 
+## The run ended. Carries the CORPSE handle, not the old player handle: row 0's generation has
+## been bumped, so the old handle is deliberately dead by the time anyone reads this.
+signal player_died(corpse: int, killer: int, lineage_generation: int)
+signal player_reborn(player: int, lineage_generation: int)
+
 
 ## Tag arrays are `Array[StringName]`. Emitting an untyped array literal into a typed
 ## parameter fails at runtime and SILENTLY DROPS THE LISTENER, so build tags explicitly:

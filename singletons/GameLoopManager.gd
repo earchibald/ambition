@@ -54,6 +54,7 @@ var locomotion: LocomotionSystem = LocomotionSystem.new()
 var planner: FactionPlanner = FactionPlanner.new()
 var reasoning: ReasoningQueue = ReasoningQueue.new()
 var llm: LLMResolutionSystem = LLMResolutionSystem.new()
+var death_loop: DeathLoopSystem = DeathLoopSystem.new()
 
 
 func _ready() -> void:
@@ -141,6 +142,26 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	# visibly stuttery.
 	if World.grid != null:
 		streaming.update_chunk_states(World.player_chunk_id, World.grid)
+	_check_player_death()
+
+
+## Death is detected on the Simulation tick rather than inside the damage path, so every way of
+## dying — melee, a fall, exposure, a future poison — routes through ONE place. Checking inside
+## each damage source is how a game ends up with three subtly different death handlers.
+func _check_player_death() -> void:
+	if not World.booted:
+		return
+	var row: int = ECSManager.resolve(ECSManager.player_handle())
+	if row < 0:
+		return
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body == null or body.is_alive():
+		return
+	var generator: DAGGenerator = null if World.boot_report == null else World.boot_report.generator
+	death_loop.on_player_death(EH.INVALID, generator)
+	# The run is over. The Interregnum and the successor are a deliberate, separate step: the
+	# player should see their corpse and their killer before the world skips a year.
+	paused = true
 
 
 ## Advances the GameClock by one in-game hour (ADR-9).

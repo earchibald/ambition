@@ -111,6 +111,8 @@ authored test geometry there and none of it exists in a generated village. Set
 - **Nobody moves.** Citizens stand exactly where history placed them. No pathfinding, no jobs.
 - **Nobody reacts.** Killing a villager produces a corpse and no witness, alarm, or grudge.
 - **No stairs.** Dungeon floors generate on demand but nothing takes you down to them yet.
+- **No respawn UI.** Death detaches control and pauses; the Interregnum and successor spawn exist
+  and are tested, but nothing triggers them from the keyboard yet.
 - **Nothing to find.** Faction stockpiles materialize at anchors, but there is no loot placement.
 
 ### What is in the arena, and what each thing is there to test
