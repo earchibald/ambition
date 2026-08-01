@@ -37,6 +37,11 @@ static func generate(chunk_id: Vector3i, master_seed: int) -> ChunkData:
 	else:
 		_generate_ruins(chunk, rng)
 	_open_edge_gates(chunk)
+	# A freshly generated chunk is ABSTRACTED until something promotes it. ChunkData defaults to
+	# ACTIVE, which is right for the hand-authored Sprint 1 arena and wrong for everything the
+	# grid produces: it made every lazily-generated dungeon chunk claim to be Active, so the LoD
+	# system would have paid full collision and fluid cost for the entire world at once.
+	chunk.state = ECSEnums.LoD.ABSTRACTED
 	chunk.tile_map_dirty = true
 	chunk.topology_dirty = true
 	chunk.nav_region_dirty = true

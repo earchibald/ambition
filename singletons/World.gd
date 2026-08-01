@@ -43,7 +43,11 @@ func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) 
 ## The player at row 0 is deliberately kept: it is the reserved handle (ADR-14) and `_spawn_player`
 ## re-dresses it in place.
 func _clear_previous_world() -> void:
-	for row in ECSManager.query(ComponentMask.POSITION):
+	# Mask 0 matches EVERY living row, positioned or not. Sweeping only POSITION missed the
+	# entities that have no place in the world by design — faction ledgers above all — so each
+	# boot stacked another set of faction cores on the last, and a lookup by faction id found a
+	# stale one from a previous world.
+	for row in ECSManager.query(0):
 		if row == 0:
 			continue
 		ECSManager.destroy_entity(ECSManager.handle_of(row))
