@@ -54,7 +54,8 @@ place the specific test features in §3 exist.
 
 | Key | Action | What it does in the ECS |
 |---|---|---|
-| `W` `A` `S` `D` | Move | Pushes a `MOVE` **intent** onto entity 0's action queue. Camera-relative on the XZ plane. Pressing W does not move you; the ECS decides what W means. |
+| `W` `A` `S` `D` | Move — **7 m/s**, body-relative | `W` walks along the direction you FACE; `A`/`D` strafe across it. Facing comes from the mouse cursor, so the mouse steers and WASD drives. Pushes a `MOVE` **intent**; pressing W does not move you, the ECS decides what W means. |
+| `Shift` + move | **Precision** — 35% speed | For lining up on a ledge edge or a pit lip without overshooting. Full speed is for covering ground. |
 | `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
 | `E` | Interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
@@ -64,9 +65,35 @@ place the specific test features in §3 exist.
 | `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
 | `Esc` | Cancel | Mapped, not yet consumed. |
 
-There is no mouse-look. The camera is a fixed-orientation third-person rig with a **deadzone**:
+**The mouse is your steering.** The character turns to face the cursor — watch the yellow nose —
+and `W` follows that heading wherever it points. `A` and `D` strafe perpendicular to it, so you
+can circle a target while still facing it. The camera itself never rotates.
+
+The camera is a fixed-orientation third-person rig with a **deadzone**:
 it does not move at all while you stay within 5 m of its focus point, and outside that it moves
 exactly far enough to put you back on the boundary. It never smooths and never rotates.
+
+### The reasoner, and why it needs no API key
+
+ADR-5 was amended: **the LLM is an optional layer.** The shipped default reasons from real
+faction state with no network — starvation outranks everything, a recent attack outranks
+opportunity, and a raid needs a target it can actually beat. That path runs in CI on every
+commit, so it cannot rot.
+
+Watch it work: wait about ten real seconds for a Macro tick, and the event feed prints
+`faction 3 -> GATHER_RESOURCES: "Quiet season. Work the stone and the fields."`
+
+To use a real model instead, set both:
+
+```bash
+export DELVE_LLM_ENDPOINT="https://api.openai.com/v1"
+export DELVE_LLM_API_KEY="sk-..."      # or put it in user://llm_secrets.cfg
+export DELVE_LLM_MODEL="gpt-4o-mini"   # optional
+```
+
+If the endpoint is set but no key is found, the remote provider is **refused** rather than
+half-configured. One that fails every call is worse than none: it burns the queue and hides the
+working path. The key is never logged — the overlay reports endpoint and model only.
 
 ### The debug gizmos (`G`)
 
@@ -89,29 +116,59 @@ Aim rotates **continuously** everywhere, including behind you and above the hori
 that never meets the ground keeps the heading the cursor implies, which is exactly the limit the
 ground intersection approaches as the ray flattens — so the two cases meet without a seam.
 
-### What to test in the `world` scenario
+## 3a. What to test right now — CURRENT AS OF SPRINT 3
 
-Honestly: **not much yet, and that is the shape of Sprint 2 rather than a bug.** Sprint 2
-delivered the world's GENERATION and its bookkeeping. Nothing in it moves or reacts — NPC
-behaviour is Sprint 3. Four things are worth checking, and everything else is scenery:
+> **Maintenance rule.** This section is rewritten at the end of every sprint, before its PR
+> opens. A play-tester should never have to work out what is finished by poking at it, and three
+> stale "what's missing" lists scattered through this file is how that happens. One section, one
+> place, updated in step with the code.
+
+### Playable today, by sprint
+
+| Sprint | What it added that you can actually see |
+|---|---|
+| 1 | Movement, wall sliding, step-up, falling, melee, pickup, the fluid CA, the debug overlay |
+| 2 | A generated world: 500 years of history, a nine-chunk village, factions placed by that history |
+| 3 | **Villagers walk** planned routes. **Factions decide and speak** once an in-game hour. **Death is a loop** — corpse, loot spill, control detached |
+
+### The Sprint 3 checks
+
+Boot the `world` scenario (the default) and watch the overlay:
 
 | Check | How | What it proves |
 |---|---|---|
-| The village is a real place | Walk in any direction across a chunk seam | Chunk streaming and the tile sampler. Sprint 1's collision would have stopped you dead at the boundary |
-| It is the same world twice | Boot, note the building layout, restart | Chunks are a pure function of (seed, chunk_id) |
-| Villagers are people | Look: **tall and green**. Monsters are **small and red** | They used to be identical red boxes |
-| Killing has a consequence you can see | Hit a villager. It becomes a **flat grey slab** and the feed says so | The corpse conversion was correct and invisible |
+| The village walks | Watch `movers` and `paths_requested` climb above zero | Grid A*, the job planner, and the locomotion tiers |
+| They avoid walls | Watch a villager cross the village without clipping a building | Active movers are collided by the same system that moves you |
+| Factions think | Wait ~10 real seconds for a Macro tick. The feed prints `faction N -> OBJECTIVE: "..."` | The reasoner, the queue, and the validation gate |
+| It thinks with no API key | You did not set one. It still decides | ADR-5 as amended: the LLM is optional, and this is the shipped default |
+| Death is a loop | Take fatal damage. Control detaches, a corpse appears holding your gear | The handle discipline: row 0's generation bumps, the corpse is a separate entity |
 
-**For movement, combat, fall damage and fluids, use `test_arena` instead.** Those features have
+### Still worth checking from earlier sprints
+
+| Check | How |
+|---|---|
+| The village is a real place | Walk across a chunk seam. Sprint 1's collision would have stopped you dead at the boundary |
+| It is the same world twice | Note the building layout, restart, compare. Chunks are a pure function of (seed, chunk_id) |
+| Villagers are people | **Tall and green.** Monsters are **small and red**, corpses are **flat grey slabs** |
+
+**For movement feel, combat, fall damage and fluids, use `test_arena`.** Those features have
 authored test geometry there and none of it exists in a generated village. Set
 `"boot_scenario": "test_arena"` in `debug_config.json`.
 
-### What Sprint 2 does NOT give you
+### NOT built yet — as of Sprint 3
 
-- **Nobody moves.** Citizens stand exactly where history placed them. No pathfinding, no jobs.
-- **Nobody reacts.** Killing a villager produces a corpse and no witness, alarm, or grudge.
-- **No stairs.** Dungeon floors generate on demand but nothing takes you down to them yet.
-- **Nothing to find.** Faction stockpiles materialize at anchors, but there is no loot placement.
+Not bugs. Listed so play-testing stops rediscovering them:
+
+- **Nothing reacts to you.** Killing a villager produces a corpse and no witness, alarm, or
+  grudge. Faction politics is unowned until Sprint 3.5.
+- **No respawn UI.** Death detaches control and pauses. The Interregnum and the successor spawn
+  are implemented and tested, but nothing triggers them from the keyboard.
+- **No stairs.** Dungeon floors generate on demand; nothing takes you down to them.
+- **No loot placement.** Faction stockpiles materialize at anchors; nothing else is scattered.
+- **The doorway is a gap, not a door.** No door entities or openable fixtures exist.
+- **No ceilings.** Floors are 2.5D planes (ADR-3), so "indoors" is not a concept the renderer
+  expresses yet.
+- **No inventory screen.** A successful `E` reports in the event feed and nowhere else.
 
 ### What is in the arena, and what each thing is there to test
 
@@ -220,19 +277,16 @@ recent events (newest first):
 This is how you tell a miss from a hit, and a step from a fall. **Refusals are reported too** —
 if an action does nothing, the feed says why rather than leaving you guessing.
 
-### Things that are deliberately missing in Sprint 1
+### One arena quirk worth knowing
 
-Not bugs, just not built yet. Listed so play-testing does not keep rediscovering them:
+**The arena rat does not move or notice you.** It has Needs, Schedule, Perception and Memory, but
+the arena has no faction to plan for it, so nothing assigns it a destination. `perceived 0
+witnesses 0` on a bare arena boot is expected. Its awareness reads `UNAWARE(0)` — that is
+*unaware*, not asleep; there is no sleep state.
 
-* **The doorway is a gap, not a door.** There are no door entities, hinges, or openable fixtures.
-  Every opening in the arena is simply an absence of wall.
-* **The rat does not move or notice you.** It has Needs, Schedule, Perception and Memory, but no
-  job source and no Simulated-tier movement, so `perceived 0  witnesses 0` on a bare boot is
-  expected. NPC movement lands in Sprint 2. Its awareness reads `UNAWARE(0)` — that is *unaware*,
-  not asleep; Sprint 1 has no sleep state at all.
-* **There is no ceiling and no roof.** Floors are 2.5D planes (ADR-3), so "indoors" is not yet a
-  concept the renderer expresses.
-* **No inventory screen.** A successful `E` reports in the event feed and nowhere else.
+Villagers in the `world` scenario do move, because a faction plans for them (Sprint 3).
+
+The full not-built-yet list lives in §3a, in one place, so it cannot drift out of date in three.
 
 ### If the text is too small
 
@@ -276,7 +330,7 @@ godot --headless -s addons/gut/gut_cmdln.gd \
 `tests/invariants/`, `tests/perf/` and `tests/soak/` are silently skipped and the run reports
 green having never opened them.
 
-Expected: **14 scripts, 141 tests, 141 passing, ~7,480 asserts**, in about 1.5 seconds.
+Expected: **25 scripts, 307 tests, 307 passing**. Under three seconds.
 
 One file at a time, which is what you want while iterating:
 
@@ -299,6 +353,17 @@ godot --headless -s addons/gut/gut_cmdln.gd -gtest=res://tests/test_fluid_dynami
 | `test_behaviour.gd` | Utility scoring, hysteresis, the job latch, need-driven preemption |
 | `test_inventory_and_lod.gd` | Container volume, LoD transitions, conservation across them |
 | `test_viewer_visibility.gd` | That you can actually **see** it — see §5 |
+| `test_playtest_regressions.gd` | Every defect a human found by playing that the suite had missed |
+| `test_camera_and_motion.gd` | Deadzone arithmetic, fixed-timestep interpolation, the aim sweep |
+| `test_dag_history.gd` | Bounded generation, reproducibility, conquest wealth conservation |
+| `test_world_generation.gd` | Per-chunk determinism, gate connectivity, the tile sampler, anchors |
+| `test_dag_instantiation.gd` | Entity-count discipline: ledgers vs bodies, quantity vs entities |
+| `test_lod_conservation.gd` | **Cross a boundary twenty times, total faction value invariant** |
+| `test_gray_box_economy.gd` | The off-screen economy creates zero entities, and says so itself |
+| `test_bootstrapper.gd` | Boot ORDER, the coarse interregnum, Pre-Warm gravity suppression |
+| `test_pathfinding_and_movement.gd` | A* bounds and correctness, both locomotion tiers, the planner |
+| `test_reasoning.gd` | The heuristic reasoner, the queue, and every branch of the validation gate |
+| `test_death_loop.gd` | Corpse and loot spill, the generation bump, the taxes, the Lineage Journal |
 | `invariants/test_forbidden_apis.gd` | The Prime Directive: no physics nodes; `ecs/` never reads wall-clock |
 | `perf/test_micro_tick_benchmark.gd` | The ADR-10 budgets, as numbers — see §6 |
 | `soak/test_soak_invariants.gd` | Long-run conservation and leak checks |
@@ -377,3 +442,6 @@ smoke test, and the full GUT suite on every PR into `dev` or `main`.
 | Grey void, no floor or walls | `TerrainView` missing from `Main.tscn` | Run `test_viewer_visibility.gd` |
 | Player invisible | `World._spawn_player` did not emit `entity_created` | Same test |
 | `Input.get_vector()` errors every frame | An action is missing from the InputMap | `test_sprint0_gate.gd` lists every required action |
+| A function silently returns `false` for no reason | A typed array assigned from a ternary throws at RUNTIME and aborts the function mid-way | Build it explicitly. `invariants/test_forbidden_apis.gd` scans for this — it has shipped twice |
+| A test asserts nothing but passes | GDScript lambdas capture primitives BY VALUE, so assigning to a captured `bool` never escapes | Collect into an Array or Dictionary; those are references |
+| NPCs stand still in `world` | No faction planned for them, or A* found no route | Check `paths_requested` and `path_failures` in the overlay |

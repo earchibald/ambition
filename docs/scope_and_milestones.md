@@ -37,6 +37,14 @@ price curve) are all untested guesses.
 ADR-10 performance budgets and ADR-12 caps live in a read-only `budgets` block that tests read
 and the tuning UI never exposes. A budget you can drag is not a budget.
 
+**R6 — `RUNNING.md` is rewritten at the end of every sprint, before the PR opens.**
+The play-tester must never have to deduce what is finished by poking at the build. Its "What to
+test right now" section carries the current sprint's checks, what each one proves, and a SINGLE
+not-built-yet list. Rewrite it; never append. This project has already accumulated three separate
+"deliberately missing" sections written for three different sprints, all quietly wrong, which is
+worse than having none — a stale list is read as authoritative. A sprint is done when someone
+else can play it and knows what they are looking at, not when the suite is green.
+
 **R5 — No effort estimates.** Team size is 1 and the owner knows it. An effort estimate for a
 novel engine architecture by a solo developer is noise dressed as rigor, and producing one is a
 day not spent writing code.

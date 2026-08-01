@@ -37,20 +37,21 @@ func _physics_process(_delta: float) -> void:
 	var raw: Vector2 = Input.get_vector(
 		&"move_left", &"move_right", &"move_forward", &"move_back"
 	)
-	# Camera-relative on the XZ plane so "forward" means what the player sees.
-	var basis_forward := Vector3(0.0, 0.0, 1.0)
-	var basis_right := Vector3(1.0, 0.0, 0.0)
-	if _camera != null:
-		var camera_basis: Basis = _camera.global_transform.basis
-		basis_forward = Vector3(camera_basis.z.x, 0.0, camera_basis.z.z).normalized()
-		basis_right = Vector3(camera_basis.x.x, 0.0, camera_basis.x.z).normalized()
 
-	var direction: Vector3 = basis_right * raw.x + basis_forward * raw.y
+	# AIM FIRST, then movement — the order is load-bearing now that movement is BODY-relative.
+	# `_aim_direction` reads the cursor and only falls back to a movement vector when the cursor
+	# cannot answer, so passing zero here breaks what would otherwise be a circular dependency:
+	# facing would depend on movement which depends on facing.
+	last_aim = _aim_direction(row, Vector3.ZERO)
+
+	var direction: Vector3 = movement_from(raw, last_aim)
+	# Precision mode is expressed as a SHORTER intent vector, not as a second speed constant.
+	# `_apply_intent` normalises only vectors longer than 1, so a 0.35-length direction is
+	# 35% speed — the ECS keeps one movement law and the viewer just asks for less of it.
+	if Input.is_action_pressed(&"precision_move"):
+		direction *= WorldConstants.PRECISION_SPEED_SCALE
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
-
-	# Recomputed every frame, not only on click, so the gizmo shows where a swing WOULD go.
-	last_aim = _aim_direction(row, direction)
 
 	if Input.is_action_just_pressed(&"attack"):
 		_push_attack(row, last_aim)
@@ -61,6 +62,28 @@ func _physics_process(_delta: float) -> void:
 	if Input.is_action_just_pressed(&"slow_time"):
 		# Bullet-time scales delta, never the 60 Hz tick rate (ADR-9).
 		GameLoopManager.time_scale = 0.2 if GameLoopManager.time_scale == 1.0 else 1.0
+
+
+## WASD in the BODY's frame, not the camera's.
+##
+## `W` is forward along whatever direction the character faces, and `A`/`D` strafe along the
+## perpendicular. Camera-relative WASD was effectively world-axis-locked, because this rig never
+## rotates — so "forward" meant a fixed compass bearing no matter which way you were pointing.
+##
+## `raw.x` is positive for `D`; `raw.y` is positive for `S`, because `Input.get_vector` treats
+## `move_forward` as the NEGATIVE axis. Hence the subtraction — miss it and `W` walks backwards.
+##
+## Extracted as a static so the handedness can be asserted without simulating input. Getting the
+## cross product backwards swaps `A` and `D`, which is trivially wrong and easy to ship.
+static func movement_from(raw: Vector2, facing: Vector3) -> Vector3:
+	var forward := Vector3(facing.x, 0.0, facing.z)
+	if forward.length() < 0.001:
+		return Vector3.ZERO
+	forward = forward.normalized()
+	# right = forward x UP. With Godot's handedness that is +X for a body facing -Z, matching the
+	# convention the camera and the heading nose already use.
+	var right: Vector3 = forward.cross(Vector3.UP).normalized()
+	return right * raw.x - forward * raw.y
 
 
 ## You swing where you POINT, not where you last walked.

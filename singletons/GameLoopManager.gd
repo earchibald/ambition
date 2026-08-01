@@ -50,6 +50,20 @@ var lod: LoDSystem = LoDSystem.new()
 var inventory: InventorySystem = InventorySystem.new()
 var streaming: ChunkStreamingSystem = ChunkStreamingSystem.new()
 var economy: GrayBoxSystem = GrayBoxSystem.new()
+var locomotion: LocomotionSystem = LocomotionSystem.new()
+var planner: FactionPlanner = FactionPlanner.new()
+var reasoning: ReasoningQueue = ReasoningQueue.new()
+var llm: LLMResolutionSystem = LLMResolutionSystem.new()
+var death_loop: DeathLoopSystem = DeathLoopSystem.new()
+
+
+func _ready() -> void:
+	# A remote reasoner ONLY when an endpoint is configured. Otherwise the heuristic one, which
+	# per the amended ADR-5 is a shipped mode rather than a fallback: it is what runs in CI, what
+	# runs for a contributor with no API key, and what runs for a player with no internet.
+	var remote: OpenAICompatibleProvider = OpenAICompatibleProvider.create_if_configured(self)
+	if remote != null:
+		reasoning.provider = remote
 
 
 func _physics_process(delta: float) -> void:
@@ -93,6 +107,9 @@ func _physics_process(delta: float) -> void:
 ## frame sees post-collision positions.
 func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 	ECSManager.flush_structural_changes()
+	# Steering first: it writes velocity, and the collision pass below integrates it. Running it
+	# after would leave every NPC one frame behind its own decision.
+	locomotion.run(scaled_delta, World.sampler())
 	_apply_intents(scaled_delta)
 	collision.run(scaled_delta, World.sampler(), spatial_hash)
 	# Geometry decides WHO landed and how fast; the energy model decides what that costs. Falls
@@ -125,6 +142,26 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	# visibly stuttery.
 	if World.grid != null:
 		streaming.update_chunk_states(World.player_chunk_id, World.grid)
+	_check_player_death()
+
+
+## Death is detected on the Simulation tick rather than inside the damage path, so every way of
+## dying — melee, a fall, exposure, a future poison — routes through ONE place. Checking inside
+## each damage source is how a game ends up with three subtly different death handlers.
+func _check_player_death() -> void:
+	if not World.booted:
+		return
+	var row: int = ECSManager.resolve(ECSManager.player_handle())
+	if row < 0:
+		return
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body == null or body.is_alive():
+		return
+	var generator: DAGGenerator = null if World.boot_report == null else World.boot_report.generator
+	death_loop.on_player_death(EH.INVALID, generator)
+	# The run is over. The Interregnum and the successor are a deliberate, separate step: the
+	# player should see their corpse and their killer before the world skips a year.
+	paused = true
 
 
 ## Advances the GameClock by one in-game hour (ADR-9).
@@ -133,6 +170,34 @@ func _run_macro_tick(chunk: ChunkData) -> void:
 	spoilage.run(chunk)
 	# The off-screen economy. Ledger integers only — it may not create a single entity.
 	economy.run()
+	_think()
+	_replan_factions()
+
+
+## Leaders think, one at a time, on the Macro tick.
+##
+## Submitting every faction each hour is cheap: the queue de-duplicates, caps its own depth, and
+## dispatches exactly one request. A leader that does not get picked this hour simply thinks next
+## hour, which at an hour of in-game time is not a behaviour anyone can perceive.
+func _think() -> void:
+	var generator: DAGGenerator = null if World.boot_report == null else World.boot_report.generator
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		reasoning.submit(ECSManager.handle_of(row))
+	reasoning.pump(generator, func(handle: int, response: Dictionary) -> void:
+		llm.resolve(handle, response, generator)
+	)
+
+
+## Every faction re-decides what its people are doing, once an in-game hour.
+##
+## Macro cadence on purpose: an objective is an hour-scale decision, and re-planning at the 2 Hz
+## Simulation rate would fight the job latch and re-path the whole village 120 times an hour.
+func _replan_factions() -> void:
+	if World.grid == null:
+		return
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[row]
+		planner.assign(planner.plan(core.current_objective, core.faction_id, World.grid))
 
 
 ## Pops each entity's queued intents and turns them into velocity or an action.

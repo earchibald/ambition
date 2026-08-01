@@ -57,3 +57,21 @@ Next Immediate Steps: The exact next thing the incoming agent should do.
 4. Your First Step
 
 If you have just been onboarded, read README.md to locate the documentation for your current Sprint. Review both the Roadmap and the Technical Scaffolding for that Sprint before generating code.
+
+5. Player-Facing Documentation (MANDATORY)
+
+RUNNING.md is the play-tester's contract. Update it IN THE SAME COMMIT as the code, and rewrite
+its "What to test right now" section at the end of every sprint, BEFORE the PR opens.
+
+It must always answer three questions without the reader having to poke at the build:
+
+- What can I do right now, and how? (controls, scenarios, the exact commands)
+- What should I look at to know this sprint worked? (per-sprint checks, with what each proves)
+- What is deliberately NOT built yet? (one list, in one place)
+
+That last one has a specific failure mode this project has already hit: three separate
+"deliberately missing" sections accumulated in RUNNING.md, each written for a different sprint
+and each quietly wrong. ONE section, rewritten, never appended to.
+
+A sprint is not done when the tests pass. It is done when someone else can play it and knows
+what they are looking at.

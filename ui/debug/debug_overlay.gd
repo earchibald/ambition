@@ -43,6 +43,7 @@ func _ready() -> void:
 	ECSEvents.item_taken.connect(_on_taken)
 	ECSEvents.action_rejected.connect(_on_rejected)
 	ECSEvents.entity_landed.connect(_on_landed)
+	ECSEvents.faction_decided.connect(_on_faction_decided)
 
 
 ## Text size is adjustable at runtime, because "edit a JSON file in the user data directory and
@@ -234,6 +235,15 @@ func _on_taken(taker: int, item: int, _reason: StringName) -> void:
 
 func _on_rejected(actor: int, action: StringName, reason: StringName) -> void:
 	_remember("%s: %s refused — %s" % [_name_of(actor), action, reason])
+
+
+## Factions talk. Without this the entire reasoning layer runs invisibly and the only evidence
+## it exists at all is that NPCs occasionally walk somewhere different.
+func _on_faction_decided(faction_id: int, objective: String, declaration: String) -> void:
+	if declaration == "":
+		_remember("faction %d -> %s" % [faction_id, objective])
+		return
+	_remember("faction %d -> %s: \"%s\"" % [faction_id, objective, declaration])
 
 
 ## A handle is not a name. Without this the feed reads "entity 4294967296 took 3.2 damage".

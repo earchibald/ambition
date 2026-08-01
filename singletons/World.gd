@@ -62,6 +62,14 @@ func _boot_generated_world(seed_value: int) -> ChunkData:
 	# The village centre is the player's chunk, and it is Active from the first frame.
 	var home: ChunkData = grid.chunk_at(Vector3i.ZERO)
 	GameLoopManager.streaming.update_chunk_states(Vector3i.ZERO, grid)
+	# Plan once at boot. Objectives are re-decided on the Macro tick, which is every ten real
+	# seconds — so without this the village stands perfectly still for the first ten seconds a
+	# player is looking at it, which is exactly the impression the Pre-Warm exists to avoid.
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[row]
+		GameLoopManager.planner.assign(
+			GameLoopManager.planner.plan(core.current_objective, core.faction_id, grid)
+		)
 	return home
 
 
@@ -126,8 +134,8 @@ func chunk_at(chunk_id: Vector3i) -> ChunkData:
 	return chunks.get(chunk_id)
 
 
-## Entity 0 spawn. Nothing in the specs told Sprint 1 how to create the player, since
-## world_bootstrapping is Sprint 2 work.
+## Dresses row 0 as a living adventurer. Called by boot AND by the death loop's successor spawn,
+## which is why it re-dresses the reserved row in place rather than allocating a new entity.
 func _spawn_player(chunk: ChunkData) -> void:
 	var handle: int = ECSManager.player_handle()
 	var row: int = EH.index_of(handle)

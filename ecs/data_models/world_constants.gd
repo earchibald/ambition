@@ -38,7 +38,15 @@ const SAFE_FALL_MPS: float = 5.0
 const FALL_DAMAGE_M: float = 3.0
 
 # --- Movement (ADR-18). ---
-const BASE_SPEED_MPS: float = 4.0
+## 4.0 m/s is a real brisk walk and reads as a CRAWL from this camera: the rig sits 11 m up, so
+## screen-space displacement per metre is small, and the village is 192 m across. Tuned by
+## playing rather than by realism — the number that matters is how fast the world goes past, not
+## how fast the legs move.
+const BASE_SPEED_MPS: float = 7.0
+
+## Hold the precision modifier to move at this fraction of full speed. Full speed is for covering
+## ground; this is for lining up on a ledge edge or a pit lip without overshooting.
+const PRECISION_SPEED_SCALE: float = 0.35
 
 # --- Combat (Sprint 1 §10, kinetic energy model). ---
 const STRENGTH_REF: float = 10.0
