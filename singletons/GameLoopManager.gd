@@ -48,6 +48,8 @@ var combat: ActionResolutionSystem = ActionResolutionSystem.new()
 var spoilage: SpoilageSystem = SpoilageSystem.new()
 var lod: LoDSystem = LoDSystem.new()
 var inventory: InventorySystem = InventorySystem.new()
+var streaming: ChunkStreamingSystem = ChunkStreamingSystem.new()
+var economy: GrayBoxSystem = GrayBoxSystem.new()
 
 
 func _physics_process(delta: float) -> void:
@@ -92,7 +94,7 @@ func _physics_process(delta: float) -> void:
 func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 	ECSManager.flush_structural_changes()
 	_apply_intents(scaled_delta)
-	collision.run(scaled_delta, chunk, spatial_hash)
+	collision.run(scaled_delta, World.sampler(), spatial_hash)
 	# Geometry decides WHO landed and how fast; the energy model decides what that costs. Falls
 	# and melee therefore share one damage path instead of drifting into two.
 	for landing in collision.landings:
@@ -118,12 +120,19 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	jobs.run(sim_ticks)
 	perception.run(chunk, spatial_hash, sim_ticks)
 	lod.run(World.player_chunk_id)
+	# Chunk streaming rides the Simulation tick, not the Micro tick: promoting a chunk spawns
+	# stockpiles and pumps fluid, and doing that 60 times a second would be both wasteful and
+	# visibly stuttery.
+	if World.grid != null:
+		streaming.update_chunk_states(World.player_chunk_id, World.grid)
 
 
 ## Advances the GameClock by one in-game hour (ADR-9).
 func _run_macro_tick(chunk: ChunkData) -> void:
 	GameClock.advance_hour()
 	spoilage.run(chunk)
+	# The off-screen economy. Ledger integers only — it may not create a single entity.
+	economy.run()
 
 
 ## Pops each entity's queued intents and turns them into velocity or an action.

@@ -5,6 +5,19 @@
     `dev` was fast-forwarded to `main` (it was 1 commit BEHIND, so any branch cut from `dev`
     would have missed the entire ADR-integration pass).
 
+*   **SPRINT 2 COMPLETE (2026-07-31).** All six roadmap steps implemented and green:
+    DAG history, world generation + tile sampler, DAG-to-ECS instantiator, LoD boundary two-way
+    sync with the conservation property test, gray-box ledger economy, and the bootstrapper.
+    `Main` now boots the GENERATED WORLD by default; `test_arena` remains reachable via
+    `debug_config.json` and is still the fast iteration loop.
+    Measured: cold boot 22 ms, 11 chunks resident, 14 factions (1 materialized with 40 citizens,
+    13 left abstract), 52 entities alive, micro 0.92 ms against the 8 ms budget.
+    Bugs this sprint surfaced, all silent: ChunkData defaulted to LoD.ACTIVE so every generated
+    chunk claimed to be Active; the instantiator generated a chunk per faction just to read a
+    flag; `_clear_previous_world` swept only positioned entities so faction ledgers accumulated
+    across boots; and Sprint 1's collision could not cross a chunk seam at all.
+    STILL UNPLAYED BY A HUMAN in the world scenario — frames inspected only.
+
 *   **Active Goal:** Sprint 0 and Sprint 1 are implemented, visually verified, and merged into
     `dev`. Next: Sprint 2.
 

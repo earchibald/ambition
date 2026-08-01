@@ -179,6 +179,31 @@ func test_assigning_anchors_twice_does_not_move_anyone() -> void:
 	assert_eq(second, first, "re-running anchor assignment is idempotent")
 
 
+## The renderer must draw the whole visible neighbourhood, not just the chunk the player stands
+## in. Drawing only `active_chunk` was correct for one room and wrong for a village of nine: the
+## other eight were invisible, so the world ended in a cliff two steps from spawn.
+func test_the_renderer_draws_more_than_the_players_own_chunk() -> void:
+	GameLoopManager.set_physics_process(false)
+	World.boot_scenario(World.SCENARIO_WORLD, SEED)
+	var terrain: TerrainView = TerrainView.new()
+	add_child_autofree(terrain)
+	assert_gt(terrain.visible_chunks().size(), 1, "the neighbours are drawn too")
+	GameLoopManager.set_physics_process(true)
+
+
+## It must draw only chunks that ALREADY exist. Asking the grid would generate the entire
+## neighbourhood purely to render it, which is the opposite of streaming.
+func test_the_renderer_does_not_generate_chunks_just_to_draw_them() -> void:
+	GameLoopManager.set_physics_process(false)
+	World.boot_scenario(World.SCENARIO_WORLD, SEED)
+	var terrain: TerrainView = TerrainView.new()
+	add_child_autofree(terrain)
+	var before: int = World.grid.chunks_generated
+	terrain.visible_chunks()
+	assert_eq(World.grid.chunks_generated, before, "rendering generated nothing new")
+	GameLoopManager.set_physics_process(true)
+
+
 ## Breadth-first flood over open tiles, returning every tile reached.
 func _flood(chunk: ChunkData, start: Vector2i) -> Dictionary:
 	var seen: Dictionary = {}

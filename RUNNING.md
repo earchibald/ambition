@@ -36,7 +36,19 @@ godot --headless --import
 godot res://viewer/Main.tscn
 ```
 
-You spawn in a 64x64 stone arena. The debug overlay is on by default in the top-left.
+You spawn in the **generated world**: 500 years of history, a nine-chunk surface village, and
+its inhabitants standing where the history put them. The debug overlay is on by default.
+
+### Two scenarios
+
+| Scenario | What it is | Boot cost |
+|---|---|---|
+| `world` (default) | The real thing. DAG history, generated village, factions at their anchors, Pre-Warm. | ~22 ms |
+| `test_arena` | The Sprint 1 hand-authored room: ledge, pit, doorway, diagonal pinch, puddle, one rat, one nugget. | ~2 ms |
+
+Switch with `"boot_scenario": "test_arena"` in `debug_config.json`. **Use the arena while
+iterating on movement and combat** — it is the loop you pay ~50 times a day, and it is the only
+place the specific test features in §3 exist.
 
 ### Controls
 

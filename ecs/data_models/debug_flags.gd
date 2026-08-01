@@ -33,6 +33,10 @@ static var trace_capacity: int = DEFAULT_TRACE_CAPACITY
 static var overlay_font_size: int = DEFAULT_OVERLAY_FONT_SIZE
 ## Wireframe reach/arc/facing overlays. On by default: Sprint 1 has no other way to see facing.
 static var gizmos_enabled: bool = true
+## Which scenario `Main` boots. "world" is the game; "test_arena" is the fast debug room the
+## scope doc budgets at under 2 seconds, kept reachable because it is the loop paid ~50 times
+## a day while iterating on movement and combat.
+static var boot_scenario: StringName = &"world"
 
 static var _loaded: bool = false
 
@@ -78,6 +82,7 @@ static func _load_config() -> void:
 	)
 	trace_capacity = int(parsed.get("trace_capacity", trace_capacity))
 	gizmos_enabled = bool(parsed.get("gizmos_enabled", gizmos_enabled))
+	boot_scenario = StringName(parsed.get("boot_scenario", String(boot_scenario)))
 	overlay_font_size = clampi(
 		int(parsed.get("overlay_font_size", overlay_font_size)),
 		MIN_OVERLAY_FONT_SIZE,
@@ -95,6 +100,7 @@ static func snapshot() -> Dictionary:
 		"trace_capacity": trace_capacity,
 		"overlay_font_size": overlay_font_size,
 		"gizmos_enabled": gizmos_enabled,
+		"boot_scenario": String(boot_scenario),
 	}
 
 

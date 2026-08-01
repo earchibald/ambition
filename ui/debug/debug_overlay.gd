@@ -276,7 +276,7 @@ func _player_location() -> String:
 	if row < 0:
 		return "you: <no player entity>"
 	var pos: Vector3 = ECSManager.position_of(row)
-	var chunk: ChunkData = World.active_chunk
+	var chunk: ChunkData = World.chunk_containing(pos)
 	if chunk == null:
 		return "you: world (%.2f, %.2f, %.2f)   <no active chunk>" % [pos.x, pos.y, pos.z]
 	var tile: Vector2i = chunk.world_to_tile(pos)
@@ -302,28 +302,37 @@ func _cursor_location() -> String:
 		return "cursor: <no camera>"
 	var tile: Vector2i = _cursor_tile(chunk, camera)
 	if tile.x < 0:
-		return "cursor: <not over the arena>"
-	return "cursor: tile %s   %s" % [_format_tile(tile), _tile_readout(chunk, tile)]
+		return "cursor: <not over the world>"
+	var owner: ChunkData = World.chunk_containing(
+		chunk.tile_to_world(tile.x, tile.y)
+	) if World.grid == null else _owner_for(camera)
+	return "cursor: tile %s   %s" % [
+		_format_tile(tile), _tile_readout(owner if owner != null else chunk, tile)
+	]
+
+
+## The chunk under the cursor, so the readout describes the tile it names.
+func _owner_for(camera: Camera3D) -> ChunkData:
+	var mouse: Vector2 = get_viewport().get_mouse_position()
+	var hit: Dictionary = GameLoopManager.picking.ground_hit(
+		camera.project_ray_origin(mouse), camera.project_ray_normal(mouse), World.sampler()
+	)
+	return null if not hit["hit"] else World.chunk_containing(hit["point"])
 
 
 ## Steps along the camera ray until it meets terrain: either the side of a solid tile, or the
 ## floor surface of an open one. Returns (-1, -1) if it leaves the chunk without hitting.
-func _cursor_tile(chunk: ChunkData, camera: Camera3D) -> Vector2i:
+func _cursor_tile(_chunk: ChunkData, camera: Camera3D) -> Vector2i:
 	var mouse: Vector2 = get_viewport().get_mouse_position()
-	var origin: Vector3 = camera.project_ray_origin(mouse)
-	var direction: Vector3 = camera.project_ray_normal(mouse)
-	var travelled: float = 0.0
-	while travelled < CURSOR_MAX_DIST_M:
-		var point: Vector3 = origin + direction * travelled
-		var tile: Vector2i = chunk.world_to_tile(point)
-		if _in_chunk(tile):
-			if chunk.is_solid(tile.x, tile.y):
-				if point.y <= TerrainView.WALL_HEIGHT_M:
-					return tile
-			elif point.y <= chunk.height_at(tile.x, tile.y):
-				return tile
-		travelled += CURSOR_STEP_M
-	return Vector2i(-1, -1)
+	# Marched through the SAMPLER, so the readout stays correct across a chunk seam rather than
+	# reporting "outside chunk" the moment the cursor leaves the player's own chunk.
+	var hit: Dictionary = GameLoopManager.picking.ground_hit(
+		camera.project_ray_origin(mouse), camera.project_ray_normal(mouse), World.sampler()
+	)
+	if not hit["hit"]:
+		return Vector2i(-1, -1)
+	var owner: ChunkData = World.chunk_containing(hit["point"])
+	return Vector2i(-1, -1) if owner == null else owner.world_to_tile(hit["point"])
 
 
 ## Kind, elevation and fluid for one tile. Elevation is what the step-up and drop rules read,
@@ -361,7 +370,7 @@ func _inspect(row: int) -> String:
 	lines.append("--- %s ---" % EH.to_debug_string(handle))
 	lines.append("components: %s" % ComponentMask.describe(ECSManager.mask_of(row)))
 	var pos: Vector3 = ECSManager.position_of(row)
-	var chunk: ChunkData = World.active_chunk
+	var chunk: ChunkData = World.chunk_containing(pos)
 	var tile_text: String = ""
 	if chunk != null:
 		tile_text = "  tile %s" % _format_tile(chunk.world_to_tile(pos))

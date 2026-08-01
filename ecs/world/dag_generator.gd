@@ -63,14 +63,14 @@ const CULTURES: Array[Dictionary] = [
 	{
 		"name": &"Human",
 		"tags": [&"Farming", &"Trade"],
-		"materials": [&"MAT_BIOMASS", &"MAT_WOOD"],
+		"materials": [&"MAT_BIOMASS", &"MAT_CLOTH"],
 		"aggression": 0.30,
 		"prefers_deep": false,
 	},
 	{
 		"name": &"Cult",
 		"tags": [&"Ritual", &"Secrecy"],
-		"materials": [&"MAT_BONE", &"MAT_COPPER"],
+		"materials": [&"MAT_SULFUR", &"MAT_COPPER"],
 		"aggression": 0.55,
 		"prefers_deep": true,
 	},
