@@ -22,6 +22,10 @@ const CONTEXT_MARKER: String = "\n---CONTEXT---\n"
 const TOP_MEMORIES: int = 3
 const RECENT_MEMORIES: int = 3
 
+## How long a violent memory keeps a faction in "crisis". Two in-game weeks: long enough that a
+## running war stays a war, short enough that a grudge from year 300 is not an emergency.
+const ATTACK_MEMORY_WINDOW_HOURS: int = 336
+
 ## Hard ceiling on the brief. Cheap insurance against a memory text that is itself enormous.
 const MAX_PROMPT_CHARS: int = 4000
 
@@ -77,7 +81,7 @@ static func build_context(core: FactionCoreComponent, generator: DAGGenerator) -
 			core.faction_id, MaterialLibrary.MAT_BIOMASS
 		),
 		"strength": strength_of(core),
-		"recently_attacked": _was_recently_attacked(core),
+		"recently_attacked": was_recently_attacked(core),
 		"memories": salient_memories(core),
 		"valid_targets": valid_targets(core, generator),
 	}
@@ -173,10 +177,21 @@ static func strength_of(core: FactionCoreComponent) -> float:
 ## True when this faction has a fresh memory of being wronged. Read from faction memory rather
 ## than from the relationship score, because a score says WHO you dislike and a memory says
 ## whether something just happened — and "fortify NOW" is a response to the second.
-static func _was_recently_attacked(core: FactionCoreComponent) -> bool:
+## "RECENTLY" NOW MEANS RECENTLY. This checked only whether a violent memory existed anywhere in
+## the list, so a murder stayed "recent" until it aged out of the 24-entry cap — which, for a
+## quiet faction, is never. That was harmless while the flag only coloured a prompt; it stopped
+## being harmless when the flag became the crisis trigger for reasoning cadence, where a
+## permanent crisis means a permanently elevated request rate.
+##
+## Case-insensitive because these strings come from two writers: `ReputationSystem` emits
+## `WITNESSED_MURDER`, and the DAG chronicle writes prose.
+static func was_recently_attacked(core: FactionCoreComponent) -> bool:
+	var now: int = GameClock.total_hours()
 	for memory in core.faction_memory:
-		var kind: String = String(memory.get("text", ""))
-		if kind.contains("MURDER") or kind.contains("ASSAULT") or kind.contains("attacked"):
+		var kind: String = String(memory.get("text", "")).to_upper()
+		if not (kind.contains("MURDER") or kind.contains("ASSAULT") or kind.contains("ATTACK")):
+			continue
+		if now - int(memory.get("tick", 0)) <= ATTACK_MEMORY_WINDOW_HOURS:
 			return true
 	return false
 

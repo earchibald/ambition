@@ -135,7 +135,13 @@ func _target_for(
 		Vector3i(worker, core.faction_id, int(action.hash() % 1000)), grid.master_seed
 	)
 	match action:
-		&"PatrolBorders", &"MarchToTarget":
+		&"MarchToTarget":
+			# MARCHING SOMEWHERE ELSE. `objective_target` was written by the resolver and read by
+			# nobody until 2026-08-01, so a faction that decided to raid faction 9 sent its
+			# soldiers to wander its own village. The decision was made, recorded, surfaced in
+			# the overlay, and had no effect on where anyone walked.
+			return _open_tile(_chunk_of_target(core, grid, chunk), rng, 4, 59)
+		&"PatrolBorders":
 			return _open_tile(chunk, rng, 4, 59)
 		&"Barricade", &"ReassignToGuard":
 			return _open_tile(chunk, rng, 2, 20)
@@ -143,6 +149,20 @@ func _target_for(
 			return _open_tile(chunk, rng, 26, 38)
 		_:
 			return _open_tile(chunk, rng, 8, 55)
+
+
+## The anchor chunk of whoever this faction decided to act against, or its own if there is no
+## target — a raid with no named enemy is a muster, and mustering at home is correct.
+func _chunk_of_target(
+	core: FactionCoreComponent, grid: WorldGrid, fallback: ChunkData
+) -> ChunkData:
+	if core.objective_target < 0 or core.objective_target == core.faction_id:
+		return fallback
+	var target: FactionCoreComponent = DAGInstantiator.faction_core(core.objective_target)
+	if target == null or target.anchor_chunk_id == DAGNode.NO_ANCHOR:
+		return fallback
+	var chunk: ChunkData = grid.chunk_at(target.anchor_chunk_id)
+	return fallback if chunk == null else chunk
 
 
 ## A walkable tile in a band of the chunk. Bounded search, then the chunk centre: an unbounded

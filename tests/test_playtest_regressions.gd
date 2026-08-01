@@ -454,3 +454,47 @@ func test_precision_mode_is_slower_but_not_stationary() -> void:
 	# mean "less speed" rather than being silently rescaled back to full.
 	var scaled: Vector3 = Vector3(0.0, 0.0, 1.0) * WorldConstants.PRECISION_SPEED_SCALE
 	assert_lt(scaled.length(), 1.0, "a precision intent is under unit length")
+
+
+## ROW 0 MUST NEVER WEAR CORPSE TAGS. `_convert_to_corpse` carried a doc comment saying it was
+## "for non-player entities" and then converted anything handed to it, so a fatal fall tagged the
+## reserved player row `Corpse`/`Filth` and stripped its behaviour bits. `DeathLoopSystem` then
+## built a SECOND corpse out of that already-mutated state.
+##
+## An audit found this; no test did, because every death-loop test called `on_player_death`
+## directly and never went through the damage path a player actually dies from.
+func test_a_fatal_fall_does_not_turn_the_player_row_into_a_corpse() -> void:
+	GameLoopManager.combat.resolve_fall(WorldConstants.PLAYER_INDEX, 100.0)
+
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(WorldConstants.PLAYER_INDEX)
+	if chemistry != null:
+		assert_false(chemistry.has_tag(&"Corpse"), "row 0 is not wearing a corpse tag")
+		assert_false(chemistry.has_tag(&"Filth"), "nor a filth tag")
+	assert_true(
+		ECSManager.has_components(WorldConstants.PLAYER_INDEX, ComponentMask.PERCEPTION),
+		"and still has the behaviour bits DeathLoopSystem expects to find"
+	)
+
+
+## The same guard, through melee rather than a fall — the two fatal paths must agree.
+func test_a_fatal_blow_does_not_turn_the_player_row_into_a_corpse() -> void:
+	var rat: int = World.spawn_creature(ECSManager.position_of(0) + Vector3(1.0, 0.0, 0.0))
+	var rat_row: int = ECSManager.resolve(rat)
+	ECSManager.bodies[WorldConstants.PLAYER_INDEX].health = 0.1
+
+	GameLoopManager.combat.resolve_melee(rat_row, WorldConstants.PLAYER_INDEX, Vector3.LEFT, 2.0)
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(WorldConstants.PLAYER_INDEX)
+	if chemistry != null:
+		assert_false(chemistry.has_tag(&"Corpse"), "row 0 survives the combat system intact")
+
+
+## Death stays owned by exactly one system. If the fall path ever converts row 0 again, the
+## player ends the frame with two corpses and one of them holds their gear.
+func test_only_the_death_loop_creates_the_players_corpse() -> void:
+	var before: int = ECSManager.query(ComponentMask.LOOSE_ITEM).size()
+	GameLoopManager.combat.resolve_fall(WorldConstants.PLAYER_INDEX, 100.0)
+	assert_eq(
+		ECSManager.query(ComponentMask.LOOSE_ITEM).size(),
+		before,
+		"the combat system created no corpse of its own"
+	)

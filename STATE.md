@@ -37,6 +37,28 @@
     registry-is-canonical rule and that is how a roadmap came to name an `EdgeType` that did not
     exist.
 
+*   **BOTH OUTPUT AUDITS ARE IN AND TRIAGED** — `docs/audits/TRIAGE--OUTPUT-AUDITS--20260801.md`.
+    392 tests. Ten more defects fixed, and **two of my own §4 claims were flatly FALSE**:
+    *   A timeout forced FORTIFY, so a faction mid-raid abandoned it because the network was slow.
+        `on_timeout()` — the function implementing the rule I claimed — had NO CALLER. Failures of
+        every kind now change nothing.
+    *   A fatal fall or blow ran `_convert_to_corpse` on ROW 0, tagging the reserved player row
+        `Corpse`/`Filth` before `DeathLoopSystem` ran, which then built a second corpse from the
+        mutated state. Guarded now.
+    *   Also fixed: unbounded response cache; `objective_target` written and never read (a raid
+        marched around its own village); reasoning running hourly instead of ADR-9's weekly;
+        registry COMPONENT drift in both directions; `was_recently_attacked` never checking when.
+    *   ONE FINDING REJECTED. An audit reported the `Authorization` header as a broken format
+        string. The auditor's own harness had masked the credential-shaped token and it analysed
+        its own redacted output. `od` shows `"Authorization: Bearer %s" % _api_key` intact.
+
+*   **THE RECURRING DEFECT IN THIS CODEBASE IS A DOC COMMENT THAT DESCRIBES BEHAVIOUR THE CODE
+    DOES NOT HAVE.** Four instances in Sprint 3 alone: `PREFERRED_PROFESSION` (declared, never
+    read), `on_timeout` (written, never called), `_convert_to_corpse` ("for non-player entities",
+    no check), `was_recently_attacked` ("recently", no time check). Every one read as covered and
+    passed review. **Before believing a comment, grep for a second reference to the symbol.**
+    A test that calls a helper directly does not prove the production path uses it.
+
 *   **SPRINT 2 COMPLETE (2026-07-31).** All six roadmap steps implemented and green:
     DAG history, world generation + tile sampler, DAG-to-ECS instantiator, LoD boundary two-way
     sync with the conservation property test, gray-box ledger economy, and the bootstrapper.

@@ -95,7 +95,7 @@ godot --headless --quit-after 120 res://viewer/Main.tscn 2>&1 | grep ECS_BOOT_OK
 godot --write-movie /tmp/f.png --fixed-fps 10 --quit-after 30 res://viewer/Main.tscn
 ```
 
-**Expected at the audited commit: 28 test scripts, 375 tests, 0 failures, gdlint clean.**
+**Expected at the audited commit: 28 test scripts, 392 tests, 0 failures, gdlint clean.**
 If you observe otherwise, that is your first finding.
 
 `RUNNING.md` documents controls and what each scenario contains. `STATE.md` records known
@@ -201,6 +201,11 @@ or `UNVERIFIABLE`.
   `planner.plan(core.current_objective, …)`, so a reasoner verdict of `FORTIFY` produces fortify
   work and not a default template. Falsify by making the reasoner return an objective and checking
   the jobs that appear.
+- **C-B8** A faction that decided to raid a specific target actually marches on it:
+  `MarchToTarget` resolves `core.objective_target` to that faction's anchor chunk. Until
+  2026-08-01 `objective_target` was written by the resolver and read by nobody, so a raid sent its
+  soldiers wandering around the attacker's own village. A raid with no named target musters at
+  home rather than crashing.
 - **C-B7** A worker whose `ProfessionComponent.profession` matches a job's preferred profession is
   given that job in preference to round-robin — and a faction of unqualified workers still gets
   jobs rather than stalling. (`FactionPlanner.PREFERRED_PROFESSION` was dead code until
@@ -216,6 +221,12 @@ or `UNVERIFIABLE`.
 - **C-C4** The queue is bounded (`MAX_PENDING`) and de-duplicates repeat submissions.
 - **C-C5** A leader that dies while queued costs zero requests.
 - **C-C6** The salience filter sends at most top-3-by-weight plus 3-most-recent, de-duplicated.
+- **C-C6a** The reasoning cadence is WEEKLY (`HOURS_PER_STRATEGY_REVIEW = 168`, ADR-9), not
+  hourly, with a crisis path so a faction attacked inside `ATTACK_MEMORY_WINDOW_HOURS` thinks
+  immediately and then not again for `CRISIS_COOLDOWN_HOURS`. The queue is still pumped every
+  macro tick — cadence governs who joins, not how fast it drains.
+- **C-C6c** `ReasoningQueue._cache` is bounded by `MAX_CACHED`, evicting oldest-first. Unbounded
+  until 2026-08-01: a prompt changes whenever the world does, so the "cost control" grew forever.
 - **C-C6b** The salience ordering is TOTAL: `(weight, tick, event_id)` for the weight pass and
   `(tick, weight, event_id)` for the recency pass, so identical history selects identical
   memories no matter what order the history arrived in. **This was broken until 2026-08-01** —
@@ -229,13 +240,25 @@ or `UNVERIFIABLE`.
 - **C-C9** Malformed output, timeout and refusal all arrive as one empty Dictionary, so there is
   no failure shape without a branch.
 - **C-C10** A hallucinated or since-destroyed target is stripped and the raid cancelled.
-- **C-C11** A timeout preserves the current objective rather than changing it.
+- **C-C11** **CORRECTED 2026-08-01 — this claim was FALSE as originally written and an audit
+  disproved it with a repro.** The rule is now: a failure of ANY kind (timeout, refusal,
+  unparseable JSON — all arrive as one empty Dictionary per C-C9) leaves the objective, target,
+  emotion and declaration exactly as they were. `FORTIFY` is the fallback only for a leader that
+  DID answer and named a faction that does not exist. Previously every empty response forced
+  `FORTIFY`, so a faction mid-raid abandoned it because the network was slow, and `on_timeout()`
+  — the function implementing the claimed rule — had no caller at all.
 - **C-C12** The remote provider is **refused** unless both endpoint and key are present, and the
   key never reaches a log or the overlay.
 
 ### Sprint 3D — death loop
 
-- **C-D1** The corpse is a separate entity; row 0 never holds a corpse.
+- **C-D1** The corpse is a separate entity; row 0 never holds a corpse — **including through the
+  damage paths a player actually dies from.** This was FALSE until 2026-08-01: a fatal fall or
+  blow ran `ActionResolutionSystem._convert_to_corpse()` on row 0, tagging the reserved player row
+  `Corpse`/`Filth` and stripping its behaviour bits before `DeathLoopSystem` ever ran, which then
+  built a SECOND corpse from that mutated state. The function's doc comment said "for non-player
+  entities" and there was no check. Attack this through `resolve_fall` and `resolve_melee`, not
+  through `on_player_death` — that is how the tests missed it.
 - **C-D2** Row 0's generation is *bumped*, not freed, so every stale handle fails validation and
   row 0 can never be handed to another entity.
 - **C-D3** Control is severed before anything else.
@@ -293,10 +316,14 @@ or `UNVERIFIABLE`.
 
 ### Cross-cutting
 
-- **C-X1** 375 tests pass, gdlint is clean, and the boot sentinel prints with no errors.
+- **C-X1** 392 tests pass, gdlint is clean, and the boot sentinel prints with no errors.
 - **C-X2** The window opens **maximized and windowed**, not fullscreen.
 - **C-X3** No Godot physics node or `move_and_slide` appears in first-party code.
 - **C-X4** `ecs/` contains no wall-clock reads.
+- **C-X6** The same invariant enforces COMPONENT drift in both directions: every registry row
+  without a `NOT YET IMPLEMENTED` or `STORED AS COLUMNS` marker has a class in `ecs/components/`,
+  and every class there has a row. Adding this immediately found six drifts, four of which an
+  audit had already reported and two of which it had not.
 - **C-X5** `tests/invariants/test_forbidden_apis.gd` parses
   `docs/component_and_field_registry.md` and asserts every documented enum matches `ECSEnums`
   member-for-member and in order, so the registry cannot drift from the code in silence. Nothing
@@ -348,6 +375,10 @@ implemented" is **overstated**. Three of nine items are genuinely built, one is 
 different shape than named, one is partial, two exist as unread fields, and two do not exist. The
 commit message says "implement Sprint 3.5: consequences" — *consequences* is the honest scope, and
 the sprint's title is not. If you conclude otherwise, say why.
+
+| G-7 | Schism, Trade Mission jobs, and territorial Brawls | `factions_and_social_mechanics_architecture.md`; Sprint 3.5 scope row | **ABSENT.** No schism path, no trade objective in `JOB_TEMPLATES`, no skirmish over neutral resources. §4b's first version drew its nine-item table from the scope row alone and missed these; an audit caught the omission. |
+| G-8 | The leader prompt should include relevant active `MemoryComponent`s, not only `FactionCoreComponent.faction_memory` | `sprint_3_implementation_roadmap.md` Step 2 | **ABSENT.** Only faction memory is read, so a Tier-2 member's significant memory never reaches the leader unless something summarised it first. |
+| G-9 | `public_declaration` is stored in the leader's `MemoryComponent` so gossip can repeat it | `llm_reasoner_and_planning_architecture.md` | **ABSENT.** Only `core.last_declaration` is written, so the overlay can show it once and nobody can ever repeat it. |
 
 ### Ambiguities resolved by choosing, and the choice recorded
 
@@ -447,7 +478,7 @@ Date (UTC): <timestamp>
 | Check | Claimed | Observed |
 |---|---|---|
 | Test scripts | 28 | |
-| Tests passing | 375 | |
+| Tests passing | 392 | |
 | gdlint | clean | |
 | Boot sentinel | present | |
 

@@ -220,3 +220,80 @@ func _enum_exists(name: String) -> bool:
 
 func _enum_dictionary(name: String) -> Dictionary:
 	return REGISTRY_ENUMS.get(name, {})
+
+
+## COMPONENT DRIFT, the other half of the registry contract.
+##
+## `test_every_registry_enum_matches_the_code` closed enum drift and an audit immediately found
+## the same rot in the component table: three rows with no class behind them
+## (`FloodSourceComponent`, `ZonePopulationComponent`, `LLMPromptComponent`) and one real
+## component with no row (`LooseItemComponent`). Both directions matter. A declared-but-absent
+## component is a promise a later sprint tries to call in; an undeclared one is invisible to
+## save/load, to the validators, and to every agent who reads the registry to learn what exists.
+##
+## Rows marked NOT YET IMPLEMENTED are exempt, which is the point of the marker: it makes the
+## difference between "planned" and "drifted" something the build can check.
+func test_every_implemented_registry_component_has_a_class() -> void:
+	var missing: Array[String] = []
+	for row in _registry_component_rows():
+		if row["planned"] or row["columns"]:
+			continue
+		if not _component_class_exists(row["name"]):
+			missing.append(row["name"])
+	assert_eq(
+		missing,
+		[] as Array[String],
+		"every registry component without a NOT YET IMPLEMENTED marker has a class"
+	)
+
+
+func test_every_component_class_is_in_the_registry() -> void:
+	var documented: Dictionary = {}
+	for row in _registry_component_rows():
+		documented[row["name"]] = true
+
+	var undocumented: Array[String] = []
+	for path in _gd_files("res://ecs/components"):
+		var text: String = _read(path)
+		var at: int = text.find("class_name ")
+		if at < 0:
+			continue
+		var name: String = text.substr(at + 11).split("\n")[0].strip_edges()
+		if not documented.has(name):
+			undocumented.append(name)
+	assert_eq(
+		undocumented, [] as Array[String], "every component class has a registry row"
+	)
+
+
+## Rows of the registry's component table, as `{name, planned}`.
+func _registry_component_rows() -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	var text: String = FileAccess.get_file_as_string(
+		"res://docs/component_and_field_registry.md"
+	)
+	for line in text.split("\n"):
+		var trimmed: String = line.strip_edges()
+		if not trimmed.begins_with("| `"):
+			continue
+		var close_tick: int = trimmed.find("`", 3)
+		if close_tick < 0:
+			continue
+		var name: String = trimmed.substr(3, close_tick - 3)
+		if not name.ends_with("Component"):
+			continue
+		rows.append({
+			"name": name,
+			"planned": trimmed.contains("NOT YET IMPLEMENTED"),
+			"columns": trimmed.contains("STORED AS COLUMNS"),
+		})
+	# Without this the two tests above pass vacuously if the table format ever changes.
+	assert_gt(rows.size(), 15, "the component table really was parsed")
+	return rows
+
+
+func _component_class_exists(name: String) -> bool:
+	for path in _gd_files("res://ecs/components"):
+		if _read(path).contains("class_name %s" % name):
+			return true
+	return false

@@ -18,6 +18,13 @@ extends RefCounted
 ## symptom is a leader acting on an hour-old decision.
 const MAX_PENDING: int = 32
 
+## Ceiling on cached responses. The cache was unbounded until 2026-08-01, and both output audits
+## found it independently: a prompt changes whenever the world does, so over a long run the
+## number of distinct prompts is unbounded and the "cost control" was a slow memory leak.
+## Oldest-first eviction is right here — an old prompt describes a world that has moved on, so it
+## is both the least likely to hit again and the least harmful to lose.
+const MAX_CACHED: int = 128
+
 ## Per-session ceiling on REMOTE calls. Local providers are free and are not counted, so running
 ## without an endpoint has no budget at all.
 const DEFAULT_SESSION_BUDGET: int = 200
@@ -38,6 +45,8 @@ var _queued: Dictionary = {}
 var _in_flight: int = EH.INVALID
 ## prompt hash -> response, for the duration of a run (ADR-5 cost control).
 var _cache: Dictionary = {}
+## Insertion order, so eviction is oldest-first without reading wall-clock time (ADR-20).
+var _cache_order: Array[String] = []
 
 
 func _init(chosen: LLMProvider = null) -> void:
@@ -107,9 +116,18 @@ func pump(generator: DAGGenerator, on_answer: Callable) -> void:
 		_in_flight = EH.INVALID
 		completed += 1
 		if not response.is_empty():
-			_cache[key] = response
+			_remember(key, response)
 		on_answer.call(handle, response)
 	)
+
+
+## Bounded, oldest-first. A dictionary that only ever grows is a leak whatever it is called.
+func _remember(key: String, response: Dictionary) -> void:
+	if not _cache.has(key):
+		_cache_order.append(key)
+	_cache[key] = response
+	while _cache_order.size() > MAX_CACHED:
+		_cache.erase(_cache_order.pop_front())
 
 
 func counters() -> Dictionary:
@@ -122,4 +140,6 @@ func counters() -> Dictionary:
 		"reason_cache_hits": cache_hits,
 		"reason_duplicates": duplicates_skipped,
 		"reason_budget_left": session_budget,
+		"reason_cached": _cache.size(),
+		"reason_budget_exhausted": budget_exhausted,
 	}

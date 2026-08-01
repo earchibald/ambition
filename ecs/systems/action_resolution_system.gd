@@ -155,7 +155,19 @@ func _emit_impact_noise(row: int, energy_j: float) -> void:
 ## Death converts the entity into a corpse IN PLACE for non-player entities. The PLAYER's death
 ## is different: it creates a SEPARATE corpse entity and retires handle 0 with a bumped
 ## generation, so the corpse and the next adventurer never compete for the reserved slot.
+##
+## THE GUARD BELOW WAS MISSING UNTIL 2026-08-01, and the comment above described an intention the
+## code did not implement — the same failure mode as a doc comment on unused code. A fatal fall
+## tagged ROW 0 itself `Corpse`/`Filth` and stripped its behaviour bits, and only afterwards did
+## `GameLoopManager._check_player_death()` run `DeathLoopSystem`, which then built a second corpse
+## out of already-mutated row-0 state. Two corpses, a player row wearing corpse tags, and ADR-14's
+## reserved-row rule broken for the width of a frame.
+##
+## Row 0 is left entirely alone here. `DeathLoopSystem.on_player_death` is the single owner of
+## what happens to the player, which is what C-D5 claims and what this now makes true.
 func _convert_to_corpse(row: int) -> void:
+	if row == WorldConstants.PLAYER_INDEX:
+		return
 	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
 	if chemistry == null:
 		chemistry = ChemistryComponent.new()

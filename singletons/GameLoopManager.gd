@@ -17,6 +17,12 @@
 ## this file. Cadence comes from the frame counter, not from elapsed time.
 extends Node
 
+## ADR-9: strategy re-evaluation is every 24x7 macro ticks, or crisis-triggered.
+const HOURS_PER_STRATEGY_REVIEW: int = 168
+
+## A faction under attack may think again this often, so a long war is not a request per hour.
+const CRISIS_COOLDOWN_HOURS: int = 24
+
 ## Bullet-time scales the per-tick delta used for integration. It NEVER changes the tick rate,
 ## which ADR-9 fixes at 60 Hz.
 var time_scale: float = 1.0
@@ -56,6 +62,9 @@ var reasoning: ReasoningQueue = ReasoningQueue.new()
 var llm: LLMResolutionSystem = LLMResolutionSystem.new()
 var death_loop: DeathLoopSystem = DeathLoopSystem.new()
 var reputation: ReputationSystem = ReputationSystem.new()
+
+## faction_id -> the hour it last joined the reasoning queue. Private, so it lives last.
+var _last_thought: Dictionary = {}
 
 
 func _ready() -> void:
@@ -191,13 +200,35 @@ func _run_macro_tick(chunk: ChunkData) -> void:
 
 ## Leaders think, one at a time, on the Macro tick.
 ##
-## Submitting every faction each hour is cheap: the queue de-duplicates, caps its own depth, and
-## dispatches exactly one request. A leader that does not get picked this hour simply thinks next
-## hour, which at an hour of in-game time is not a behaviour anyone can perceive.
+## WEEKLY, NOT HOURLY. ADR-9 specifies strategy re-evaluation every 168 macro ticks "or
+## crisis-triggered", and this submitted every faction every hour — 168x the specified rate. The
+## comment that used to sit here argued it was cheap because the queue de-duplicates, which is
+## true of memory and false of everything else: with a remote provider it burns a 200-call
+## session budget in a bit over a day of in-game time, and it churns objectives fast enough that
+## no faction ever finishes acting on one.
+##
+## The crisis clause is what keeps weekly cadence from feeling inert. A faction that has just
+## been attacked does not wait six days to react; it thinks now, then falls quiet for
+## CRISIS_COOLDOWN_HOURS so a long siege does not become a request per hour.
 func _think() -> void:
 	var generator: DAGGenerator = null if World.boot_report == null else World.boot_report.generator
+	var hour: int = GameClock.total_hours()
+	var scheduled: bool = hour % HOURS_PER_STRATEGY_REVIEW == 0
+
 	for row in ECSManager.query(ComponentMask.FACTION_CORE):
-		reasoning.submit(ECSManager.handle_of(row))
+		var core: FactionCoreComponent = ECSManager.faction_cores[row]
+		var handle: int = ECSManager.handle_of(row)
+		var since: int = hour - int(_last_thought.get(core.faction_id, -CRISIS_COOLDOWN_HOURS))
+		var crisis: bool = (
+			PromptBuilder.was_recently_attacked(core) and since >= CRISIS_COOLDOWN_HOURS
+		)
+		if not scheduled and not crisis:
+			continue
+		if reasoning.submit(handle):
+			_last_thought[core.faction_id] = hour
+
+	# Pumped EVERY macro tick regardless. The cadence governs who joins the queue, not how fast
+	# the queue drains — a request that waited a week to be made should not wait another to fire.
 	reasoning.pump(generator, func(handle: int, response: Dictionary) -> void:
 		llm.resolve(handle, response, generator)
 	)
