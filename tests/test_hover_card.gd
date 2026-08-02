@@ -138,12 +138,12 @@ func test_a_wounded_creature_reports_health_and_turns_red() -> void:
 	assert_eq(vitals.size(), 1, "a beast shows health and nothing else")
 	assert_eq(
 		EntityCard.vital_colour(body.health, body.max_health),
-		PanelFormat.BAD,
+		UITheme.DANGER,
 		"nearly dead is visible without reading the number"
 	)
 	assert_eq(
 		EntityCard.vital_colour(body.max_health, body.max_health),
-		PanelFormat.GOOD,
+		UITheme.GOOD,
 		"and unhurt is not"
 	)
 

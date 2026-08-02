@@ -23,10 +23,6 @@ const FEED_CAPACITY: int = 8
 ## enough of the world visible that the overlay never becomes the whole screen.
 const MAX_PANEL_SCREEN_FRACTION: float = 0.8
 
-## The last-known-name cache is keyed by handle, so unlike the old row-keyed version it does not
-## self-limit to the row count. Bounded here instead: it only has to outlive the feed above it.
-const MAX_REMEMBERED_NAMES: int = 256
-
 var _panel: PanelContainer = null
 var _header: Label = null
 var _scroll: ScrollContainer = null
@@ -39,7 +35,6 @@ var _accumulator: float = 0.0
 var _feed: Array[String] = []
 ## Worst micro-tick duration since the panel last redrew, fed by the per-frame signal.
 var _worst_micro_ms: float = 0.0
-var _remembered_names: Dictionary = {}
 var _page: Page = Page.LIVE
 var _lmb_presses: int = 0
 var _rmb_presses: int = 0
@@ -53,6 +48,12 @@ func _ready() -> void:
 	DebugFlags.initialize()
 	_build_panel()
 	_page = clampi(DebugFlags.boot_overlay_page, 0, Page.size() - 1) as Page
+	# HIDDEN at boot since the player HUD took over the player-facing duties. `F1` summons the
+	# panel at `boot_overlay_page` exactly as before; captures that need it up from frame one set
+	# `overlay_visible_on_boot` in the config alongside the page.
+	if not DebugFlags.overlay_visible_on_boot:
+		_page = Page.HIDDEN
+	_panel.visible = _page != Page.HIDDEN
 	visible = DebugFlags.tick_counters_enabled
 
 	# Listen only. The overlay never writes ECS state (Prime Directive / invariants §2).
@@ -590,24 +591,10 @@ func _on_changed_floor(from_floor: int, to_floor: int) -> void:
 
 
 ## A handle is not a name. Without this the feed reads "entity 4294967296 took 3.2 damage".
-##
-## Names are REMEMBERED, because the interesting events are exactly the ones that end an entity.
-## A stack that merges on pickup is destroyed inside the operation that reports it, so resolving
-## the handle afterwards yields nothing and the log read "you picked up <gone>". The last known
-## name is the honest answer.
-## KEYED BY THE FULL HANDLE, not the row. Rows are recycled — `allocate_entity` pops straight off
-## `_free_indices` — so a row-keyed cache answered a question about a dead entity with the name of
-## whatever now occupies its slot, and the feed attributed deaths to the wrong object.
+## Delegated to `EntityCard.title_or_last` — one naming truth AND one last-known-name memory,
+## shared with the player HUD's log, so the two feeds can never call one object two things.
 func _name_of(entity: int) -> String:
-	var row: int = ECSManager.resolve(entity)
-	if row < 0:
-		return _remembered_names.get(entity, "<gone>")
-	# One naming truth: the feed calls things exactly what the hover card calls them.
-	var name: String = EntityCard.title(row)
-	if _remembered_names.size() >= MAX_REMEMBERED_NAMES:
-		_remembered_names.erase(_remembered_names.keys()[0])
-	_remembered_names[entity] = name
-	return name
+	return EntityCard.title_or_last(entity)
 
 
 ## What a thing IS, in words. Delegated to `EntityCard` so the inspector header, the event feed

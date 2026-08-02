@@ -31,8 +31,14 @@ static var hard_fail_on_invariant_violation: bool = true
 static var trace_capacity: int = DEFAULT_TRACE_CAPACITY
 
 static var overlay_font_size: int = DEFAULT_OVERLAY_FONT_SIZE
-## Wireframe reach/arc/facing overlays. On by default: Sprint 1 has no other way to see facing.
-static var gizmos_enabled: bool = true
+## Wireframe reach/arc/facing overlays. Off by default since the player HUD landed: they are
+## debug drawing on a player's screen, and the heading nose covers facing. `G` summons them.
+static var gizmos_enabled: bool = false
+## Whether the debug overlay panel is up at boot. Off since the player HUD took over the
+## player-facing duties; `F1` summons it exactly as before. A NEW key rather than a reuse of
+## `boot_overlay_page`, because that key is already persisted in existing config files and
+## reusing it would let an old save silently pin the overlay open forever.
+static var overlay_visible_on_boot: bool = false
 ## Which scenario `Main` boots. "world" is the game; "test_arena" is the fast debug room the
 ## scope doc budgets at under 2 seconds, kept reachable because it is the loop paid ~50 times
 ## a day while iterating on movement and combat.
@@ -135,7 +141,14 @@ static func _load_config() -> void:
 		parsed.get("hard_fail_on_invariant_violation", hard_fail_on_invariant_violation)
 	)
 	trace_capacity = int(parsed.get("trace_capacity", trace_capacity))
-	gizmos_enabled = bool(parsed.get("gizmos_enabled", gizmos_enabled))
+	# Read under a NEW key ("gizmos_visible", not "gizmos_enabled") as a one-time default
+	# reset: every existing config file has the OLD on-by-default baked in from before the
+	# player HUD existed, and honouring it would pin the debug wireframes on for exactly the
+	# players the new default is for. `G` re-saves the preference under the new name.
+	gizmos_enabled = bool(parsed.get("gizmos_visible", gizmos_enabled))
+	overlay_visible_on_boot = bool(
+		parsed.get("overlay_visible_on_boot", overlay_visible_on_boot)
+	)
 	boot_scenario = StringName(parsed.get("boot_scenario", String(boot_scenario)))
 	boot_overlay_page = int(parsed.get("boot_overlay_page", boot_overlay_page))
 	overlay_font_size = clampi(
@@ -154,7 +167,8 @@ static func snapshot() -> Dictionary:
 		"hard_fail_on_invariant_violation": hard_fail_on_invariant_violation,
 		"trace_capacity": trace_capacity,
 		"overlay_font_size": overlay_font_size,
-		"gizmos_enabled": gizmos_enabled,
+		"gizmos_visible": gizmos_enabled,
+		"overlay_visible_on_boot": overlay_visible_on_boot,
 		"boot_scenario": String(boot_scenario),
 		"boot_overlay_page": boot_overlay_page,
 	}

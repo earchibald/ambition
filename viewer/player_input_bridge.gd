@@ -11,6 +11,8 @@ const DEBUG_HURT_AMOUNT: float = 25.0
 
 @export var camera_path: NodePath
 @export var overlay_path: NodePath
+@export var grimoire_path: NodePath
+@export var pack_path: NodePath
 
 var intents_pushed: int = 0
 
@@ -22,6 +24,8 @@ var last_aim: Vector3 = Vector3(0.0, 0.0, 1.0)
 
 var _camera: Camera3D = null
 var _overlay: DebugOverlay = null
+var _grimoire: Node = null
+var _pack: Node = null
 
 
 func _ready() -> void:
@@ -29,6 +33,10 @@ func _ready() -> void:
 		_camera = get_node_or_null(camera_path)
 	if not overlay_path.is_empty():
 		_overlay = get_node_or_null(overlay_path)
+	if not grimoire_path.is_empty():
+		_grimoire = get_node_or_null(grimoire_path)
+	if not pack_path.is_empty():
+		_pack = get_node_or_null(pack_path)
 
 
 func _physics_process(_delta: float) -> void:
@@ -62,18 +70,26 @@ func _physics_process(_delta: float) -> void:
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
 
-	# A click on the debug panel belongs to the panel. The bridge POLLS rather than consuming
-	# events, so it has to ask rather than relying on the event being marked handled.
-	var ui_has_mouse: bool = _overlay != null and _overlay.wants_mouse()
-
-	if not ui_has_mouse and Input.is_action_just_pressed(&"attack"):
-		_push_attack(row, last_aim)
-	if not ui_has_mouse and Input.is_action_just_pressed(&"interact"):
-		_push_interact(row)
-	if not ui_has_mouse and Input.is_action_just_pressed(&"inspect"):
-		_select_under_cursor()
-	if Input.is_action_just_pressed(&"cast"):
-		_push_cast(row, last_aim)
+	# A SUMMONED PANEL IS MODAL for the combat keys. While the Grimoire or the pack is up:
+	# a click outside it dismisses the panel — the genre reflex — rather than swinging a weapon
+	# at whatever stood behind it, and Q does not cast at a world the pointer cannot even
+	# identify (the hover card yields while a panel is open, so a cast then would strike what
+	# the UI refuses to name). The debug keys below stay live regardless.
+	var modal: Node = _open_modal()
+	if modal != null:
+		if Input.is_action_just_pressed(&"attack") and not _claims_mouse(modal):
+			modal.close()
+	else:
+		# The debug overlay is non-modal: it only claims clicks that land ON it.
+		var ui_has_mouse: bool = _claims_mouse(_overlay)
+		if not ui_has_mouse and Input.is_action_just_pressed(&"attack"):
+			_push_attack(row, last_aim)
+		if not ui_has_mouse and Input.is_action_just_pressed(&"interact"):
+			_push_interact(row)
+		if not ui_has_mouse and Input.is_action_just_pressed(&"inspect"):
+			_select_under_cursor()
+		if Input.is_action_just_pressed(&"cast"):
+			_push_cast(row, last_aim)
 	if Input.is_action_just_pressed(&"debug_hurt"):
 		_debug_hurt(row)
 	if Input.is_action_just_pressed(&"debug_respawn"):
@@ -172,6 +188,19 @@ func _push_cast(row: int, aim: Vector3) -> void:
 
 func _rig() -> CameraRig:
 	return null if _camera == null else _camera.get_parent() as CameraRig
+
+
+static func _claims_mouse(panel: Node) -> bool:
+	return panel != null and panel.has_method("wants_mouse") and panel.wants_mouse()
+
+
+## The open summoned panel, or null. One at a time is an invariant the toggles keep informally;
+## if both were somehow open, the Grimoire wins the click.
+func _open_modal() -> Node:
+	for panel in [_grimoire, _pack]:
+		if panel != null and panel.has_method("is_open") and panel.is_open():
+			return panel
+	return null
 
 
 ## DEBUG ONLY (`F8`): detach the camera and survey the world. Half of the scope doc's "free

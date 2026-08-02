@@ -5,7 +5,46 @@
     `feature/sprint3-world-inspector` (PR #7), off `dev`. **PRs #7, #8 and #9 are still OPEN
     and UNMERGED** — await human review.
 
-*   **LAST CHANGE: the player-facing hover card (2026-08-01). 602 tests across 38 scripts,
+*   **LAST CHANGE: THE PLAYER UI PASS (2026-08-02). 619 tests across 39 scripts, gdlint clean,
+    both scenarios frame-verified, and two subagent beauty reviews (genre + accessibility)
+    applied against rendered frames — eighteen findings closed or declared, recorded in the
+    design doc §7.** The goal-set order was a full UI/UX exercise plus "make it
+    easy and beautiful to play what we have". The central audit finding: hiding the debug
+    overlay left the player with NO health bar, no stamina, no event feedback, no clock — every
+    player-facing fact lived inside a developer tool, which is why debug info "drowned". What
+    shipped:
+    *   **`ui/player_hud.gd`** — the always-on player layer, laid out per
+        `docs/hud_and_main_interface_architecture.md` §2: drawn vital bars top-left (ticks
+        every 25, 0.6 s damage ghosting, casting strain as an amber dent in the stamina bar),
+        the spam-aggregated running log bottom-left (player-relevant events only, one line per
+        repeat with `(xN)`), the keybar bottom-center with the bound spell named in player
+        words (`Fire bolt`, via `EntityCard.spell_name`), the load chip bottom-right, the
+        clock top-right. Never eats input; every Control is MOUSE_FILTER_IGNORE.
+    *   **`ui/pack_panel.gd`** (`I`) — the inventory made visible: auto-sorted heaviest-first
+        list (ui_ux spec §5: never a Tetris grid), space/load bars, pace penalty, and its
+        read-only limit stated on its face (no DROP intent exists yet).
+    *   **`ui/ui_theme.gd` + `ui/vital_bar.gd`** — one visual voice for all player panels
+        (warm parchment palette, 3 px radius, 12 px padding, WCAG-verified contrast asserted
+        by `tests/test_player_hud.gd`; stamina is TEAL not green for colour-blind safety).
+        Debug keeps its cool monospace voice ON PURPOSE — two voices tell the player which
+        layer is talking. Hover card and Grimoire rethemed onto it.
+    *   **Debug segregation** — the overlay boots HIDDEN (`F1` summons, `overlay_visible_on_boot`
+        restores) and gizmos boot OFF (`G`; persisted key renamed `gizmos_visible` as a
+        one-time default reset, because every existing config had the old on-default baked in).
+    *   **A real input bug fixed**: the bridge polled only the debug overlay's `wants_mouse`,
+        so a click on the open Grimoire swung a weapon at the world behind it. All panels now
+        claim their own clicks.
+    *   **The design record** is `docs/ui_information_architecture_and_hud_plan.md`: the ring
+        model (glance/point/summon), answers to mouseover/examine/inventory/keys/radial/debug
+        questions, a 12-row ambiguities-resolved-by-choosing table (spec deviations recorded,
+        e.g. two bars + strain dent instead of three bars; radial DEFERRED until >1 bound
+        spell), and the genre beauty standard with verified contrast maths in Appendix A.
+    *   **Frame-verified** via a temporary capture harness (deleted): windowed captures of both
+        scenarios; found and fixed a placement bug (RichTextLabel min-size under-reporting —
+        `reset_size()` before measuring) and a capture pitfall worth remembering: the project
+        boots MAXIMIZED, so movie-writer frames CROP the real canvas and lie about clipping.
+
+*   **The player-facing hover card (2026-08-01). 602 tests across 38 scripts,
     gdlint clean.** Point at anything and `ui/hover_card.gd` names it — no key, no panel, no tag
     vocabulary. Words come from `ui/entity_card.gd`, which is pure, static and row-only so a
     headless test asserts every line. Three things changed underneath it: `BodyComponent.species`
@@ -183,10 +222,12 @@
     across boots; and Sprint 1's collision could not cross a chunk seam at all.
     STILL UNPLAYED BY A HUMAN in the world scenario — frames inspected only.
 
-*   **Active Goal:** The Sprints 1–4 remediation is implemented, documented, mutation-tested
-    and self-audited. `docs/audits/OUTPUT-IMPL-AUDIT-remediation-sprints1-4.md` is the manifest
-    for an external auditor. Await human review of PRs #7/#8/#9, then open the remediation PR
-    stacked on #9 (or fold it into #9 if the owner prefers).
+*   **Active Goal:** The player UI pass and the Sprints 1–4 remediation are implemented,
+    documented and self-audited on this branch. Await human review of PRs #7/#8/#9, then open
+    the remediation+UI PR stacked on #9 (or fold it into #9 if the owner prefers). The next UI
+    increment, in order of declared intent: the examine tier (pinned insight-gated card), DROP
+    intent + an actionable pack, the settings screen (remapping + accessibility), quick-belt
+    slots, and the `B`→`G` Grimoire key reconciliation (decision #4 in the HUD plan).
 
 *   **START HERE IF YOU ARE NEW:** `RUNNING.md`. It has the exact commands to run the game, the
     control list, what every object in the test arena is there to test, how to read the debug

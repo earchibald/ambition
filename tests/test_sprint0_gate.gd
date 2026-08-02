@@ -21,6 +21,7 @@ const REQUIRED_ACTIONS: Array[StringName] = [
 	&"toggle_gizmos",
 	&"overlay_text_bigger",
 	&"overlay_text_smaller",
+	&"inventory",
 	&"cancel",
 ]
 

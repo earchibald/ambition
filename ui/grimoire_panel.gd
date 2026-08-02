@@ -47,12 +47,12 @@ func _build() -> void:
 	_panel = PanelContainer.new()
 	_panel.position = Vector2(12, 12)
 	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0.06, 0.04, 0.09, 0.88)
-	style.border_color = Color(0.62, 0.5, 0.85, 0.95)
-	style.set_border_width_all(1)
-	style.set_content_margin_all(8)
+	# The shared player anatomy (UITheme), with the border tinted toward the magic colour so the
+	# panel keeps its arcane identity without inventing a second anatomy.
+	var style: StyleBoxFlat = UITheme.panel_style(true)
+	style.border_color = Color("#" + UITheme.MAGIC).darkened(0.45)
 	_panel.add_theme_stylebox_override("panel", style)
+	UITheme.decorate(_panel)
 	_panel.visible = false
 	add_child(_panel)
 
@@ -63,11 +63,8 @@ func _build() -> void:
 	_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# Monospace for the same reason the debug overlay uses it: these are aligned columns, and a
-	# proportional face shreds them.
-	var mono := SystemFont.new()
-	mono.font_names = PackedStringArray(
-		["JetBrains Mono", "SF Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
-	)
+	# proportional face shreds them. The stack itself lives in UITheme — one definition.
+	var mono: SystemFont = UITheme.mono_font()
 	for role in ["normal_font", "bold_font", "italics_font", "mono_font"]:
 		_label.add_theme_font_override(role, mono)
 	_label.add_theme_font_size_override("normal_font_size", DebugFlags.overlay_font_size)
@@ -78,6 +75,21 @@ func _build() -> void:
 ## True while the panel is up, so the input bridge can ignore a click that belongs to it.
 func is_open() -> bool:
 	return _open
+
+
+## True when a click belongs to this panel rather than to the world behind it. The input bridge
+## POLLS `Input`, so `MOUSE_FILTER_STOP` alone cannot protect the world from panel clicks — the
+## bridge has to ask.
+func wants_mouse() -> bool:
+	if not _open or _panel == null:
+		return false
+	return _panel.get_global_rect().has_point(_panel.get_global_mouse_position())
+
+
+## Closed from outside — the input bridge dismisses on a click-away.
+func close() -> void:
+	_open = false
+	_panel.visible = false
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -100,15 +112,16 @@ func _handle_key(key: InputEventKey) -> void:
 		_toggle(code - KEY_1)
 	elif code == KEY_ENTER or code == KEY_KP_ENTER:
 		_request_bind()
-	elif code == KEY_O:
+	elif code == KEY_O or code == KEY_0:
+		# `[O] overclock` beside `[1-9]` reads as a zero at a glance, so zero is an alias
+		# rather than a dead key that looks mapped.
 		_overclock = not _overclock
 		_refresh()
 	elif code == KEY_BACKSPACE:
 		_selected.clear()
 		_refresh()
 	elif code == KEY_ESCAPE:
-		_open = false
-		_panel.visible = false
+		close()
 	else:
 		return
 	get_viewport().set_input_as_handled()
@@ -158,34 +171,57 @@ func _mind() -> MindComponent:
 
 func _on_bound(_caster: int, spell_id: StringName, ok: bool, reason: StringName) -> void:
 	_last_result = (
-		"[color=#8fe08f]bound %s[/color]" % spell_id
+		"[color=#%s]bound %s[/color]" % [UITheme.GOOD, _spell_word(spell_id)]
 		if ok
-		else "[color=#e08f8f]refused — %s[/color]" % reason
+		else "[color=#%s]refused — %s[/color]" % [UITheme.DANGER, reason]
 	)
 	_refresh()
 
 
 func _on_cast(_caster: int, spell_id: StringName, strain: float) -> void:
-	_last_result = "[color=#8fbfe0]cast %s (%.1f strain)[/color]" % [spell_id, strain]
+	_last_result = "[color=#%s]cast %s (%.1f strain)[/color]" % [
+		UITheme.MAGIC, _spell_word(spell_id), strain
+	]
 	_refresh()
+
+
+## The player's name for a spell, with the rune-list id as the fallback for a spell the mind no
+## longer holds.
+func _spell_word(spell_id: StringName) -> String:
+	var mind: MindComponent = _mind()
+	if mind == null:
+		return String(spell_id)
+	var spell: CompiledSpell = mind.grimoire.get(spell_id)
+	return String(spell_id) if spell == null else EntityCard.spell_name(spell)
 
 
 func _refresh() -> void:
 	if not _open or _label == null:
 		return
+	# Re-applied here rather than only at build, so `=`/`-` reach this panel too.
+	_label.add_theme_font_size_override("normal_font_size", DebugFlags.overlay_font_size)
+	_label.add_theme_font_size_override("bold_font_size", DebugFlags.overlay_font_size)
 	_label.text = "\n".join(_compose())
 	_panel.reset_size()
+	# Centered like the pack: a summoned panel is the object of attention, and pinning it over
+	# the vitals corner made two panels fight for one corner.
+	var view: Vector2 = Vector2(get_viewport().get_visible_rect().size)
+	_panel.position = ((view - _panel.get_combined_minimum_size()) / 2.0).max(Vector2(12.0, 12.0))
+
+
+## `Apply_Water` -> `Apply Water`. Ids stay canonical everywhere below the display layer.
+func _rune_word(rune_id: StringName) -> String:
+	return String(rune_id).replace("_", " ")
 
 
 func _compose() -> Array[String]:
 	var mind: MindComponent = _mind()
 	var out: Array[String] = []
-	out.append(
-		"[b]GRIMOIRE[/b]   [1-9] add/remove   [Enter] bind   [O] overclock"
-		+ "   [Backspace] clear   [B] close"
-	)
+	# The title stands alone: a title line that also carries five key hints sets the PANEL's
+	# width, and a panel as wide as its longest hint is a panel sized by accident.
+	out.append(UITheme.title("Grimoire"))
 	if mind == null:
-		out.append("[color=#e08f8f]no mind to read[/color]")
+		out.append("[color=#%s]no mind to read[/color]" % UITheme.DANGER)
 		return out
 
 	out.append("")
@@ -194,16 +230,21 @@ func _compose() -> Array[String]:
 	for i in runes.size():
 		var rune_id: StringName = runes[i]
 		var mark: String = "*" if _selected.has(rune_id) else " "
+		# Displayed with spaces, stored with underscores: `Apply_Water` is a registry id, and
+		# ids do not belong on a player panel.
 		out.append("  %d %s %-18s %-8s cost %d" % [
-			i + 1, mark, rune_id, RuneLibrary.kind_of(rune_id),
+			i + 1, mark, _rune_word(rune_id), RuneLibrary.kind_of(rune_id),
 			RuneLibrary.complexity_of(rune_id),
 		])
 
 	out.append("")
 	out.append("[b]this spell[/b]")
-	out.append("  runes: %s" % ("<none>" if _selected.is_empty() else " + ".join(_selected)))
+	var chosen: Array[String] = []
+	for rune_id in _selected:
+		chosen.append(_rune_word(rune_id))
+	out.append("  runes: %s" % ("<none>" if chosen.is_empty() else " + ".join(chosen)))
 	out.append(
-		"  budget: %.1f (Rune_Stability %d)" % [
+		"  budget: %.1f (rune stability %d)" % [
 			SpellCompilerSystem.complexity_budget(mind), mind.insight_in(&"Rune_Stability")
 		]
 	)
@@ -211,13 +252,16 @@ func _compose() -> Array[String]:
 		# The spec's "jagged and red Bind button", at this panel's fidelity: the warning IS the
 		# button state, and it names the price.
 		out.append(
-			"  [color=#e05050][b]OVERCLOCK ARMED[/b] — bind will force past the limit"
-			+ " and brand the spell UNSTABLE[/color]"
+			"  [color=#%s][b]OVERCLOCK ARMED[/b] — bind will force past the limit"
+			% UITheme.DANGER + " and brand the spell UNSTABLE[/color]"
 		)
 	out.append_array(_preview(mind))
 	if _last_result != "":
 		out.append("")
 		out.append("  " + _last_result)
+	out.append("")
+	out.append(UITheme.muted("[1-9] add/remove   [Enter] bind   [O] overclock"))
+	out.append(UITheme.muted("[Backspace] clear   [B] close"))
 	return out
 
 
@@ -231,12 +275,17 @@ func _preview(mind: MindComponent) -> Array[String]:
 	var compiler := SpellCompilerSystem.new()
 	var result: Dictionary = compiler.compile(_selected, mind)
 	if not result["ok"]:
-		out.append("  [color=#e08f8f]will not compile — %s[/color]" % result["reason"])
+		out.append(
+			"  [color=#%s]will not compile — %s[/color]" % [UITheme.DANGER, result["reason"]]
+		)
 		return out
 	var spell: CompiledSpell = result["spell"]
-	out.append("  [color=#8fe08f]%s[/color]" % spell.describe())
+	out.append("  [color=#%s]%s[/color]  [color=#%s]%s[/color]" % [
+		UITheme.TEXT_PRIMARY, EntityCard.spell_name(spell), UITheme.GOOD, spell.describe()
+	])
 	if spell.was_capped():
 		out.append(
-			"  [color=#e0d08f]WARN: capped — %s[/color]" % ", ".join(spell.caps_applied)
+			"  [color=#%s]WARN: capped — %s[/color]"
+			% [UITheme.WARNING, ", ".join(spell.caps_applied)]
 		)
 	return out

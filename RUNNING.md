@@ -37,7 +37,10 @@ godot res://viewer/Main.tscn
 ```
 
 You spawn in the **generated world**: 500 years of history, a nine-chunk surface village, and
-its inhabitants standing where the history put them. The debug overlay is on by default.
+its inhabitants standing where the history put them. What you see is the **player HUD** (§3b):
+vitals top-left, the running log bottom-left, the keybar bottom-center, your load bottom-right,
+the clock top-right. The debug overlay now boots **hidden** — `F1` summons it. The wireframe
+gizmos boot **off** — `G` summons them.
 
 ### Two scenarios
 
@@ -87,19 +90,20 @@ day, and it is the only place the specific test features in §3 exist.
 | `Shift` + move | **Precision** — 35% speed | For lining up on a ledge edge or a pit lip without overshooting. Full speed is for covering ground. |
 | `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
-| `B` | **Grimoire** — compose a spell | Opens the rune list. `1`-`9` add and remove runes, `Enter` binds, `Backspace` clears, `B` or `Esc` closes. The panel previews the compiled spell live — cost, radius, lifetime, and any cap that fired — and previewing costs nothing. |
+| `B` | **Grimoire** — compose a spell | Opens the rune list. `1`-`9` add and remove runes, `Enter` binds, `O` (or `0`) arms overclock, `Backspace` clears; `B`, `Esc`, or a click outside the panel closes. The panel previews the compiled spell live — cost, radius, lifetime, and any cap that fired — and previewing costs nothing. While it or the pack is open, clicks and `Q` never reach the world: a click-away dismisses, it does not swing. |
 | `Q` | **Cast** the bound spell | Fires whatever the Grimoire last bound, aimed where the cursor points. Refuses out loud if nothing is bound, or if you lack the stamina. Magic costs **stamina**, not mana. |
 | `H` | **DEBUG: fill the chunk with spores** | Toggles. The fast route to the mutation loop; natural spore and toxin zones now generate on dungeon floors -2 and below, so `H` is a convenience, not the only door. About 50 s of standing in it produces a mutation. |
 | `E` | **Use stairs**, or interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
-| *(just point)* | **Identify** — the hover card | Point at anything and a small card names it and gives you the short version: what it is, how it regards you, its health, and any condition worth knowing (`on fire`, `soaked`, `starving`). No key, no panel, no tag vocabulary. This is the **player-facing** readout; `Tab` below is the developer one. The card hides itself whenever the debug panel or the Grimoire wants the pointer. |
+| `I` | **Pack** — what you carry | An auto-sorted list, heaviest first, with the space and load bars and your walking pace once weight bites. Read-only: dropping is not built yet, and the panel says so. `I`, `Esc`, or a click outside closes. |
+| *(just point)* | **Identify** — the hover card | Point at anything and a small card names it and gives you the short version: what it is, how it regards you, its health, and any condition worth knowing (`on fire`, `soaked`, `starving`). No key, no panel, no tag vocabulary. This is the **player-facing** readout; `Tab` below is the developer one. The card hides itself whenever the debug panel, the Grimoire, or the pack wants the pointer. |
 | `Tab` | Inspect — **toggles** | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Tab the **same** target again to clear it; Tab **empty ground** to clear it. Tab a **different** target to switch straight to it, with no clearing press in between. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
 | `K` | **DEBUG: injure yourself** — 25 damage | The only way to reach death in the generated world, which has no pit, no hazard and nothing hostile. Four presses kills you. |
 | `R` | **DEBUG: run the year and respawn** | Only works once dead. Runs the Interregnum and brings in the successor, so the loop can be completed rather than pausing forever. |
-| `F1` | **Cycle overlay page / hide** | LIVE -> CHRONICLE -> FACTIONS -> MAP -> hidden -> LIVE. See below. |
+| `F1` | **Summon the debug overlay / cycle / hide** | Boots hidden. First press shows LIVE, then CHRONICLE -> FACTIONS -> MAP -> hidden. See below. |
 | Drag the header | **Move the debug panel** | Grab the `☰ debug — drag me` bar. Clicks on the panel stay on the panel; they do not swing a weapon at the world behind it. |
-| `G` | Toggle debug gizmos | Wireframe facing arrow, melee arc, interact radius, sight radius. On by default. |
-| `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
+| `G` | Toggle debug gizmos | Wireframe facing arrow, melee arc, interact radius, sight radius. **Off by default** since the HUD landed; the heading nose stays on the body regardless. If an old `debug_config.json` pinned them on, that key was deliberately reset — press `G` once and the new choice persists. |
+| `=` / `-` | UI text bigger / smaller | One knob for every layer: the HUD, the hover card, the pack, the Grimoire, and the debug overlay. Saved immediately, so it survives a restart. |
 | `Esc` | Cancel | Mapped, not yet consumed. |
 
 **The mouse is your steering.** The character turns to face the cursor — watch the yellow nose —
@@ -109,6 +113,31 @@ can circle a target while still facing it. The camera itself never rotates.
 The camera is a fixed-orientation third-person rig with a **deadzone**:
 it does not move at all while you stay within 5 m of its focus point, and outside that it moves
 exactly far enough to put you back on the boundary. It never smooths and never rotates.
+
+### The player HUD (2026-08-02)
+
+Until this pass, hiding the debug overlay meant playing with **no health bar, no stamina, no
+event feedback, and no clock** — every player-facing fact lived inside a developer tool. The
+HUD is the player layer the overlay had been standing in for. It is always on, it never eats a
+click, and everything on it is named by the same `EntityCard` words the hover card uses:
+
+| Where | What | Worth knowing |
+|---|---|---|
+| Top-left | **Health and stamina bars** | Drawn, not text: tick marks every 25 so you can count what a hit cost, a ghost of what you just lost that drains over 0.6 s, and casting **strain as an amber dent** at the right end of the stamina bar — the part of you that is unavailable until you rest. Your conditions (`on fire`, `starving`, `laden`) appear beneath in words. |
+| Bottom-left | **The running log** | The last six things that happened *to you*: damage, refusals, pickups, learned runes, mutations, floor changes. Clock-stamped, colour-coded, and spam-aggregated — ten identical events print once with `(x10)`. The debug feed keeps the machine's full firehose separately. |
+| Bottom-center | **The keybar** | The core keys as slots: `E take / use`, `B grimoire`, `I pack`, `Shift careful`, and `Q` showing the **bound spell by name** — `Fire bolt`, not `On_Cast+Projectile+...`. |
+| Bottom-right | **Your load** | `8.0 / 30 kg`, plus `laden` / `overburdened` once weight actually slows you (ADR-18: below half capacity is free). |
+| Top-right | **The clock** | `Spring 1 06:00 · the surface`, and the floor you are on underground. |
+
+Two visual voices are deliberate: the HUD's **warm parchment** panels are the game talking; the
+debug overlay's **cool monospace** is the machine talking. You always know which layer you are
+reading. Stamina is **teal, not green**, so the health/stamina pair survives colour-blindness;
+every colour is paired with words, position, and numbers regardless.
+
+Config keys (`debug_config.json`, §3): `overlay_visible_on_boot: true` restores the always-on
+overlay for captures and long debug sessions; `gizmos_visible: true` does the same for the
+wireframes. The design record for all of this is
+`docs/ui_information_architecture_and_hud_plan.md`.
 
 ### The reasoner, and why it needs no API key
 
@@ -242,9 +271,15 @@ arena (`godot --scenario=test_arena res://viewer/Main.tscn`) unless marked *worl
 | *world*: boot and read the console | `boot phase pre_warm ~50 ms` and villagers already mid-routine, hungry | The Pre-Warm actually runs; it never did — the counter claimed 100 ticks while zero ran |
 | `godot --headless --scenario=world --soak=600 res://viewer/Main.tscn` | `SOAK_OK — 10 metrics inside their bands` | The ADR-20 soak gate: deterministic metrics against a committed baseline |
 | `F8`, fly somewhere, `F9` | A rat appears at the cursor | The Sprint 1 "free camera + spawn console" debug deliverable, shipped |
-| Point at the rat, the nugget, the spore pile, then at yourself | A card names each one — `Rat / beast / Health ====...... 3/8`, `5 Copper / item`, `Biomass / spore-choked`, `You / Health / Stamina` | The hover card. Identifying a thing no longer requires `Tab` and a component dump, and no raw tag or `MAT_` name reaches the player |
+| Point at the rat, the nugget, the spore pile, then at yourself | A card names each one — `Rat / beast / Health ███░░ 3/8`, `5 Copper / item`, `Biomass / spore-choked`, `You / Health / Stamina` | The hover card. Identifying a thing no longer requires `Tab` and a component dump, and no raw tag or `MAT_` name reaches the player |
 | Set the rat on fire, keep pointing at it | The card gains `on fire` and the health bar shortens and reddens live | The card tracks state rather than snapshotting it on selection |
 | *world*: point at a villager | `Ingrid of Hollowfast / Hauler, Human of Grimhold  indifferent to you` | Villagers have names and a visible standing toward you. `indifferent` turns red and reads `hostile to you` once you have earned it |
+| Boot and press nothing | Health and stamina bars top-left, keybar bottom-center, clock top-right — and NO debug panel | The player HUD (§3b). Playing no longer requires the developer firehose, which now boots hidden |
+| `K` once, watch the health bar | It drops 25, and a pale ghost of the lost span drains away over half a second; the log prints `you take 25 damage — 75 left` | The ghost bar, and the player log hearing the same event the debug feed does |
+| Swing at empty air (`LMB`) three times | ONE log line: `nothing in reach (x3)` | Refusals reach the player without a debug panel, and the spam aggregator collapses repeats |
+| `B`, bind the fireball, close | The keybar's `Q` slot reads `Fire bolt` | Compiled spells have player names; the rune-list id never reaches the screen |
+| `E` the nugget, then `I` | The pack lists `5 Copper` with its mass and litres, the space and load bars move | The inventory was real since Sprint 1; now it is visible |
+| Cast until strain accrues, watch the stamina bar | An amber dent grows at the bar's right end and the ceiling number falls | Strain is temporary damage to MAX stamina, drawn as exactly that |
 
 Caravans run between factions whose mutual score reaches the TRADE band (40+); organic pairs are
 rare in a young world, so the caravan path is proven by `tests/test_social_system.gd` rather
@@ -343,7 +378,20 @@ smaller and different.
   check exists; the items do not).
 - **`Arcane_Burn` and `Bleeding` cannot be cured.** The trauma tags work — crippled rest — but
   the "advanced medical crafting" that clears them belongs to the crafting sprint.
-- **No respawn UI, no inventory screen.** Unchanged.
+- **No respawn UI.** Death still reads from the log lines alone.
+- **The pack is read-only.** `I` shows what you carry; nothing can be dropped, equipped, or
+  consumed from it, because no DROP/EQUIP/CONSUME intent exists in the ECS yet. The spec's
+  body slots (Head/Chest/Back/Belt), fluid containers, and quick-belt buckets come with
+  equipment itself.
+- **No examine tier, no Tactical Lens.** The hover card is the whole player examination path;
+  the insight-gated dossier (ui_ux spec §2) and the `Tab`-as-Lens design are the next UI
+  increment. `Tab` remains a developer tool.
+- **No settings screen.** Key remapping, colour-blind filters, motion sliders, hold-vs-toggle
+  options, and the HUD edit mode (hud spec §1, §4) all wait on it. The InputMap actions exist;
+  the UI to rebind them does not.
+- **No icons, no radial menu, no quick-belt slots 1-9.** The keybar shows keys as text pills;
+  the hold-`Q` bullet-time radial (ui_ux spec §3) is deferred until there is more than one
+  bound spell to choose between.
 - **The hover card identifies, it does not compare.** It answers "what is that" — name, kind,
   standing, health, conditions. It has no icons, no item stats you could weigh one thing against
   another with, and no route to acting on what it names. It also shows only the conditions
@@ -394,7 +442,8 @@ rule, so "walking around" is a real test pass:
 
 ### Reading the debug overlay
 
-Colour is reserved for values measured against a threshold, so it always carries information:
+It boots hidden — `F1` summons it (§3b). Colour is reserved for values measured against a
+threshold, so it always carries information:
 **green** inside budget, **amber** approaching it, **red** over — or, for `handles`, red the
 moment a stale rejection appears, since that counter should never be anything but zero.
 
@@ -574,7 +623,7 @@ godot --headless -s addons/gut/gut_cmdln.gd \
 `tests/invariants/`, `tests/perf/` and `tests/soak/` are silently skipped and the run reports
 green having never opened them.
 
-Expected: **37 scripts, 585 tests, 585 passing**. Under twenty seconds — the world-boot
+Expected: **39 scripts, 619 tests, all passing**. Under twenty seconds — the world-boot
 tests now run a real 100-tick Pre-Warm each, which is the price of the boot being honest.
 
 One file at a time, which is what you want while iterating:
@@ -642,7 +691,15 @@ godot --write-movie /tmp/frames/f.png --fixed-fps 10 --quit-after 40 \
 ```
 
 Godot's movie writer emits a PNG per frame. Open the last one. You should see a grey stone floor,
-dark walls, a cyan player box, a red rat, a gold nugget, a blue puddle, and the overlay.
+dark walls, a cyan player box, a red rat, a gold nugget, a blue puddle, and the HUD (vitals
+top-left, keybar bottom-center).
+
+**One pitfall, hit on 2026-08-02:** the project boots MAXIMIZED (`window/size/mode=2`), and the
+movie writer records at `--resolution` while the canvas lays out at the real window size — so
+frames CROP the bottom and right of what is actually on screen, and edge-anchored UI looks
+clipped when it is not. For faithful captures, force the window from a wrapper scene
+(`get_window().mode = Window.MODE_WINDOWED; get_window().size = Vector2i(1280, 720)`) before
+instancing `Main.tscn`.
 
 ## 6. Performance
 
@@ -703,7 +760,7 @@ smoke test, and the full GUT suite on every PR into `dev` or `main`.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `Identifier "X" not declared` on every script | Project never imported | `godot --headless --import` |
-| Tests pass but you know they should not | `-ginclude_subdirs` missing, so subdirectories were skipped | Add the flag; check the reported script count is 14 |
+| Tests pass but you know they should not | `-ginclude_subdirs` missing, so subdirectories were skipped | Add the flag; check the reported script count matches §4 |
 | Boot exits 0 but nothing works | A `_ready()` runtime error still exits 0 | Grep the output for `ECS_BOOT_OK`; its absence is the failure signal |
 | Grey void, no floor or walls | `TerrainView` missing from `Main.tscn` | Run `test_viewer_visibility.gd` |
 | Player invisible | `World._spawn_player` did not emit `entity_created` | Same test |

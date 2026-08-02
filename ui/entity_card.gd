@@ -64,15 +64,37 @@ const STATUS_WORDS: Dictionary = {
 }
 
 const STATUS_COLOURS: Dictionary = {
-	ECSEnums.RelationshipStatus.WAR: PanelFormat.BAD,
-	ECSEnums.RelationshipStatus.NEUTRAL: PanelFormat.MUTED,
-	ECSEnums.RelationshipStatus.TRADE: PanelFormat.GOOD,
-	ECSEnums.RelationshipStatus.ALLIED: PanelFormat.GOOD,
+	ECSEnums.RelationshipStatus.WAR: UITheme.DANGER,
+	ECSEnums.RelationshipStatus.NEUTRAL: UITheme.TEXT_MUTED,
+	ECSEnums.RelationshipStatus.TRADE: UITheme.GOOD,
+	ECSEnums.RelationshipStatus.ALLIED: UITheme.GOOD,
 }
+
+## Player words for what a compiled spell throws, looked up from its payload tags in order.
+const SPELL_PAYLOAD_WORDS: Dictionary = {
+	&"Burning": "fire",
+	&"Wet": "water",
+	&"Spores": "spore",
+	&"Filth": "filth",
+}
+
+## Player words for how a compiled spell moves.
+const SPELL_SHAPE_WORDS: Dictionary = {
+	RuneLibrary.SHAPE_PROJECTILE: "bolt",
+	RuneLibrary.SHAPE_AURA: "aura",
+	RuneLibrary.SHAPE_CONE: "wave",
+	RuneLibrary.SHAPE_SELF: "burst",
+}
+
+## Last known titles, keyed by FULL HANDLE, for naming things that no longer exist — a stack
+## destroyed by a pickup merge, a corpse that burned away. Bounded; oldest entry evicted.
+const MAX_REMEMBERED_TITLES: int = 256
 
 ## Below this fraction of max health, the health figure turns red rather than green.
 const HURT_FRACTION: float = 0.35
 const WOUNDED_FRACTION: float = 0.75
+
+static var _remembered_titles: Dictionary = {}
 
 
 ## The headline. One short noun phrase, never an id.
@@ -161,7 +183,7 @@ static func standing(row: int) -> Dictionary:
 	var status: ECSEnums.RelationshipStatus = ReputationSystem.status_for(score)
 	return {
 		"text": String(STATUS_WORDS.get(status, "indifferent to you")),
-		"colour": String(STATUS_COLOURS.get(status, PanelFormat.MUTED)),
+		"colour": String(STATUS_COLOURS.get(status, UITheme.TEXT_MUTED)),
 		"score": score,
 	}
 
@@ -188,13 +210,51 @@ static func facts(row: int) -> Array[String]:
 ## The colour a health figure should take, so "nearly dead" is visible without reading numbers.
 static func vital_colour(value: float, maximum: float) -> String:
 	if maximum <= 0.0:
-		return PanelFormat.MUTED
+		return UITheme.TEXT_MUTED
 	var fraction: float = value / maximum
 	if fraction <= HURT_FRACTION:
-		return PanelFormat.BAD
+		return UITheme.DANGER
 	if fraction <= WOUNDED_FRACTION:
-		return PanelFormat.WARN
-	return PanelFormat.GOOD
+		return UITheme.WARNING
+	return UITheme.GOOD
+
+
+## `title`, but works for the dead too. The interesting events are exactly the ones that end an
+## entity — a merged stack, a burned corpse — so the last known name is remembered per HANDLE
+## and returned once the entity is gone. Handle-keyed, never row-keyed: rows are recycled, and
+## a row-keyed cache once attributed deaths to whatever now occupied the slot.
+static func title_or_last(entity: int) -> String:
+	var row: int = ECSManager.resolve(entity)
+	if row < 0:
+		return _remembered_titles.get(entity, "<gone>")
+	var name: String = title(row)
+	if _remembered_titles.size() >= MAX_REMEMBERED_TITLES:
+		_remembered_titles.erase(_remembered_titles.keys()[0])
+	_remembered_titles[entity] = name
+	return name
+
+
+## A compiled spell in the player's words. The id is the rune list joined with `+`, which is an
+## implementation detail wearing a name badge — "Fire bolt" is what the keybar and the feed say.
+static func spell_name(spell: CompiledSpell) -> String:
+	var payload: String = ""
+	for tag in spell.applies_tags:
+		if SPELL_PAYLOAD_WORDS.has(tag):
+			payload = String(SPELL_PAYLOAD_WORDS[tag])
+			break
+	if payload == "":
+		if spell.removes_tags.has(&"Wet"):
+			payload = "drying"
+		elif spell.energy_j > 0.0:
+			payload = "scalding"
+		elif spell.energy_j < 0.0:
+			payload = "chilling"
+		else:
+			payload = "arcane"
+	var name: String = "%s %s" % [payload, String(SPELL_SHAPE_WORDS.get(spell.shape, "spell"))]
+	if spell.unstable:
+		name = "unstable " + name
+	return name.substr(0, 1).to_upper() + name.substr(1)
 
 
 static func _is_corpse(row: int) -> bool:
