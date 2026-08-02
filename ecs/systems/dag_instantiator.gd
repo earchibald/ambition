@@ -130,6 +130,7 @@ func _spawn_citizen(
 	ECSManager.add_component_bit(row, ComponentMask.BOUNDS)
 
 	var body := BodyComponent.new()
+	body.species = &"SPC_CITIZEN"
 	body.strength = 8.0
 	body.structural_toughness = 1.0
 	ECSManager.bodies[row] = body

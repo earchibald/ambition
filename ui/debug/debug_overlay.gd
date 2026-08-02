@@ -23,6 +23,10 @@ const FEED_CAPACITY: int = 8
 ## enough of the world visible that the overlay never becomes the whole screen.
 const MAX_PANEL_SCREEN_FRACTION: float = 0.8
 
+## The last-known-name cache is keyed by handle, so unlike the old row-keyed version it does not
+## self-limit to the row count. Bounded here instead: it only has to outlive the feed above it.
+const MAX_REMEMBERED_NAMES: int = 256
+
 var _panel: PanelContainer = null
 var _header: Label = null
 var _scroll: ScrollContainer = null
@@ -591,56 +595,27 @@ func _on_changed_floor(from_floor: int, to_floor: int) -> void:
 ## A stack that merges on pickup is destroyed inside the operation that reports it, so resolving
 ## the handle afterwards yields nothing and the log read "you picked up <gone>". The last known
 ## name is the honest answer.
+## KEYED BY THE FULL HANDLE, not the row. Rows are recycled — `allocate_entity` pops straight off
+## `_free_indices` — so a row-keyed cache answered a question about a dead entity with the name of
+## whatever now occupies its slot, and the feed attributed deaths to the wrong object.
 func _name_of(entity: int) -> String:
 	var row: int = ECSManager.resolve(entity)
 	if row < 0:
-		return _remembered_names.get(EH.index_of(entity), "<gone>")
-	var name: String = _describe(row)
-	_remembered_names[row] = name
+		return _remembered_names.get(entity, "<gone>")
+	# One naming truth: the feed calls things exactly what the hover card calls them.
+	var name: String = EntityCard.title(row)
+	if _remembered_names.size() >= MAX_REMEMBERED_NAMES:
+		_remembered_names.erase(_remembered_names.keys()[0])
+	_remembered_names[entity] = name
 	return name
 
 
-## What a thing IS, in words. Material and count first for items, because "618 x MAT_CLOTH" is
-## the answer to "what is this" and a component list is not.
+## What a thing IS, in words. Delegated to `EntityCard` so the inspector header, the event feed
+## and the hover card cannot drift apart — three names for one object is how "you picked up
+## Item #2 / you picked up <gone>" happened. The debug-only detail (the raw handle) is appended
+## by the caller, not baked in here.
 func _label_for(row: int) -> String:
-	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
-	if chemistry != null and chemistry.active_tags.has(&"Corpse"):
-		return "corpse"
-	if row == 0:
-		return "you"
-
-	var policy: MaterializationComponent = ECSManager.materializations.get(row)
-	if policy != null and policy.item_class == &"Citizen":
-		return "villager"
-	if ECSManager.has_components(row, ComponentMask.FACTION_CORE):
-		return "faction ledger"
-	if ECSManager.bodies.has(row):
-		return "creature"
-	return _describe_stack(row, policy)
-
-
-## Items read as "618 x MAT_CLOTH (Commodity)" — the count and the material ARE the answer to
-## "what is this", where a component list is not.
-func _describe_stack(row: int, policy: MaterializationComponent) -> String:
-	var physical: PhysicalPropertyComponent = ECSManager.physicals.get(row)
-	var composition: MaterialCompositionComponent = ECSManager.materials.get(row)
-	if physical == null or composition == null:
-		return "object"
-	var kind: String = ""
-	if policy != null and policy.item_class != &"":
-		kind = " (%s)" % policy.item_class
-	return "%d x %s%s" % [physical.quantity, composition.dominant_material(), kind]
-
-
-func _describe(row: int) -> String:
-	if row == 0:
-		return "you"
-	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
-	if chemistry != null and chemistry.active_tags.has(&"Corpse"):
-		return "corpse #%d" % row
-	if ECSManager.bodies.has(row):
-		return "creature #%d" % row
-	return "item #%d" % row
+	return EntityCard.title(row)
 
 
 ## Selects an entity for inspection, or clears with a negative row. Called by the input bridge

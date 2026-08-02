@@ -5,6 +5,18 @@
     `feature/sprint3-world-inspector` (PR #7), off `dev`. **PRs #7, #8 and #9 are still OPEN
     and UNMERGED** — await human review.
 
+*   **LAST CHANGE: the player-facing hover card (2026-08-01). 602 tests across 38 scripts,
+    gdlint clean.** Point at anything and `ui/hover_card.gd` names it — no key, no panel, no tag
+    vocabulary. Words come from `ui/entity_card.gd`, which is pure, static and row-only so a
+    headless test asserts every line. Three things changed underneath it: `BodyComponent.species`
+    now exists (`spawn_creature` took a species, branched on it and threw it away, so every
+    animal displayed as "creature"); `DebugOverlay._label_for`/`_name_of` delegate to
+    `EntityCard` so the feed, the inspector header and the card cannot drift apart; and
+    `_remembered_names` is keyed by HANDLE rather than row, which fixes a real misattribution —
+    rows are recycled, so the feed could name a death after whatever now occupied the slot.
+    **Known gap this did NOT close:** entities still all render as coloured boxes, so telling
+    things apart *without* pointing at them is unsolved. Declared in RUNNING.md.
+
 *   **THE SPRINTS 1–4 REMEDIATION PASS IS COMPLETE (2026-08-01). 585 tests across 37 scripts,
     gdlint clean, soak gate green, 27/27 mutations killed.** Four audit sweeps (Sprints 1–2
     spec-vs-code, Sprint 3/3.5 beyond §4b, Sprint 4 beyond §6, and a dead-symbol sweep over

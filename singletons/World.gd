@@ -367,6 +367,7 @@ func spawn_creature(position: Vector3, species: StringName = &"SPC_CORPSE_RAT") 
 	ECSManager.add_component_bit(row, ComponentMask.BOUNDS)
 
 	var body := BodyComponent.new()
+	body.species = species
 	body.max_health = 8.0 if is_rat else 100.0
 	body.health = body.max_health
 	body.strength = 2.0 if is_rat else 10.0

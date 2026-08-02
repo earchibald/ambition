@@ -2,6 +2,12 @@
 class_name BodyComponent
 extends RefCounted
 
+## What KIND of body this is, e.g. `SPC_CORPSE_RAT`. `World.spawn_creature` took a species,
+## branched on it to pick stats, and then discarded it — so nothing downstream could tell a rat
+## from a villager and every animal in the build displayed as "creature". Kept so `EntityCard`
+## can name what the player is looking at.
+var species: StringName = &""
+
 var max_health: float = 100.0
 var health: float = 100.0
 var stamina: float = 100.0

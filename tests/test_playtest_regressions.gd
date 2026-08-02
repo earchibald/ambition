@@ -432,8 +432,11 @@ func test_the_inspector_says_what_a_thing_is() -> void:
 	)
 	var label: String = overlay._label_for(ECSManager.resolve(pile))
 	assert_string_contains(label, "618", "the label counts the pile")
-	assert_string_contains(label, "MAT_IRON", "and names the material")
-	assert_eq(overlay._label_for(_player_row), "you", "and knows who you are")
+	# "Iron", NOT "MAT_IRON". The storage prefix is an implementation detail the player never
+	# asked about, and the raw enum name was itself reported from play as unreadable.
+	assert_string_contains(label, "Iron", "and names the material")
+	assert_false(label.contains("MAT_"), "without leaking the storage prefix")
+	assert_eq(overlay._label_for(_player_row), "You", "and knows who you are")
 
 
 ## Movement speed is a FEEL number, tuned by playing rather than by realism. 4.0 m/s is a real

@@ -91,6 +91,7 @@ day, and it is the only place the specific test features in §3 exist.
 | `Q` | **Cast** the bound spell | Fires whatever the Grimoire last bound, aimed where the cursor points. Refuses out loud if nothing is bound, or if you lack the stamina. Magic costs **stamina**, not mana. |
 | `H` | **DEBUG: fill the chunk with spores** | Toggles. The fast route to the mutation loop; natural spore and toxin zones now generate on dungeon floors -2 and below, so `H` is a convenience, not the only door. About 50 s of standing in it produces a mutation. |
 | `E` | **Use stairs**, or interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
+| *(just point)* | **Identify** — the hover card | Point at anything and a small card names it and gives you the short version: what it is, how it regards you, its health, and any condition worth knowing (`on fire`, `soaked`, `starving`). No key, no panel, no tag vocabulary. This is the **player-facing** readout; `Tab` below is the developer one. The card hides itself whenever the debug panel or the Grimoire wants the pointer. |
 | `Tab` | Inspect — **toggles** | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Tab the **same** target again to clear it; Tab **empty ground** to clear it. Tab a **different** target to switch straight to it, with no clearing press in between. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
 | `K` | **DEBUG: injure yourself** — 25 damage | The only way to reach death in the generated world, which has no pit, no hazard and nothing hostile. Four presses kills you. |
@@ -241,6 +242,9 @@ arena (`godot --scenario=test_arena res://viewer/Main.tscn`) unless marked *worl
 | *world*: boot and read the console | `boot phase pre_warm ~50 ms` and villagers already mid-routine, hungry | The Pre-Warm actually runs; it never did — the counter claimed 100 ticks while zero ran |
 | `godot --headless --scenario=world --soak=600 res://viewer/Main.tscn` | `SOAK_OK — 10 metrics inside their bands` | The ADR-20 soak gate: deterministic metrics against a committed baseline |
 | `F8`, fly somewhere, `F9` | A rat appears at the cursor | The Sprint 1 "free camera + spawn console" debug deliverable, shipped |
+| Point at the rat, the nugget, the spore pile, then at yourself | A card names each one — `Rat / beast / Health ====...... 3/8`, `5 Copper / item`, `Biomass / spore-choked`, `You / Health / Stamina` | The hover card. Identifying a thing no longer requires `Tab` and a component dump, and no raw tag or `MAT_` name reaches the player |
+| Set the rat on fire, keep pointing at it | The card gains `on fire` and the health bar shortens and reddens live | The card tracks state rather than snapshotting it on selection |
+| *world*: point at a villager | `Ingrid of Hollowfast / Hauler, Human of Grimhold  indifferent to you` | Villagers have names and a visible standing toward you. `indifferent` turns red and reads `hostile to you` once you have earned it |
 
 Caravans run between factions whose mutual score reaches the TRADE band (40+); organic pairs are
 rare in a young world, so the caravan path is proven by `tests/test_social_system.gd` rather
@@ -340,6 +344,16 @@ smaller and different.
 - **`Arcane_Burn` and `Bleeding` cannot be cured.** The trauma tags work — crippled rest — but
   the "advanced medical crafting" that clears them belongs to the crafting sprint.
 - **No respawn UI, no inventory screen.** Unchanged.
+- **The hover card identifies, it does not compare.** It answers "what is that" — name, kind,
+  standing, health, conditions. It has no icons, no item stats you could weigh one thing against
+  another with, and no route to acting on what it names. It also shows only the conditions
+  somebody wrote a player-facing word for (`EntityCard.CONDITION_WORDS`); a tag added later is
+  invisible there until it gets a word, which is deliberate — the alternative is the raw tag
+  dump that made the playfield unreadable in the first place.
+- **Entities still all look alike on the playfield.** The card fixes *identification*; it does
+  not fix *discrimination at a glance*. `ViewManager` still draws every entity as a coloured box
+  with no silhouette, icon, or outline, so telling a rat from a villager from a nugget without
+  pointing at it remains unsolved.
 
 **Infrastructure debts, on the record**
 
