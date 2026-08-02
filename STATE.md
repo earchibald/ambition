@@ -1,9 +1,14 @@
 # Agent Handoff State
 
-*   **Current Branch:** `fix/sprints1-4-remediation`, stacked on
-    `feature/sprint4-the-crucible` (PR #9), on `feature/sprint3.5-body-politic` (PR #8), on
-    `feature/sprint3-world-inspector` (PR #7), off `dev`. **PRs #7, #8 and #9 are still OPEN
-    and UNMERGED** — await human review.
+*   **Current Branch:** `dev`. **THE WHOLE SPRINT 3-4 STACK IS MERGED (2026-08-02), on the
+    owner's explicit instruction** ("merge it all, i'd rather fix things later than get them
+    tangled up"): PR #7 (world inspector), #8 (Sprint 3.5), and #10 (Sprint 4 + the Sprints 1-4
+    remediation + the player UI pass) are merged into `dev`; all feature branches deleted.
+    PR #9 shows CLOSED, not merged — GitHub closed it when its base branch was deleted — but
+    every commit in it landed through #10's ancestry (verified with `git merge-base
+    --is-ancestor`; noted on the PR). Post-merge `dev` verified locally: 619 tests / 39
+    scripts green, gdlint clean, world scenario prints `ECS_BOOT_OK`. `main` is untouched, per
+    the standing rule. Next feature work: branch off `dev` as usual.
 
 *   **LAST CHANGE: THE PLAYER UI PASS (2026-08-02). 619 tests across 39 scripts, gdlint clean,
     both scenarios frame-verified, and two subagent beauty reviews (genre + accessibility)
@@ -222,12 +227,13 @@
     across boots; and Sprint 1's collision could not cross a chunk seam at all.
     STILL UNPLAYED BY A HUMAN in the world scenario — frames inspected only.
 
-*   **Active Goal:** The player UI pass and the Sprints 1–4 remediation are implemented,
-    documented and self-audited on this branch. Await human review of PRs #7/#8/#9, then open
-    the remediation+UI PR stacked on #9 (or fold it into #9 if the owner prefers). The next UI
-    increment, in order of declared intent: the examine tier (pinned insight-gated card), DROP
-    intent + an actionable pack, the settings screen (remapping + accessibility), quick-belt
-    slots, and the `B`→`G` Grimoire key reconciliation (decision #4 in the HUD plan).
+*   **Active Goal:** Everything through the player UI pass is merged into `dev` and verified.
+    Nothing is in flight. The next UI increment, in order of declared intent: the examine tier
+    (pinned insight-gated card), DROP intent + an actionable pack, the settings screen
+    (remapping + accessibility), quick-belt slots, and the `B`→`G` Grimoire key reconciliation
+    (decision #4 in the HUD plan). The big engineering debt remains the ADR-10 perf gap
+    (Rust/GDExtension port of the CA and spatial hash). Branch off `dev` for whichever comes
+    next.
 
 *   **START HERE IF YOU ARE NEW:** `RUNNING.md`. It has the exact commands to run the game, the
     control list, what every object in the test arena is there to test, how to read the debug
