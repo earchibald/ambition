@@ -1,0 +1,445 @@
+## The master clock. Drives every ECS tick class from Godot's fixed physics step, and owns the
+## system registry.
+##
+## MUST `extends Node` to be autoloadable. Loaded LAST so its `_physics_process` runs after the
+## state it drives exists.
+##
+## TICKS ARE COUNTED IN PHYSICS FRAMES, NOT ACCUMULATED FLOATS (ADR-9). `_physics_process` delta
+## is exactly 1/60 in Godot, so a frame counter is exact, testable, and cannot drift or
+## double-fire. The float-accumulator version in the original scaffolding could do both.
+##
+## Dropped ticks are DELIBERATE. If the process stalls we do not run catch-up ticks, because a
+## catch-up burst is how a hitch becomes a death spiral.
+##
+## ADR-20 forbids simulation code in `ecs/` from reading wall-clock time, so the soak harness is
+## reproducible from RNG seeds alone. The `Time.get_ticks_usec()` calls here are PROFILING ONLY:
+## they feed observability counters, never gate a branch that changes the world, and never leave
+## this file. Cadence comes from the frame counter, not from elapsed time.
+extends Node
+
+## ADR-9: strategy re-evaluation is every 24x7 macro ticks, or crisis-triggered.
+const HOURS_PER_STRATEGY_REVIEW: int = 168
+
+## A faction under attack may think again this often, so a long war is not a request per hour.
+const CRISIS_COOLDOWN_HOURS: int = 24
+
+## Bullet-time scales the per-tick delta used for integration. It NEVER changes the tick rate,
+## which ADR-9 fixes at 60 Hz.
+var time_scale: float = 1.0
+var paused: bool = false
+
+var micro_frames: int = 0
+var sim_ticks: int = 0
+var macro_ticks: int = 0
+var fluid_ticks: int = 0
+
+# --- Observability: last measured duration per tick class, in milliseconds. ---
+var last_micro_ms: float = 0.0
+var last_sim_ms: float = 0.0
+var last_macro_ms: float = 0.0
+var last_fluid_ms: float = 0.0
+var last_spatial_ms: float = 0.0
+
+# --- Systems, registered in tick order. ---
+var spatial_hash: SpatialHash = SpatialHash.new()
+var collision: CollisionResolveSystem = CollisionResolveSystem.new()
+var picking: PickSystem = PickSystem.new()
+var fluids: FluidDynamicsSystem = FluidDynamicsSystem.new()
+var thermodynamics: ThermodynamicsSystem = ThermodynamicsSystem.new()
+var reactions: ReactionSystem = ReactionSystem.new()
+var ephemerals: EphemeralSystem = EphemeralSystem.new()
+var perception: PerceptionSystem = PerceptionSystem.new()
+var metabolism: MetabolismSystem = MetabolismSystem.new()
+var jobs: JobResolutionSystem = JobResolutionSystem.new()
+var combat: ActionResolutionSystem = ActionResolutionSystem.new()
+var spoilage: SpoilageSystem = SpoilageSystem.new()
+var lod: LoDSystem = LoDSystem.new()
+var inventory: InventorySystem = InventorySystem.new()
+var streaming: ChunkStreamingSystem = ChunkStreamingSystem.new()
+var economy: GrayBoxSystem = GrayBoxSystem.new()
+var locomotion: LocomotionSystem = LocomotionSystem.new()
+var planner: FactionPlanner = FactionPlanner.new()
+var reasoning: ReasoningQueue = ReasoningQueue.new()
+var llm: LLMResolutionSystem = LLMResolutionSystem.new()
+var death_loop: DeathLoopSystem = DeathLoopSystem.new()
+var reputation: ReputationSystem = ReputationSystem.new()
+var social: SocialSystem = SocialSystem.new()
+var mutation: MutationSystem = MutationSystem.new()
+var spells: SpellCompilerSystem = SpellCompilerSystem.new()
+
+## faction_id -> the hour it last joined the reasoning queue. Private, so it lives last.
+var _last_thought: Dictionary = {}
+
+
+func _ready() -> void:
+	# A remote reasoner ONLY when an endpoint is configured. Otherwise the heuristic one, which
+	# per the amended ADR-5 is a shipped mode rather than a fallback: it is what runs in CI, what
+	# runs for a contributor with no API key, and what runs for a player with no internet.
+	var remote: OpenAICompatibleProvider = OpenAICompatibleProvider.create_if_configured(self)
+	if remote != null:
+		reasoning.provider = remote
+	_connect_event_trace()
+
+
+## The structured trace records the OUTCOME bus (debugging spec §3). Wired here — the one place
+## with a view of every signal — and gated inside `EventTrace.record`, so a disabled trace costs
+## a boolean per event. The dump-on-death is the spec's dump-on-failure, at the granularity the
+## build has: the run ending IS the failure a play session traces toward.
+func _connect_event_trace() -> void:
+	ECSEvents.entity_died.connect(func(entity: int, cause: StringName) -> void:
+		EventTrace.record(&"combat", &"died", entity, String(cause)))
+	ECSEvents.entity_damaged.connect(
+		func(entity: int, amount: float, _left: float, cause: StringName) -> void:
+			EventTrace.record(&"combat", &"damaged", entity, "%s %.1f" % [cause, amount]))
+	ECSEvents.spell_cast.connect(func(caster: int, spell_id: StringName, _strain: float) -> void:
+		EventTrace.record(&"magic", &"cast", caster, String(spell_id)))
+	ECSEvents.spell_detonated.connect(func(caster: int, spell_id: StringName, _at: Vector3) -> void:
+		EventTrace.record(&"magic", &"detonated", caster, String(spell_id)))
+	ECSEvents.entity_mutated.connect(func(entity: int, mutation: StringName) -> void:
+		EventTrace.record(&"mutation", &"mutated", entity, String(mutation)))
+	ECSEvents.faction_decided.connect(
+		func(faction_id: int, objective: String, _say: String) -> void:
+			EventTrace.record(&"reasoning", &"decided", faction_id, objective))
+	ECSEvents.faction_schism.connect(func(parent: int, splinter: int, _count: int) -> void:
+		EventTrace.record(&"social", &"schism", parent, "splinter %d" % splinter))
+	ECSEvents.player_died.connect(func(_corpse: int, _killer: int, generation: int) -> void:
+		EventTrace.record(&"death", &"player_died", 0, "generation %d" % generation)
+		if DebugFlags.event_trace_enabled:
+			print("event trace dumped: %s" % EventTrace.dump_to_file("death")))
+
+
+func _physics_process(delta: float) -> void:
+	if paused or not World.booted:
+		return
+	var scaled_delta: float = delta * time_scale
+	var chunk: ChunkData = World.active_chunk
+	if chunk == null:
+		return
+
+	var micro_start: int = Time.get_ticks_usec()
+	_run_micro_tick(scaled_delta, chunk)
+	last_micro_ms = float(Time.get_ticks_usec() - micro_start) / 1000.0
+	micro_frames += 1
+
+	# Fluids run at 15 Hz, NOT 60 Hz. Measured: 20,000 cell-updates costs ~13 ms on ADR-10's own
+	# M1 reference, which is 164% of the entire 8 ms frame budget on its own.
+	if micro_frames % WorldConstants.FLUID_TICK_EVERY_N_MICRO == 0:
+		var fluid_start: int = Time.get_ticks_usec()
+		fluids.run(chunk)
+		last_fluid_ms = float(Time.get_ticks_usec() - fluid_start) / 1000.0
+		fluid_ticks += 1
+
+	if micro_frames % WorldConstants.SIM_TICK_EVERY_N_MICRO == 0:
+		var sim_start: int = Time.get_ticks_usec()
+		_run_sim_tick(chunk)
+		last_sim_ms = float(Time.get_ticks_usec() - sim_start) / 1000.0
+		sim_ticks += 1
+
+	if micro_frames % WorldConstants.MACRO_TICK_EVERY_N_MICRO == 0:
+		var macro_start: int = Time.get_ticks_usec()
+		_run_macro_tick(chunk)
+		last_macro_ms = float(Time.get_ticks_usec() - macro_start) / 1000.0
+		macro_ticks += 1
+
+	ECSEvents.tick_completed.emit(&"micro", last_micro_ms, collision.movers_processed)
+
+
+## Micro order is load-bearing: intents produce velocity, velocity integrates into position and
+## resolves against geometry, and only THEN is the spatial hash rebuilt — so every query this
+## frame sees post-collision positions.
+func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
+	ECSManager.flush_structural_changes()
+	# Steering first: it writes velocity, and the collision pass below integrates it. Running it
+	# after would leave every NPC one frame behind its own decision.
+	locomotion.run(scaled_delta, World.sampler())
+	_apply_intents(scaled_delta)
+	collision.run(scaled_delta, World.sampler(), spatial_hash)
+	# Geometry decides WHO landed and how fast; the energy model decides what that costs. Falls
+	# and melee therefore share one damage path instead of drifting into two.
+	for landing in collision.landings:
+		var landed_row: int = int(landing["row"])
+		var speed: float = float(landing["speed"])
+		var hurt: float = combat.resolve_fall(landed_row, speed)
+		# Report anything faster than a walking stumble, damage or not. Ordinary steps land
+		# constantly and would drown the feed.
+		if speed >= WorldConstants.REPORTABLE_LANDING_MPS:
+			ECSEvents.entity_landed.emit(ECSManager.handle_of(landed_row), speed, hurt)
+
+	var spatial_start: int = Time.get_ticks_usec()
+	spatial_hash.set_origin(_active_origin(chunk))
+	# FLOOR-FILTERED. Floors stack at the same world X/Z, so an unfiltered 2D hash makes an NPC
+	# upstairs a collision and perception neighbour of the player downstairs.
+	spatial_hash.rebuild(
+		ECSManager.rows_on_floor(ComponentMask.SPATIAL, World.player_chunk_id.z)
+	)
+	last_spatial_ms = float(Time.get_ticks_usec() - spatial_start) / 1000.0
+
+	# CHEMISTRY BEFORE HEAT, and both after the hash rebuild. Reactions need post-collision
+	# positions to decide what is touching what, they release energy into the chunk's air, and
+	# thermodynamics is what carries that air temperature into every body in the chunk. Running
+	# them the other way round costs a frame of latency on every fire.
+	reactions.run(micro_frames, chunk, spatial_hash, combat)
+	# Projectiles need the tile grid to know what a wall is. Handed in per tick rather than held,
+	# because the sampler changes when the player crosses a chunk seam or a floor.
+	ephemerals.sampler = World.sampler()
+	ephemerals.run(scaled_delta, spatial_hash)
+	thermodynamics.run(scaled_delta, chunk)
+
+
+func _run_sim_tick(chunk: ChunkData) -> void:
+	metabolism.run(chunk)
+	jobs.run(sim_ticks)
+	perception.run(chunk, spatial_hash, sim_ticks)
+	# The ecology loop. Runs BEFORE the consequence chain so a mutation gained this tick is seen
+	# this tick rather than next, and so it joins the same witness batch a murder would.
+	mutation.run(_sim_seconds(), chunk)
+	# THE CONSEQUENCE CHAIN, in order and on the Simulation tick. Combat only reports that an act
+	# happened; perception decides who was in a position to see it; reputation turns each witness
+	# into a grievance; gossip carries it to people who were not there. Sprint 4 adds mutation to
+	# the same chain rather than beside it: a defilement the village never saw must not change how
+	# they treat you, for the same reason a murder in a back alley does not.
+	var acts: Array[Dictionary] = combat.witnessed_actions.duplicate()
+	acts.append_array(mutation.take_witnessed_mutations())
+	for act in acts:
+		perception.report_witnessed_act(
+			int(act["subject"]), act["action"], act["location"], chunk, spatial_hash
+		)
+	combat.witnessed_actions.clear()
+	reputation.run(perception)
+	reputation.spread_gossip(spatial_hash)
+	# The consequence chain's LAST link: loyalty, succession, schism, and hostile engagement act
+	# on the relationship states the links above just moved. After reputation, so a grievance
+	# filed this tick can tip a faction to WAR and be answered this tick; before LoD, so a
+	# schism's new macro-entity is seen by the same tick's streaming pass.
+	social.run(
+		spatial_hash,
+		null if World.boot_report == null else World.boot_report.generator,
+		reasoning,
+		combat
+	)
+	lod.run(World.player_chunk_id)
+	# Chunk streaming rides the Simulation tick, not the Micro tick: promoting a chunk spawns
+	# stockpiles and pumps fluid, and doing that 60 times a second would be both wasteful and
+	# visibly stuttery.
+	if World.grid != null:
+		streaming.update_chunk_states(World.player_chunk_id, World.grid)
+	_check_player_death()
+
+
+## Simulated seconds between two Simulation ticks. Derived from the FRAME COUNT, not measured:
+## ADR-9 fixes the Micro tick at 60 Hz and the Simulation tick at every 30th, so this is exact.
+## Bullet-time is included because it scales the delta every other system integrates with, and an
+## exposure clock that ignored it would accrue six times faster than the world it is timing.
+func _sim_seconds() -> float:
+	return (
+		float(WorldConstants.SIM_TICK_EVERY_N_MICRO)
+		/ float(WorldConstants.MICRO_TICK_HZ)
+		* time_scale
+	)
+
+
+## Death is detected on the Simulation tick rather than inside the damage path, so every way of
+## dying — melee, a fall, exposure, a future poison — routes through ONE place. Checking inside
+## each damage source is how a game ends up with three subtly different death handlers.
+func _check_player_death() -> void:
+	if not World.booted:
+		return
+	var row: int = ECSManager.resolve(ECSManager.player_handle())
+	if row < 0:
+		return
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body == null or body.is_alive():
+		return
+	var generator: DAGGenerator = null if World.boot_report == null else World.boot_report.generator
+	death_loop.on_player_death(EH.INVALID, generator)
+	# The run is over. The Interregnum and the successor are a deliberate, separate step: the
+	# player should see their corpse and their killer before the world skips a year.
+	paused = true
+
+
+## Advances the GameClock by one in-game hour (ADR-9).
+func _run_macro_tick(chunk: ChunkData) -> void:
+	GameClock.advance_hour()
+	spoilage.run(chunk)
+	# The off-screen economy. Ledger integers only — it may not create a single entity.
+	economy.run()
+	# Trade caravans ride the Macro tick: dispatch is an hour-scale decision, and the walk
+	# between dispatch and arrival is where interception lives.
+	social.run_trade(World.grid, inventory)
+	_think()
+	_replan_factions()
+
+
+## Leaders think, one at a time, on the Macro tick.
+##
+## WEEKLY, NOT HOURLY. ADR-9 specifies strategy re-evaluation every 168 macro ticks "or
+## crisis-triggered", and this submitted every faction every hour — 168x the specified rate. The
+## comment that used to sit here argued it was cheap because the queue de-duplicates, which is
+## true of memory and false of everything else: with a remote provider it burns a 200-call
+## session budget in a bit over a day of in-game time, and it churns objectives fast enough that
+## no faction ever finishes acting on one.
+##
+## The crisis clause is what keeps weekly cadence from feeling inert. A faction that has just
+## been attacked does not wait six days to react; it thinks now, then falls quiet for
+## CRISIS_COOLDOWN_HOURS so a long siege does not become a request per hour.
+func _think() -> void:
+	var generator: DAGGenerator = null if World.boot_report == null else World.boot_report.generator
+	var hour: int = GameClock.total_hours()
+	var scheduled: bool = hour % HOURS_PER_STRATEGY_REVIEW == 0
+
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[row]
+		var handle: int = ECSManager.handle_of(row)
+		var since: int = hour - int(_last_thought.get(core.faction_id, -CRISIS_COOLDOWN_HOURS))
+		var crisis: bool = (
+			PromptBuilder.was_recently_attacked(core) and since >= CRISIS_COOLDOWN_HOURS
+		)
+		if not scheduled and not crisis:
+			continue
+		# A crisis jumps the line (queue priority, declared gap G-5): a faction under attack must
+		# not think after twenty routine weekly reviews. The bark (review F1) is emitted the
+		# moment the request is accepted, so deliberation is visible before the answer exists.
+		var priority: int = (
+			ReasoningQueue.PRIORITY_CRISIS if crisis else ReasoningQueue.PRIORITY_ROUTINE
+		)
+		if reasoning.submit(handle, priority):
+			_last_thought[core.faction_id] = hour
+			ECSEvents.faction_thinking.emit(core.faction_id, crisis)
+
+	# Pumped EVERY macro tick regardless. The cadence governs who joins the queue, not how fast
+	# the queue drains — a request that waited a week to be made should not wait another to fire.
+	#
+	# AN EMPTY RESPONSE REQUEUES (fallback matrix: "timeout -> maintain current objective AND
+	# requeue next Macro tick"). The resolver's half — keep the plan — shipped in Sprint 3; this
+	# half was asserted in a comment and implemented nowhere, so one failed call cost a faction a
+	# week of thinking. Routine priority: a timeout is not a crisis, and with a remote provider
+	# the retry is bounded by the session budget rather than by hope.
+	reasoning.pump(generator, func(handle: int, response: Dictionary) -> void:
+		llm.resolve(handle, response, generator)
+		if response.is_empty() and ECSManager.is_alive(handle):
+			reasoning.submit(handle, ReasoningQueue.PRIORITY_ROUTINE)
+	)
+
+
+## Every faction re-decides what its people are doing, once an in-game hour.
+##
+## Macro cadence on purpose: an objective is an hour-scale decision, and re-planning at the 2 Hz
+## Simulation rate would fight the job latch and re-path the whole village 120 times an hour.
+func _replan_factions() -> void:
+	if World.grid == null:
+		return
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[row]
+		planner.assign(planner.plan(core.current_objective, core.faction_id, World.grid))
+
+
+## Pops each entity's queued intents and turns them into velocity or an action.
+func _apply_intents(scaled_delta: float) -> void:
+	var rows: PackedInt32Array = ECSManager.query(ComponentMask.POSITION)
+	for i in rows.size():
+		var row: int = rows[i]
+		var queued: Array = ECSManager.take_intents(row)
+		for intent in queued:
+			_apply_intent(row, intent, scaled_delta)
+
+
+func _apply_intent(row: int, intent: ActionIntent, _scaled_delta: float) -> void:
+	match intent.type:
+		ActionIntent.MOVE:
+			# Pressing a key does NOT move the player. It sets ECS velocity, and the mass
+			# divisor is applied here in the ECS, not in the viewer.
+			var speed: float = (
+				WorldConstants.BASE_SPEED_MPS * InventorySystem.speed_multiplier(row)
+			)
+			var direction: Vector3 = intent.vector_data
+			if direction.length() > 1.0:
+				direction = direction.normalized()
+			ECSManager.set_velocity(row, direction * speed)
+		ActionIntent.MELEE:
+			var target_row: int = ECSManager.resolve(intent.target)
+			if target_row >= 0:
+				combat.resolve_melee(row, target_row, intent.vector_data, 1.5)
+		ActionIntent.TAKE:
+			# Report the outcome either way. A pickup that silently fails a volume or tag filter
+			# is indistinguishable from a pickup that was never attempted.
+			var actor: int = ECSManager.handle_of(row)
+			if _try_read(row, intent.target):
+				pass
+			elif inventory.try_insert(row, intent.target):
+				ECSEvents.item_taken.emit(actor, intent.target, &"taken")
+			else:
+				ECSEvents.action_rejected.emit(actor, &"take", inventory.last_rejection)
+		ActionIntent.CAST:
+			combat.resolve_cast(row, intent.name_data, intent.vector_data)
+		ActionIntent.BIND:
+			spells.bind(row, intent.name_list, intent.scalar_data > 0.5)
+		ActionIntent.CONSUME:
+			var need: NeedsComponent = ECSManager.needs.get(row)
+			if need != null:
+				MetabolismSystem.consume_meal(need)
+		_:
+			pass
+
+
+## Interacting with an `Inscribed` object READS it instead of pocketing it (declared gap G-3:
+## no way to learn runes in play). Returns false for everything else so the normal take path
+## runs. Reading is repeatable and idempotent — a lectern is a book, not a consumable.
+func _try_read(reader_row: int, target: int) -> bool:
+	var target_row: int = ECSManager.resolve(target)
+	if target_row < 0:
+		return false
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(target_row)
+	if chemistry == null or not chemistry.has_tag(&"Inscribed"):
+		return false
+	var mind: MindComponent = ECSManager.minds.get(reader_row)
+	var item: LooseItemComponent = ECSManager.loose_items.get(target_row)
+	if mind == null or item == null:
+		return false
+	var learned: Array[StringName] = []
+	for rune_id in item.inscribed_runes:
+		if mind.learn_rune(rune_id):
+			learned.append(rune_id)
+	ECSEvents.runes_learned.emit(ECSManager.handle_of(reader_row), learned)
+	return true
+
+
+## Minimum world corner the spatial grid covers: one chunk out from the player's chunk.
+func _active_origin(chunk: ChunkData) -> Vector3:
+	return Vector3(
+		float(chunk.chunk_id.x - 1) * WorldConstants.CHUNK_SIZE_M,
+		0.0,
+		float(chunk.chunk_id.y - 1) * WorldConstants.CHUNK_SIZE_M
+	)
+
+
+## Aggregated counters for the debug overlay and the ADR-20 soak harness CSV.
+func counters() -> Dictionary:
+	var out: Dictionary = {
+		"micro_frames": micro_frames,
+		"sim_ticks": sim_ticks,
+		"macro_ticks": macro_ticks,
+		"fluid_ticks": fluid_ticks,
+		"last_micro_ms": last_micro_ms,
+		"last_sim_ms": last_sim_ms,
+		"last_macro_ms": last_macro_ms,
+		"last_fluid_ms": last_fluid_ms,
+		"last_spatial_ms": last_spatial_ms,
+		"micro_budget_ms": WorldConstants.MICRO_BUDGET_MS,
+		"over_micro_budget": last_micro_ms > WorldConstants.MICRO_BUDGET_MS,
+		"time_scale": time_scale,
+		"clock": GameClock.to_display_string(),
+	}
+	# EVERY registered system, not a hand-picked subset. Seven Sprint 3 systems — planner,
+	# reasoning, llm, locomotion, death_loop, streaming, economy — were missing from this list,
+	# so the F1 page rendered `0 plans, 0 thoughts, 0 rejected` forever and the entire reasoning
+	# layer looked idle from the only surface built to watch it. The overlay reads keys with
+	# `.get(key, 0)`, which is exactly the API shape that turns an omission here into a plausible
+	# zero instead of an error.
+	for system in [
+		spatial_hash, collision, picking, fluids, thermodynamics, reactions, ephemerals,
+		perception, metabolism, jobs, combat, spoilage, lod, inventory, mutation, reputation,
+		spells, planner, reasoning, llm, locomotion, death_loop, streaming, economy, social
+	]:
+		out.merge(system.counters())
+	out.merge(ECSManager.counters())
+	return out

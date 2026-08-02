@@ -53,7 +53,7 @@ Build the LoDSystem in the ECS. Track Entity 0's current chunk and its Active se
 
 Cohesion Check (The Arrow Fix): Projectiles with a [Kinetic_Ephemeral] tag CANNOT be downgraded to Simulated. If they hit a boundary, instantly run a math-based raycast against abstract chunk data and despawn them. Do not freeze them in mid-air.
 
-Cohesion Check (The Wealth Exploit Fix): When materializing wealth from an abstract ledger to Active, you MUST subtract the value from the ledger. When a chunk downgrades to Simulated, the system MUST count physical items in the [Zone_Stockpile], add them back to the abstract ledger, and delete the physical entities.
+Cohesion Check (The Wealth Exploit Fix): When materializing wealth from an abstract ledger to Active, you MUST subtract the value from the ledger. When a chunk downgrades to Simulated, the system MUST count all faction-owned fungible physical matter in the chunk (stockpile, NPC inventories, owned loose items), add it back to the abstract ledger, and delete those fungible physical entities. Identity-bearing items (equipped gear, artifacts, containers/stashes, caravan cargo) follow `MaterializationComponent.policy` and preserve manifests instead of becoming fungible ledger entries.
 
 Implement the Flood Buffer: When a chunk transitions to Active, read its abstract VolumePools (fluids) and spawn a [Flood_Source] to prevent Cellular Automata CPU spikes.
 Success State: Walking away from a lake prevents water physics from calculating. Walking back and forth across a boundary syncs wealth flawlessly without duplicating a single gold coin.
@@ -63,7 +63,7 @@ Step 5: The Macro-Tick & The Ledger Economy
 The Objective: Prove that the world continues to function when the player isn't looking, without breaking memory.
 Required Implementation:
 
-Hook up the Macro Tick (executing once every 60 real-world seconds).
+Hook up the Macro Tick (executing once every 10 real-world seconds and advancing 1 in-game hour per ADR-9).
 
 Implement the GrayBoxSystem.
 
@@ -81,7 +81,7 @@ History: Execute DAG Generator.
 
 Grid: Execute World Gen (Grid mapping and Spatial Anchors).
 
-Interregnum: (If Player Died): Execute 12-Macro-Tick Meta-Progression time-skip (Requires Grid).
+Interregnum: (If Player Died): Execute the dedicated 12-month coarse interregnum pass (requires Grid). Do not run 12 ordinary hourly Macro ticks.
 
 Pre-Warm: Execute 100-Sim-Tick Pre-Warm. CRITICAL: Items crafted during this phase must skip gravity calculations and strictly snap to [Display_Table] coordinates to prevent Day 0 collision explosions.
 

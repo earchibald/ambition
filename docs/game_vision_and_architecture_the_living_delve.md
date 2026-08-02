@@ -6,7 +6,7 @@ Core Concept: A dungeon crawler where the dungeon is a living, breathing ecosyst
 
 Before the player takes their first step, the world must exist. We will use a Directed Acyclic Graph (DAG) to generate and store history.
 
-The World Gen Tick: We simulate 1,000 years of history in abstract chunks. Nodes represent entities (Kingdoms, Dungeon Floors, Notable Leaders, Artifacts).
+The World Gen Tick: By default we simulate 50 epochs (about 500 years; tunable per seed) of history in abstract chunks. Nodes represent entities (Kingdoms, Dungeon Floors, Notable Leaders, Artifacts).
 
 Events as Edges: Events (Wars, Collapses, Artifact Forging, Migrations) connect these nodes.
 
@@ -22,11 +22,15 @@ The Simulation Tick: Separate the game frame rate from the simulation tick. The 
 
 Level of Detail (LoD) Simulation:
 
-Active Floor (Player Present): High-res simulation. Physics, pathfinding (A*), animation, immediate combat.
+Active Chunk Neighborhood (Player Present): High-res simulation in the ADR-3 Active set
+(3x3 same-floor chunks plus up/down landing chunks). Physics, pathfinding, animation, and
+immediate combat run here.
 
-Adjacent Floors: Medium-res. Movement is calculated node-to-node (Hierarchical Pathfinding). Factions gather resources and fight abstract skirmishes.
+Nearby Simulated Chunks/Routes: Medium-res. Movement is calculated node-to-node on the
+AbstractGraph. Factions gather resources and fight abstract skirmishes.
 
-Distant Floors: Low-res. Entire populations are treated as single integer values. "Goblin population grew by 5%."
+Distant Floors/Factions: Low-res. Entire populations are treated as integer ledgers/counters.
+"Goblin population grew by 5%."
 
 3. The Dungeon Ecology
 
@@ -48,7 +52,10 @@ Prompt Context: "You are Ug, Goblin King of Floor 3. Your population is 45. You 
 
 LLM Output (Structured JSON): The LLM decides on a high-level goal and an emotional state. { "Goal": "RAID_FLOOR_4_FOR_FOOD", "Emotion": "VENGEFUL", "Target": "FUNGAL_LORD" }
 
-The Planner (Engine AI): Godot takes this JSON and feeds it to traditional game AI (like GOAP - Goal Oriented Action Planning). The engine translates "RAID_FLOOR_4" into actual pathfinding, assigning squads, and moving units.
+The Planner (Engine AI): Godot takes this JSON and feeds it to the ECS JobTemplate planner.
+The engine translates "RAID_FLOOR_4" into actual pathfinding, assigning squads, and moving
+units. A more expensive search planner may replace the template planner later behind the same
+interface, but it is not the current implementation target.
 
 The Magic: The player intercepts a goblin raiding party on the stairs. They aren't there because of a random spawn trigger; they are there because Ug the LLM-Agent got mad and thirsty.
 

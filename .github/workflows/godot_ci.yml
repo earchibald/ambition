@@ -1,55 +1,133 @@
 name: Godot ECS CI Pipeline
 
+# Every guard in this file exists because the naive version was VERIFIED to pass while doing
+# nothing. See docs/ADVERSARIAL_REVIEW_GESTALT_2026-07-31.md F9-F11 and
+# docs/sprint_0_technical_scaffolding.md R1-R7.
+#
+# SECURITY: this workflow interpolates NO github.event.* values into any run: block, so it is
+# not exposed to workflow-injection via issue/PR/commit text. Keep it that way: if you ever
+# need such a value, pass it through env: and quote it, never inline it into a shell command.
+
 on:
   pull_request:
     branches: [ "dev", "main" ]
   push:
     branches: [ "dev", "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   test_and_lint:
     runs-on: ubuntu-latest
     container:
-      image: barichello/godot-ci:4.7.1 # Canonical Godot version — keep in sync with project.godot + README
-    
+      # ADR-15. Keep in sync with project.godot config/features and README section 5.
+      image: barichello/godot-ci:4.7.1
+
+    defaults:
+      run:
+        # R8: this image has NO bash. Actions silently falls back to `sh -e {0}`, which is dash,
+        # and dash rejects `set -o pipefail` with "Illegal option -o pipefail" — killing the very
+        # first step before it runs anything. Naming the shell makes that explicit rather than
+        # implicit, so nobody re-adds a bashism and rediscovers this.
+        #
+        # Consequences, both handled below: no `pipefail`, so never let a command that must fail
+        # the build sit on the left of a pipe; and no bash arrays or `[[ ]]`.
+        shell: sh
+
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
-          submodules: recursive # CRITICAL for GUT framework
+          submodules: recursive # GUT is vendored, but keep this in case that changes.
 
       - name: GDScript Linter
         run: |
-          apt-get update && apt-get install -y python3-pip
-          # Pin gdtoolkit so lint rules don't change under us and break CI nondeterministically.
-          pip3 install "gdtoolkit==4.3.*"
-          # Lint FIRST-PARTY code only. Never lint addons/ (third-party GUT is not gdlint-clean).
-          # Guard each dir so CI passes before the Sprint 0 folders exist.
+          set -eu
+          # R1: this image ships NO python3 and NO pip3 at all, so install them first.
+          apt-get update -qq
+          apt-get install -y -qq python3-pip
+          # R1: the base is Ubuntu 24.04, which is PEP-668 externally-managed. A bare
+          # `pip3 install` fails with "error: externally-managed-environment". Verified.
+          # R2: pin 4.5.* - the old 4.3.* pin predates Godot 4.5+ syntax and dies on @abstract.
+          pip3 install --break-system-packages -q "gdtoolkit==4.5.*"
+          gdlint --version
+          # R3: do NOT use `ls "$d"/**/*.gd`. globstar is off in Actions so ** degrades to *,
+          # and `ls` returns non-zero if ANY pattern misses, short-circuiting the &&. That made
+          # gdlint silently skip every directory. Verified against the real mandated tree.
+          # Lint first-party dirs ONLY; addons/ is third-party and not gdlint-clean.
           for d in ecs singletons ui viewer tests; do
-            if [ -d "$d" ] && ls "$d"/**/*.gd "$d"/*.gd >/dev/null 2>&1; then
+            if [ -d "$d" ] && [ -n "$(find "$d" -name '*.gd' -print -quit)" ]; then
+              echo "--- gdlint $d ---"
               gdlint "$d"
+            else
+              echo "--- skipping $d (no .gd files) ---"
             fi
           done
 
-      - name: Pre-Import Assets (CRITICAL ANTI-HANG FIX)
+      - name: Import Project
         run: |
-          godot --headless --editor --quit
+          set -eu
+          # R4: `class_name` globals and cross-file enums do NOT resolve until the project has
+          # been imported. Running a script on a fresh checkout dies with
+          # `Identifier "X" not declared`. GUT's own error text names this exact flag.
+          godot --headless --import
 
-      - name: Boot Smoke Test (main scene loads headlessly)
+      - name: Boot Smoke Test
         run: |
-          # "main must always run flawlessly" — verify the project actually boots.
-          # Guarded until Sprint 0 creates the main scene, so CI is green pre-bootstrap.
-          if [ -f viewer/Main.tscn ]; then
-            timeout 30 godot --headless --quit-after 120 res://viewer/Main.tscn
-          else
-            echo "viewer/Main.tscn not present yet; skipping boot smoke (pre-Sprint-0)."
+          set -eu
+          # R6: a Main.tscn whose _ready() throws a hard runtime error STILL EXITS 0, so a bare
+          # invocation here cannot fail. Assert the sentinel and reject any error output.
+          #
+          # Redirect rather than `| tee`: with no pipefail available (see R8 above) a pipe would
+          # silently discard godot's exit status. `|| true` is deliberate — the sentinel and
+          # error greps below are the real gate, and a non-zero exit here must still let them
+          # run so the log gets printed and the failure is diagnosable.
+          timeout 60 godot --headless --quit-after 120 res://viewer/Main.tscn > boot.log 2>&1 \
+            || true
+          cat boot.log
+          if ! grep -q "ECS_BOOT_OK" boot.log; then
+            echo "::error::boot sentinel ECS_BOOT_OK missing - Main.tscn did not finish _ready()"
+            exit 1
           fi
+          if grep -qE "SCRIPT ERROR|^ERROR:|Failed to instantiate an autoload" boot.log; then
+            echo "::error::errors emitted during boot"
+            exit 1
+          fi
+          echo "boot smoke OK"
 
       - name: Run ECS Unit Tests (Headless)
         run: |
-          # Guard until GUT + tests exist so CI passes before bootstrap.
-          if [ -f addons/gut/gut_cmdln.gd ]; then
-            godot --headless -s addons/gut/gut_cmdln.gd -gdir=res://tests/ -gexit
-          else
-            echo "GUT not installed yet; skipping unit tests (pre-Sprint-0)."
-          fi
+          set -eu
+          # R5/R7: GUT exits 0 having run ZERO tests via three separate paths - missing import,
+          # an empty test dir, and -gdir not recursing into subdirectories. All verified.
+          # -ginclude_subdirs is REQUIRED: tests/invariants/ is invisible without it.
+          godot --headless -s addons/gut/gut_cmdln.gd \
+            -gdir=res://tests \
+            -ginclude_subdirs \
+            -gexit \
+            -gjunit_xml_file=res://gut_results.xml
+          # A green run that executed nothing is a false pass. Assert a real test count.
+          python3 - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse("gut_results.xml").getroot()
+          suites = list(root.iter("testsuite"))
+          tests = sum(int(s.get("tests", 0)) for s in suites)
+          failures = sum(int(s.get("failures", 0)) for s in suites)
+          errors = sum(int(s.get("errors", 0)) for s in suites)
+          print(f"GUT: {len(suites)} suites, {tests} tests, {failures} failures, {errors} errors")
+          if tests < 1:
+              print("::error::GUT reported success but ran 0 tests")
+              sys.exit(1)
+          if failures or errors:
+              print("::error::GUT reported failures")
+              sys.exit(1)
+          PY
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gut-results
+          path: gut_results.xml
+          if-no-files-found: ignore

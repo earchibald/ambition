@@ -1,5 +1,11 @@
 # Adversarial Review & Recommendations — "The Living Delve"
 
+> **Historical review:** Sections A-M document the original pre-implementation review and
+> are kept for reasoning history. The original P0/P1 findings have been resolved or
+> superseded by `docs/architecture_decisions.md`, the integration log in §N, and the fresh
+> dated review `docs/ADVERSARIAL_REVIEW_2026-07-31.md`. Do not reopen settled ADR decisions
+> from the historical body without new evidence.
+
 **Reviewer:** Lead Systems Coding Agent
 **Date:** 2026-07-30
 **Scope:** End-to-end review of all specification, architecture, sprint, and process

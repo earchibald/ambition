@@ -1,0 +1,57 @@
+[gd_scene load_steps=12 format=3 uid="uid://bdlvng0mainsc"]
+
+[ext_resource type="Script" path="res://viewer/Main.gd" id="1_main"]
+[ext_resource type="Script" path="res://viewer/view_manager.gd" id="2_view"]
+[ext_resource type="Script" path="res://viewer/camera_rig.gd" id="3_cam"]
+[ext_resource type="Script" path="res://viewer/player_input_bridge.gd" id="4_input"]
+[ext_resource type="Script" path="res://ui/debug/debug_overlay.gd" id="5_debug"]
+[ext_resource type="Script" path="res://viewer/terrain_view.gd" id="6_terrain"]
+[ext_resource type="Script" path="res://viewer/debug_gizmos.gd" id="7_gizmos"]
+[ext_resource type="Script" path="res://ui/grimoire_panel.gd" id="8_grimoire"]
+[ext_resource type="Script" path="res://ui/hover_card.gd" id="9_hover"]
+[ext_resource type="Script" path="res://ui/player_hud.gd" id="10_hud"]
+[ext_resource type="Script" path="res://ui/pack_panel.gd" id="11_pack"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_main")
+
+[node name="TerrainView" type="Node3D" parent="."]
+script = ExtResource("6_terrain")
+
+[node name="ViewManager" type="Node3D" parent="."]
+script = ExtResource("2_view")
+aim_source_path = NodePath("../PlayerInputBridge")
+
+[node name="CameraRig" type="Node3D" parent="."]
+script = ExtResource("3_cam")
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig"]
+
+[node name="PlayerInputBridge" type="Node" parent="."]
+script = ExtResource("4_input")
+camera_path = NodePath("../CameraRig/Camera3D")
+overlay_path = NodePath("../DebugOverlay")
+grimoire_path = NodePath("../GrimoirePanel")
+pack_path = NodePath("../PackPanel")
+
+[node name="PlayerHUD" type="CanvasLayer" parent="."]
+script = ExtResource("10_hud")
+
+[node name="HoverCard" type="CanvasLayer" parent="."]
+script = ExtResource("9_hover")
+
+[node name="DebugOverlay" type="CanvasLayer" parent="."]
+script = ExtResource("5_debug")
+
+[node name="GrimoirePanel" type="CanvasLayer" parent="."]
+script = ExtResource("8_grimoire")
+
+[node name="PackPanel" type="CanvasLayer" parent="."]
+script = ExtResource("11_pack")
+
+[node name="DebugGizmos" type="Node3D" parent="."]
+script = ExtResource("7_gizmos")
+input_bridge_path = NodePath("../PlayerInputBridge")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.6, 0.8, 0, -0.8, 0.6, 0, 12, 0)
