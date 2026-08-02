@@ -16,6 +16,7 @@ const STREAM_NAMES: Array[StringName] = [
 	&"economy",
 	&"loot",
 	&"perception",
+	&"magic",
 ]
 
 var master_seed: int = 0

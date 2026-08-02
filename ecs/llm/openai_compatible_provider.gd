@@ -19,6 +19,12 @@ const ENV_MODEL: String = "DELVE_LLM_MODEL"
 const ENV_KEY: String = "DELVE_LLM_API_KEY"
 const KEY_FILE: String = "user://llm_secrets.cfg"
 
+## The COMMITTED half of the configuration (scaffolding §5: "endpoint + model in a committed
+## config file with env-var overrides"). Endpoint and model only — never the key, which stays in
+## the environment or `user://` per ADR-5. Env vars override the file, so a contributor can
+## point one session at a local model without editing tracked files.
+const CONFIG_FILE: String = "res://llm_config.cfg"
+
 const TIMEOUT_S: float = 20.0
 
 var endpoint: String = ""
@@ -31,21 +37,39 @@ var _on_done: Callable = Callable()
 
 ## Returns null unless an endpoint AND a key are both configured. A half-configured provider that
 ## fails every call is worse than no provider: it burns the queue and hides the heuristic path.
+##
+## Layering: committed `llm_config.cfg` first, environment on top. The key is NEVER in the file.
 static func create_if_configured(host: Node) -> OpenAICompatibleProvider:
+	var file_config: Dictionary = _read_config_file()
 	var endpoint_value: String = OS.get_environment(ENV_ENDPOINT)
+	if endpoint_value == "":
+		endpoint_value = String(file_config.get("endpoint", ""))
 	if endpoint_value == "":
 		return null
 	var provider := OpenAICompatibleProvider.new()
 	provider.endpoint = endpoint_value
 	var model_value: String = OS.get_environment(ENV_MODEL)
+	if model_value == "":
+		model_value = String(file_config.get("model", ""))
 	if model_value != "":
 		provider.model = model_value
 	provider._api_key = provider._read_key()
 	if provider._api_key == "":
-		push_warning("%s is set but no API key was found; using the heuristic reasoner" % ENV_ENDPOINT)
+		push_warning("an LLM endpoint is configured but no API key was found; using heuristics")
 		return null
 	provider._attach(host)
 	return provider
+
+
+## The committed config. Absent, unreadable or malformed all mean the same thing: no file half.
+static func _read_config_file() -> Dictionary:
+	var config := ConfigFile.new()
+	if config.load(CONFIG_FILE) != OK:
+		return {}
+	return {
+		"endpoint": String(config.get_value("llm", "endpoint", "")),
+		"model": String(config.get_value("llm", "model", "")),
+	}
 
 
 func describe() -> String:

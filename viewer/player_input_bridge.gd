@@ -11,6 +11,8 @@ const DEBUG_HURT_AMOUNT: float = 25.0
 
 @export var camera_path: NodePath
 @export var overlay_path: NodePath
+@export var grimoire_path: NodePath
+@export var pack_path: NodePath
 
 var intents_pushed: int = 0
 
@@ -22,6 +24,8 @@ var last_aim: Vector3 = Vector3(0.0, 0.0, 1.0)
 
 var _camera: Camera3D = null
 var _overlay: DebugOverlay = null
+var _grimoire: Node = null
+var _pack: Node = null
 
 
 func _ready() -> void:
@@ -29,6 +33,10 @@ func _ready() -> void:
 		_camera = get_node_or_null(camera_path)
 	if not overlay_path.is_empty():
 		_overlay = get_node_or_null(overlay_path)
+	if not grimoire_path.is_empty():
+		_grimoire = get_node_or_null(grimoire_path)
+	if not pack_path.is_empty():
+		_pack = get_node_or_null(pack_path)
 
 
 func _physics_process(_delta: float) -> void:
@@ -55,26 +63,48 @@ func _physics_process(_delta: float) -> void:
 	# 35% speed — the ECS keeps one movement law and the viewer just asks for less of it.
 	if Input.is_action_pressed(&"precision_move"):
 		direction *= WorldConstants.PRECISION_SPEED_SCALE
+	# While the free camera flies, WASD belongs to the CAMERA and the body stands still. A zero
+	# intent is still pushed so the player halts rather than gliding on their last velocity.
+	if _rig() != null and _rig().free_flight:
+		direction = Vector3.ZERO
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
 
-	# A click on the debug panel belongs to the panel. The bridge POLLS rather than consuming
-	# events, so it has to ask rather than relying on the event being marked handled.
-	var ui_has_mouse: bool = _overlay != null and _overlay.wants_mouse()
-
-	if not ui_has_mouse and Input.is_action_just_pressed(&"attack"):
-		_push_attack(row, last_aim)
-	if not ui_has_mouse and Input.is_action_just_pressed(&"interact"):
-		_push_interact(row)
-	if not ui_has_mouse and Input.is_action_just_pressed(&"inspect"):
-		_select_under_cursor()
+	# A SUMMONED PANEL IS MODAL for the combat keys. While the Grimoire or the pack is up:
+	# a click outside it dismisses the panel — the genre reflex — rather than swinging a weapon
+	# at whatever stood behind it, and Q does not cast at a world the pointer cannot even
+	# identify (the hover card yields while a panel is open, so a cast then would strike what
+	# the UI refuses to name). The debug keys below stay live regardless.
+	var modal: Node = _open_modal()
+	if modal != null:
+		if Input.is_action_just_pressed(&"attack") and not _claims_mouse(modal):
+			modal.close()
+	else:
+		# The debug overlay is non-modal: it only claims clicks that land ON it.
+		var ui_has_mouse: bool = _claims_mouse(_overlay)
+		if not ui_has_mouse and Input.is_action_just_pressed(&"attack"):
+			_push_attack(row, last_aim)
+		if not ui_has_mouse and Input.is_action_just_pressed(&"interact"):
+			_push_interact(row)
+		if not ui_has_mouse and Input.is_action_just_pressed(&"inspect"):
+			_select_under_cursor()
+		if Input.is_action_just_pressed(&"cast"):
+			_push_cast(row, last_aim)
 	if Input.is_action_just_pressed(&"debug_hurt"):
 		_debug_hurt(row)
 	if Input.is_action_just_pressed(&"debug_respawn"):
 		_debug_respawn()
+	if Input.is_action_just_pressed(&"debug_hazard"):
+		_debug_toggle_hazard()
 	if Input.is_action_just_pressed(&"slow_time"):
 		# Bullet-time scales delta, never the 60 Hz tick rate (ADR-9).
 		GameLoopManager.time_scale = 0.2 if GameLoopManager.time_scale == 1.0 else 1.0
+	if Input.is_action_just_pressed(&"free_camera"):
+		_toggle_free_camera(row)
+	if Input.is_action_just_pressed(&"debug_spawn_rat"):
+		_spawn_at_cursor(row, &"rat")
+	if Input.is_action_just_pressed(&"debug_spawn_item"):
+		_spawn_at_cursor(row, &"item")
 
 
 ## WASD in the BODY's frame, not the camera's.
@@ -139,6 +169,78 @@ func _push_attack(row: int, swing: Vector3) -> void:
 	intents_pushed += 1
 
 
+## Casts whatever the Grimoire last bound, aimed where the cursor points.
+##
+## The bound Action_ID lives on `MindComponent.active_spell`, not in this node. That keeps the
+## viewer stateless about magic: a cast is "fire what my mind currently holds", so a bind that
+## happened this frame is castable the next without the two nodes having to agree about anything.
+func _push_cast(row: int, aim: Vector3) -> void:
+	var mind: MindComponent = ECSManager.minds.get(row)
+	if mind == null or mind.active_spell == &"":
+		# Silence is the worst possible feedback. Say what is missing and where to fix it.
+		ECSEvents.action_rejected.emit(
+			ECSManager.handle_of(row), &"cast", &"no spell bound — press B"
+		)
+		return
+	ECSManager.push_intent(row, ActionIntent.cast(mind.active_spell, aim))
+	intents_pushed += 1
+
+
+func _rig() -> CameraRig:
+	return null if _camera == null else _camera.get_parent() as CameraRig
+
+
+static func _claims_mouse(panel: Node) -> bool:
+	return panel != null and panel.has_method("wants_mouse") and panel.wants_mouse()
+
+
+## The open summoned panel, or null. One at a time is an invariant the toggles keep informally;
+## if both were somehow open, the Grimoire wins the click.
+func _open_modal() -> Node:
+	for panel in [_grimoire, _pack]:
+		if panel != null and panel.has_method("is_open") and panel.is_open():
+			return panel
+	return null
+
+
+## DEBUG ONLY (`F8`): detach the camera and survey the world. Half of the scope doc's "free
+## camera + spawn console" Sprint 1 deliverable, which never shipped — "without a spawn console
+## you cannot reproduce a single success state on demand" was the roadmap's own warning.
+func _toggle_free_camera(row: int) -> void:
+	var rig: CameraRig = _rig()
+	if rig == null:
+		return
+	var flying: bool = rig.toggle_free_flight()
+	ECSEvents.action_rejected.emit(
+		ECSManager.handle_of(row), &"camera",
+		&"free camera ON — WASD flies, F8 returns" if flying else &"camera follows you again"
+	)
+
+
+## DEBUG ONLY (`F9`/`F10`): the spawn console's other half. Spawns a rat or a copper stack at
+## the cursor's ground point, so any combat or pickup scenario is reproducible on demand
+## without editing a scene.
+func _spawn_at_cursor(row: int, kind: StringName) -> void:
+	if _camera == null or World.active_chunk == null:
+		return
+	var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
+	var ground: Dictionary = GameLoopManager.picking.cursor_ground(
+		_camera.project_ray_origin(mouse),
+		_camera.project_ray_normal(mouse),
+		World.sampler()
+	)
+	if not bool(ground.get("hit", false)):
+		ECSEvents.action_rejected.emit(
+			ECSManager.handle_of(row), &"spawn", &"point at the ground first"
+		)
+		return
+	var at: Vector3 = ground["point"] + Vector3(0.0, 0.5, 0.0)
+	if kind == &"rat":
+		World.spawn_creature(at, &"SPC_CORPSE_RAT")
+	else:
+		World.spawn_item(at, MaterialLibrary.MAT_COPPER, 112.0, 5)
+
+
 ## DEBUG ONLY: injure the player, so the death loop can be reached at all.
 ##
 ## Sprint 3's headline feature is that death is a loop rather than a screen, and in the generated
@@ -153,6 +255,30 @@ func _debug_hurt(row: int) -> void:
 	body.health = maxf(0.0, body.health - DEBUG_HURT_AMOUNT)
 	ECSEvents.entity_damaged.emit(
 		ECSManager.handle_of(row), before - body.health, body.health, &"debug"
+	)
+
+
+## DEBUG ONLY: make the chunk you are standing in a spore field, and back again.
+##
+## Same reason `K` exists. Mutation is Sprint 4's headline consequence system, and there is no
+## naturally-occurring hazard zone anywhere in either scenario — the world generator does not
+## place them yet — so without this the entire ecology loop is unreachable from the keyboard and
+## can only be seen by reading a test. Exposure accrues at 2.0/s and the threshold is 100, so a
+## mutation lands after about fifty seconds of standing in it.
+func _debug_toggle_hazard() -> void:
+	var chunk: ChunkData = World.active_chunk
+	if chunk == null:
+		return
+	var row: int = EH.index_of(ECSManager.player_handle())
+	if chunk.hazard_tags.has(&"Spores"):
+		chunk.hazard_tags.erase(&"Spores")
+		ECSEvents.action_rejected.emit(
+			ECSManager.handle_of(row), &"hazard", &"the air clears"
+		)
+		return
+	chunk.hazard_tags.append(&"Spores")
+	ECSEvents.action_rejected.emit(
+		ECSManager.handle_of(row), &"hazard", &"the chunk fills with spores"
 	)
 
 
@@ -191,8 +317,30 @@ func _select_under_cursor() -> void:
 		World.sampler(),
 		player_row
 	)
-	# Nothing near the cursor falls back to the player, so Tab always shows something useful.
-	_overlay.select_row(EH.index_of(handle) if EH.is_valid(handle) else player_row)
+	var picked: int = EH.index_of(handle) if EH.is_valid(handle) else -1
+	_overlay.select_row(next_selection(picked, _overlay.selected_row()))
+
+
+## What Tab should select next, given what it hit and what is already selected.
+##
+## THREE BEHAVIOURS, and they have to stay distinguishable (Sprint 4 roadmap Step 5):
+##   * a NEW target   -> inspect it, with no clearing press in between;
+##   * the SAME target -> clear, restoring the unobstructed LIVE view;
+##   * empty ground    -> clear.
+##
+## That last case REVERSES a Sprint 3 decision. Tab used to fall back to the player row on a miss
+## so it "always shows something useful", which was the right fix while the complaint was a hitbox
+## that felt broken, and the wrong one once the panel grew big enough to obstruct the view: there
+## was then no press anywhere on screen that dismissed it.
+##
+## Extracted as a static because the behaviour is the whole feature and the rest of
+## `_select_under_cursor` is a camera, a viewport and a spatial hash. Testing it through those
+## would test the pick path instead — which already has its own tests — and would make the one
+## rule that matters here the hardest part to assert.
+static func next_selection(picked_row: int, selected_row: int) -> int:
+	if picked_row < 0:
+		return -1
+	return -1 if picked_row == selected_row else picked_row
 
 
 ## `E` takes what is under the cursor, or failing that the nearest thing within arm's reach.

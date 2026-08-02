@@ -45,6 +45,7 @@ var wealth_taxed: int = 0
 var swarms_capped: int = 0
 var junk_collected: int = 0
 var grudges_decayed: int = 0
+var dag_nodes_compacted: int = 0
 
 
 ## Entity 0's health reached zero. Returns the corpse handle.
@@ -151,7 +152,15 @@ func run_interregnum(bootstrapper: Bootstrapper, grid: WorldGrid) -> void:
 	# arena completes its loop rather than crashing on a null.
 	if bootstrapper != null:
 		bootstrapper._run_interregnum()
+		# ADR-12's slow-cadence DAG compaction, at the cadence the spec names: each interregnum.
+		# Without it the history graph grew monotonically for the life of a save.
+		if bootstrapper.generator != null:
+			dag_nodes_compacted += bootstrapper.generator.compact()
 	_levy_entropy_tax()
+	# Breed BEFORE the junk sweep: the filth that feeds the rats is the same filth the sweep is
+	# about to collect, and a year's vermin bloom is caused by the mess as it stood at death,
+	# not by whatever survives the cleanup.
+	_breed_swarms(grid)
 	_cap_swarms(grid)
 	_collect_junk()
 	_decay_grudges()
@@ -167,6 +176,30 @@ func _levy_entropy_tax() -> void:
 			var after: int = int(float(before) * WEALTH_RETAINED)
 			core.abstract_wealth_ledger[material] = after
 			wealth_taxed += before - after
+
+
+## A year of breeding, on the COUNTER (ecology: "Filth left by the player spawns massive rat
+## populations"). Geometric doubling, plus two heads per piece of filth rotting in the chunk.
+## This is the growth the swarm tax below exists to cap, and until 2026-08-01 it did not exist:
+## the tax clamped a counter nothing ever raised, so `swarms_capped` was structurally zero in
+## every session that was ever played.
+func _breed_swarms(grid: WorldGrid) -> void:
+	if grid == null:
+		return
+	var filth_by_chunk: Dictionary = {}
+	for row in ECSManager.query(ComponentMask.LOOSE_ITEM):
+		var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
+		if chemistry == null or not chemistry.active_tags.has(&"Filth"):
+			continue
+		var chunk_id := Vector3i(
+			ECSManager.col_chunk_x[row], ECSManager.col_chunk_y[row], ECSManager.col_floor[row]
+		)
+		filth_by_chunk[chunk_id] = int(filth_by_chunk.get(chunk_id, 0)) + 1
+	for chunk_id in grid.chunks:
+		var chunk: ChunkData = grid.chunks[chunk_id]
+		var boost: int = 2 * int(filth_by_chunk.get(chunk_id, 0))
+		if chunk.swarm_population > 0 or boost > 0:
+			chunk.swarm_population = chunk.swarm_population * 2 + boost
 
 
 ## Carrying capacity, on the COUNTER. Rats breed geometrically; an unchecked exponential over
@@ -201,8 +234,21 @@ func _decay_grudges() -> void:
 		if is_zero_approx(before):
 			continue
 		state["score"] = before * GRUDGE_RETAINED
+		if core.anchor_chunk_id == Vector3i.ZERO:
+			state["score"] = spawn_faction_floor(float(state["score"]))
 		state["status"] = ReputationSystem.status_for(float(state["score"]))
 		grudges_decayed += 1
+
+
+## THE SPAWN-FACTION FLOOR (death-loop doc, REQUIRED): the faction whose chunk the new
+## adventurer wakes in is hard-clamped to NEUTRAL at re-entry. Before this clamp the rule held
+## only by arithmetic accident — score floor -100 x 0.30 = -30, just above the -40 hostility
+## line — so anyone tuning GRUDGE_RETAINED past 0.4 would have silently restored the unwinnable
+## spawn the requirement exists to prevent. Extracted as a static PRECISELY because the accident
+## also makes the clamp unreachable at today's constants: a test can only prove the invariant by
+## asking the rule directly, with a score the decay cannot currently produce.
+static func spawn_faction_floor(score: float) -> float:
+	return maxf(score, ReputationSystem.HOSTILE_BELOW + 1.0)
 
 
 ## Residual physical sweep. Filth and scrap always go; unowned loose items go by chance, because
@@ -217,6 +263,11 @@ func _collect_junk() -> void:
 			doomed.append(row)
 			continue
 		if ECSManager.ownerships.has(row):
+			continue
+		# Inscribed stone survives a year of neglect. The lecterns are the only route into rune
+		# knowledge in the generated world; a janitor pass deleting libraries at 40% per death
+		# would make progression regress at random.
+		if chemistry != null and chemistry.active_tags.has(&"Inscribed"):
 			continue
 		# ADR-20: the RNG stream, never a bare randf, or the soak harness cannot reproduce a run.
 		if RNGService.randf_in(&"economy") < UNOWNED_DECAY_CHANCE:
@@ -278,4 +329,5 @@ func counters() -> Dictionary:
 		"interregnum_swarms_capped": swarms_capped,
 		"interregnum_junk_collected": junk_collected,
 		"interregnum_grudges_decayed": grudges_decayed,
+		"interregnum_dag_compacted": dag_nodes_compacted,
 	}

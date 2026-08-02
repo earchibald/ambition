@@ -183,6 +183,85 @@ func _found_faction(population: int, floor_index: int, is_village: bool) -> DAGN
 	return node
 
 
+## Runtime DAG compaction (ADR-12 / Sprint 2 scaffolding: "prune edges/nodes with no live
+## descendants, artifacts, or physical ruins... at each interregnum"). Specified, siblinged by
+## two caps that WERE built, and never written — the history grew monotonically forever.
+##
+## Deliberately conservative: a DESTROYED node is pruned only when no ACTIVE node's story
+## touches it (no edge links it to a living faction) and it forged nothing. A conquest victim
+## stays as long as its conqueror lives, because "why does the winner hold this ground" is the
+## question the DAG exists to answer.
+func compact() -> int:
+	var touched_by_living: Dictionary = {}
+	for edge in edges:
+		var source_alive: bool = _is_active(edge.source_id)
+		var target_alive: bool = _is_active(edge.target_id)
+		if source_alive:
+			touched_by_living[edge.target_id] = true
+		if target_alive:
+			touched_by_living[edge.source_id] = true
+
+	var doomed: Array[int] = []
+	for node_id in nodes:
+		var node: DAGNode = nodes[node_id]
+		if node.is_active() or node.type != ECSEnums.NodeType.FACTION:
+			continue
+		if touched_by_living.has(node_id) or _forged_anything(node_id):
+			continue
+		doomed.append(node_id)
+
+	for node_id in doomed:
+		nodes.erase(node_id)
+	var kept: Array[DAGEdge] = []
+	for edge in edges:
+		if not doomed.has(edge.source_id) and not doomed.has(edge.target_id):
+			kept.append(edge)
+	edges = kept
+	return doomed.size()
+
+
+func _is_active(node_id: int) -> bool:
+	var node: DAGNode = nodes.get(node_id)
+	return node != null and node.is_active()
+
+
+func _forged_anything(node_id: int) -> bool:
+	for edge in edges:
+		if edge.source_id == node_id and edge.type == ECSEnums.EdgeType.FORGED:
+			return true
+	return false
+
+
+## A runtime schism: disloyal citizens of `parent` found a splinter faction (factions doc §3).
+##
+## Goes through the DAG, not around it, so "why does this faction exist" stays answerable: the
+## splinter is a real node with a FOUNDED edge and a chronicle line, exactly like a faction
+## born in history generation. Returns null at the ADR-12 cap — the same skip-don't-merge rule
+## `_found_faction` applies, because a mutiny that cannot form a faction disperses instead.
+func found_splinter(parent: DAGNode, population: int) -> DAGNode:
+	if active_factions().size() >= FACTION_CAP:
+		return null
+	var node := DAGNode.new()
+	node.node_id = _next_node_id
+	_next_node_id += 1
+	node.type = ECSEnums.NodeType.FACTION
+	node.birth_epoch = current_epoch
+	node.population = population
+	node.home_floor = parent.home_floor
+	node.anchor_chunk_id = parent.anchor_chunk_id
+	node.name = StringName("Splinter of %s" % parent.name)
+	node.culture_tags = parent.culture_tags.duplicate()
+	nodes[node.node_id] = node
+	edges.append(
+		DAGEdge.create(node.node_id, parent.node_id, ECSEnums.EdgeType.FOUNDED, current_epoch)
+	)
+	_record(
+		"Year %d: %s broke away from %s in mutiny."
+		% [year_of(current_epoch), node.name, parent.name]
+	)
+	return node
+
+
 ## An aggressive faction conquers a weaker neighbour on the same floor.
 ##
 ## The loser is marked DESTROYED but KEPT. Deleting it would erase the only explanation for why

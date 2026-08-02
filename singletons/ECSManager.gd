@@ -407,16 +407,6 @@ func row_capacity() -> int:
 	return _row_count
 
 
-func generation_at(row: int) -> int:
-	if row < 0 or row >= _row_count:
-		return 0
-	return _generations[row]
-
-
-func registry_count() -> int:
-	return _registries.size()
-
-
 func counters() -> Dictionary:
 	return {
 		"alive_count": alive_count,

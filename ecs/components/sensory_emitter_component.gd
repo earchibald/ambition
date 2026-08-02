@@ -3,8 +3,6 @@ class_name SensoryEmitterComponent
 extends RefCounted
 
 var noise_radius_m: float = 0.0
-var visibility_modifier: float = 1.0
-var scent_tags: Array[StringName] = []
 
 
 ## Converts a noise radius to a source level in decibels for the attenuation model

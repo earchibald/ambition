@@ -432,8 +432,11 @@ func test_the_inspector_says_what_a_thing_is() -> void:
 	)
 	var label: String = overlay._label_for(ECSManager.resolve(pile))
 	assert_string_contains(label, "618", "the label counts the pile")
-	assert_string_contains(label, "MAT_IRON", "and names the material")
-	assert_eq(overlay._label_for(_player_row), "you", "and knows who you are")
+	# "Iron", NOT "MAT_IRON". The storage prefix is an implementation detail the player never
+	# asked about, and the raw enum name was itself reported from play as unreadable.
+	assert_string_contains(label, "Iron", "and names the material")
+	assert_false(label.contains("MAT_"), "without leaking the storage prefix")
+	assert_eq(overlay._label_for(_player_row), "You", "and knows who you are")
 
 
 ## Movement speed is a FEEL number, tuned by playing rather than by realism. 4.0 m/s is a real
@@ -498,3 +501,45 @@ func test_only_the_death_loop_creates_the_players_corpse() -> void:
 		before,
 		"the combat system created no corpse of its own"
 	)
+
+
+## THE TAB TOGGLE (Sprint 4 roadmap Step 5). Tab selected and never deselected, and a miss fell
+## back to the player row, so the LIVE panel could not be dismissed from the keyboard at all.
+##
+## Driven through `next_selection` rather than through the camera on purpose: the rule IS the
+## feature, and routing it through a viewport would test the pick path instead — which has its
+## own tests, and none of which say anything about toggling.
+func test_tab_on_a_new_target_inspects_it() -> void:
+	assert_eq(PlayerInputBridge.next_selection(7, -1), 7, "nothing selected -> inspect the target")
+
+
+func test_tab_on_the_same_target_clears_the_selection() -> void:
+	assert_eq(PlayerInputBridge.next_selection(7, 7), -1, "a second Tab on one target dismisses")
+
+
+## The retarget case. Without it a play-tester needs a clearing press between every two targets,
+## which is the toggle being technically present and useless in a crowd.
+func test_tab_on_a_second_target_switches_without_a_clearing_press() -> void:
+	assert_eq(PlayerInputBridge.next_selection(9, 7), 9, "a new target replaces the old one")
+
+
+## The reversed Sprint 3 fallback. A miss must CLEAR, not select the player.
+func test_tab_on_empty_ground_clears_rather_than_selecting_the_player() -> void:
+	assert_eq(PlayerInputBridge.next_selection(-1, 7), -1, "a miss dismisses the panel")
+	assert_eq(
+		PlayerInputBridge.next_selection(-1, -1),
+		-1,
+		"a miss with nothing selected stays cleared rather than falling back to row 0"
+	)
+
+
+## The overlay has to be able to answer "what is selected" or the toggle above cannot be computed.
+## `select_row(-1)` was already the cleared state; only the getter was missing.
+func test_the_overlay_reports_and_clears_its_selection() -> void:
+	var overlay := DebugOverlay.new()
+	add_child_autofree(overlay)
+	assert_eq(overlay.selected_row(), -1, "nothing is selected before anything is picked")
+	overlay.select_row(4)
+	assert_eq(overlay.selected_row(), 4, "the overlay reports what it was given")
+	overlay.select_row(-1)
+	assert_eq(overlay.selected_row(), -1, "a negative row clears the inspection panel")

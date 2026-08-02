@@ -1,8 +1,151 @@
 # Agent Handoff State
 
-*   **Current Branch:** `feature/sprint3.5-body-politic`, stacked on
-    `feature/sprint3-world-inspector` (PR #7), off `dev`. Sprint 3 proper is already on `dev`
-    via PR #6. PRs #7 and #8 are OPEN and UNMERGED — await human review.
+*   **Current Branch:** `fix/sprints1-4-remediation`, stacked on
+    `feature/sprint4-the-crucible` (PR #9), on `feature/sprint3.5-body-politic` (PR #8), on
+    `feature/sprint3-world-inspector` (PR #7), off `dev`. **PRs #7, #8 and #9 are still OPEN
+    and UNMERGED** — await human review.
+
+*   **LAST CHANGE: THE PLAYER UI PASS (2026-08-02). 619 tests across 39 scripts, gdlint clean,
+    both scenarios frame-verified, and two subagent beauty reviews (genre + accessibility)
+    applied against rendered frames — eighteen findings closed or declared, recorded in the
+    design doc §7.** The goal-set order was a full UI/UX exercise plus "make it
+    easy and beautiful to play what we have". The central audit finding: hiding the debug
+    overlay left the player with NO health bar, no stamina, no event feedback, no clock — every
+    player-facing fact lived inside a developer tool, which is why debug info "drowned". What
+    shipped:
+    *   **`ui/player_hud.gd`** — the always-on player layer, laid out per
+        `docs/hud_and_main_interface_architecture.md` §2: drawn vital bars top-left (ticks
+        every 25, 0.6 s damage ghosting, casting strain as an amber dent in the stamina bar),
+        the spam-aggregated running log bottom-left (player-relevant events only, one line per
+        repeat with `(xN)`), the keybar bottom-center with the bound spell named in player
+        words (`Fire bolt`, via `EntityCard.spell_name`), the load chip bottom-right, the
+        clock top-right. Never eats input; every Control is MOUSE_FILTER_IGNORE.
+    *   **`ui/pack_panel.gd`** (`I`) — the inventory made visible: auto-sorted heaviest-first
+        list (ui_ux spec §5: never a Tetris grid), space/load bars, pace penalty, and its
+        read-only limit stated on its face (no DROP intent exists yet).
+    *   **`ui/ui_theme.gd` + `ui/vital_bar.gd`** — one visual voice for all player panels
+        (warm parchment palette, 3 px radius, 12 px padding, WCAG-verified contrast asserted
+        by `tests/test_player_hud.gd`; stamina is TEAL not green for colour-blind safety).
+        Debug keeps its cool monospace voice ON PURPOSE — two voices tell the player which
+        layer is talking. Hover card and Grimoire rethemed onto it.
+    *   **Debug segregation** — the overlay boots HIDDEN (`F1` summons, `overlay_visible_on_boot`
+        restores) and gizmos boot OFF (`G`; persisted key renamed `gizmos_visible` as a
+        one-time default reset, because every existing config had the old on-default baked in).
+    *   **A real input bug fixed**: the bridge polled only the debug overlay's `wants_mouse`,
+        so a click on the open Grimoire swung a weapon at the world behind it. All panels now
+        claim their own clicks.
+    *   **The design record** is `docs/ui_information_architecture_and_hud_plan.md`: the ring
+        model (glance/point/summon), answers to mouseover/examine/inventory/keys/radial/debug
+        questions, a 12-row ambiguities-resolved-by-choosing table (spec deviations recorded,
+        e.g. two bars + strain dent instead of three bars; radial DEFERRED until >1 bound
+        spell), and the genre beauty standard with verified contrast maths in Appendix A.
+    *   **Frame-verified** via a temporary capture harness (deleted): windowed captures of both
+        scenarios; found and fixed a placement bug (RichTextLabel min-size under-reporting —
+        `reset_size()` before measuring) and a capture pitfall worth remembering: the project
+        boots MAXIMIZED, so movie-writer frames CROP the real canvas and lie about clipping.
+
+*   **The player-facing hover card (2026-08-01). 602 tests across 38 scripts,
+    gdlint clean.** Point at anything and `ui/hover_card.gd` names it — no key, no panel, no tag
+    vocabulary. Words come from `ui/entity_card.gd`, which is pure, static and row-only so a
+    headless test asserts every line. Three things changed underneath it: `BodyComponent.species`
+    now exists (`spawn_creature` took a species, branched on it and threw it away, so every
+    animal displayed as "creature"); `DebugOverlay._label_for`/`_name_of` delegate to
+    `EntityCard` so the feed, the inspector header and the card cannot drift apart; and
+    `_remembered_names` is keyed by HANDLE rather than row, which fixes a real misattribution —
+    rows are recycled, so the feed could name a death after whatever now occupied the slot.
+    **Known gap this did NOT close:** entities still all render as coloured boxes, so telling
+    things apart *without* pointing at them is unsolved. Declared in RUNNING.md.
+
+*   **THE SPRINTS 1–4 REMEDIATION PASS IS COMPLETE (2026-08-01). 585 tests across 37 scripts,
+    gdlint clean, soak gate green, 27/27 mutations killed.** Four audit sweeps (Sprints 1–2
+    spec-vs-code, Sprint 3/3.5 beyond §4b, Sprint 4 beyond §6, and a dead-symbol sweep over
+    every first-party declaration) produced 51 spec findings and 72 dead symbols on top of the
+    ~28 already-declared gaps. Every declared gap and every buildable finding is closed; the
+    rest are declared with reasons. The ledger is
+    `docs/audits/REMEDIATION-LEDGER-sprints1-4.md` (56 items, all FIXED); the external-audit
+    manifest is `docs/audits/OUTPUT-IMPL-AUDIT-remediation-sprints1-4.md`.
+    The headline closures:
+    *   **The social layer exists** (`ecs/systems/social_system.gd`): loyalty recalculated and
+        READ, succession by prestige with an immediate crisis reasoning tick, schism into a
+        real DAG faction at war with its parent, WAR's first behavioural consumer (hostile
+        citizens attack on sight), non-lethal brawls, trade caravans carrying real
+        interceptable cargo, ClaimTags with a trespass rule, and Guest_Status that a witnessed
+        crime revokes.
+    *   **Fire is a process**: DoT, burnout, fuelled sources burn down, ignition temperatures,
+        fire heats what it touches (`conduct_pair`'s first production caller), smoke blocks
+        sight, detonations are audible (`spawn_noise`'s first callers). One word for water
+        (`Wet`) — the starting water spell could not quench a fire it hit before.
+    *   **Strain per the magic doc** (temporary max-stamina damage) with rest recovery —
+        nothing in the build restored stamina at all; a fireball was castable five times per
+        LIFE. Overclocking + the d100 mishap table + the Mercy Cap. Rune learning at lecterns.
+        Insight grows in play.
+    *   **The wiring blockers**: Pre-Warm actually runs at boot (the counter used to claim 100
+        ticks while zero ran); all seven missing systems merged into `counters()` (F1 showed
+        zeros forever); planner jobs claim at a real score (LLM objectives used to survive
+        half a second); professions attached with matching `Prof_*` keys; faction memory
+        decays at read; queue priorities; timeout requeue; the 200-char cap enforced.
+    *   **Infrastructure**: the ADR-20 soak harness (`--soak=<n>`, CSV, committed baseline,
+        SOAK_OK gate, verified deterministic), the debugging spec's event trace (ring buffer,
+        dump-on-death), free camera + spawn console (F8/F9/F10), boot per-phase timing,
+        per-floor hazard zones, the Adventurer's Residence, DAG compaction at the Interregnum,
+        the Interregnum advancing the CALENDAR, and the dead-symbol cull (24 deleted, 2 wired,
+        registry reconciled in both directions).
+
+*   **SPRINT 4 "THE CRUCIBLE" IS IMPLEMENTED (2026-08-01). 506 tests across 32 scripts, gdlint
+    clean, boot sentinel present.** All five roadmap steps plus the Grimoire UI the scope
+    document assigns to this sprint:
+    *   **Step 5 first, as the roadmap instructs.** `Tab` now toggles: a new target inspects, the
+        same target clears, empty ground clears. That last case REVERSES the Sprint 3 player-row
+        fallback, deliberately.
+    *   **Reaction matrix.** Sorted-pair keys, INTRA/INTER/**BOTH** scope, the 60-frame
+        anti-recursion lock, energy DERIVED from the burning material rather than typed into the
+        rule table, a real ambient rise over the chunk's air, and a capped kinetic blast.
+    *   **Gas in the fluid CA**, keyed on ambient versus boiling point: gas ignores elevation and
+        dissipates, while liquid stays exactly conservative.
+    *   **Spell compiler**, with the two caps failing DIFFERENTLY on purpose — complexity refuses,
+        geometry clamps and says so. Runes, triggers, shapes, catalysts, `Absorb_Tag`
+        conservation.
+    *   **Casting** through the Sprint 1 Ephemeral primitive. The TRIGGER decides when the payload
+        fires and the SHAPE decides where, which is what makes the magic doc's Trap and its
+        fireball different spells.
+    *   **Mutation and the ecology loop**, with the faction shift propagated by gossip and
+        weighted by the WITNESS faction's own culture — the only act in the game whose severity
+        depends on who saw it.
+    *   **The Grimoire panel** (`B`), because `docs/scope_and_milestones.md` assigns Sprint 4 the
+        UI that fronts the compiler, and a compiler with no route in would have been the fifth
+        system this project shipped unreachable.
+
+*   **SIX DEFECTS FOUND AGAINST MY OWN WORK, before any external audit.** Listed because the
+    METHOD that found each one is the reusable part:
+    1.  **Four trigger runes and a Cone that did nothing.** `trigger`, `delay_s` and
+        `cone_angle_deg` were written by the compiler and read by nobody. Found by GREPPING FOR A
+        SECOND REFERENCE to every new symbol — not by any test.
+    2.  `RuneLibrary.ids_of_kind` had exactly one reference. Same grep. Deleted.
+    3.  **The mutation affinity table named four cultures that do not exist.** Every branch
+        unreachable. Same grep, then checked against `DAGGenerator.CULTURES`.
+    4.  **The documented flash-fire demo did not work.** The rule was INTER-only and a fireball
+        leaves both tags on ONE entity. Every unit test passed because they all arranged the tags
+        across two neighbours. Found by RUNNING THE DOCUMENTED PLAY ROUTE END TO END.
+    5.  **A +48% regression in the CA, the hottest loop in the build.** Found by A/B BENCHMARKING
+        AGAINST `git stash`, not by any test. Now ~10%, and stated in RUNNING.md.
+    6.  `LineageJournal.apply_to` REPLACED insight rather than merging. Pre-existing and harmless
+        until Sprint 4 made insight load-bearing; an empty journal would have left a successor
+        permanently unable to cast.
+
+*   **`--scenario=<name>` FINALLY EXISTS.** `scope_and_milestones.md` §7 specifies it as a
+    SPRINT 1 deliverable and it was never built, which meant the only route to the test arena —
+    where every hand-authored feature in the build lives, including all three Sprint 4 props —
+    was hand-writing JSON into an OS-specific application-data directory that RUNNING.md named
+    eleven times before saying where it was. It cost the owner a play session on the very first
+    attempt at Sprint 4. Also `--overlay-font=` and `--no-overlay`. **CLI overrides are never
+    persisted**: without that guard, one `--scenario=test_arena` plus any runtime font change
+    would write the debug room in as the permanent default. Every boot now prints the active
+    scenario and the real config path.
+
+*   **30 MUTATION TESTS RUN AGAINST THE NEW CODE, ALL KILLED.** Two initially survived and both
+    turned out to be BAD MUTATIONS rather than weak tests — worth re-deriving rather than
+    trusting. The harness is in the session log; the pattern is: break the fix, run the file,
+    confirm red, restore.
 
 *   **SPRINT 3 + 3.5 (2026-07-31). Green, and under adversarial audit.**
     375 tests across 28 scripts, gdlint clean, boot sentinel present.
@@ -53,11 +196,18 @@
         its own redacted output. `od` shows `"Authorization: Bearer %s" % _api_key` intact.
 
 *   **THE RECURRING DEFECT IN THIS CODEBASE IS A DOC COMMENT THAT DESCRIBES BEHAVIOUR THE CODE
-    DOES NOT HAVE.** Four instances in Sprint 3 alone: `PREFERRED_PROFESSION` (declared, never
-    read), `on_timeout` (written, never called), `_convert_to_corpse` ("for non-player entities",
-    no check), `was_recently_attacked` ("recently", no time check). Every one read as covered and
-    passed review. **Before believing a comment, grep for a second reference to the symbol.**
-    A test that calls a helper directly does not prove the production path uses it.
+    DOES NOT HAVE. Eight instances across two sprints.** Sprint 3: `PREFERRED_PROFESSION`
+    (declared, never read), `on_timeout` (written, never called), `_convert_to_corpse` ("for
+    non-player entities", no check), `was_recently_attacked` ("recently", no time check).
+    Sprint 4: `trigger` and `delay_s` (compiled, never read — four trigger runes with identical
+    behaviour), `cone_angle_deg` (a Cone that was a sphere), `ids_of_kind` (one reference),
+    and `MUTATION_AFFINITY` (naming four cultures no faction has).
+    Every one read as covered and passed review.
+    **BEFORE BELIEVING A COMMENT, GREP FOR A SECOND REFERENCE TO THE SYMBOL.** This is now the
+    single highest-yield check on this codebase; it found four of Sprint 4's six self-caught
+    defects. A test that calls a helper directly does not prove the production path uses it, and
+    a unit test that arranges its own fixture does not prove the shipped content reaches it —
+    the flash-fire demo passed every unit test and did not work.
 
 *   **SPRINT 2 COMPLETE (2026-07-31).** All six roadmap steps implemented and green:
     DAG history, world generation + tile sampler, DAG-to-ECS instantiator, LoD boundary two-way
@@ -72,9 +222,12 @@
     across boots; and Sprint 1's collision could not cross a chunk seam at all.
     STILL UNPLAYED BY A HUMAN in the world scenario — frames inspected only.
 
-*   **Active Goal:** Sprint 3 and 3.5 are implemented and documented. External and Copilot input
-    audits now exist in `docs/audits/`; the implementation audit manifest is also present. Await
-    human review of #7/#8 and triage the remaining input-spec findings before starting Sprint 4.
+*   **Active Goal:** The player UI pass and the Sprints 1–4 remediation are implemented,
+    documented and self-audited on this branch. Await human review of PRs #7/#8/#9, then open
+    the remediation+UI PR stacked on #9 (or fold it into #9 if the owner prefers). The next UI
+    increment, in order of declared intent: the examine tier (pinned insight-gated card), DROP
+    intent + an actionable pack, the settings screen (remapping + accessibility), quick-belt
+    slots, and the `B`→`G` Grimoire key reconciliation (decision #4 in the HUD plan).
 
 *   **START HERE IF YOU ARE NEW:** `RUNNING.md`. It has the exact commands to run the game, the
     control list, what every object in the test arena is there to test, how to read the debug
@@ -228,19 +381,19 @@
         reference before believing a doc comment.
 
 *   **Next Immediate Steps:**
-    1.  **Wait for the two audits.** Findings land as
-        `docs/audits/{INPUT,OUTPUT}-AUDIT-RESULT--<slug>--<stamp>.md`. Triage them before
-        writing new features; a MAJOR finding against a claim outranks any Sprint 4 task.
-    2.  **Close the declared gaps in `OUTPUT-IMPL-AUDIT` §4b**, or move them into a spec with an
-        owner. The per-faction reasoning cap (G-1) is the one with a real failure mode: one
-        faction can currently fill the global queue.
-    3.  Sprint 4 (reaction matrix, spell compiler, ephemeral casting, mutation) per
-        `docs/scope_and_milestones.md`. Do not start until #7 and #8 are merged.
-        **Roadmap Step 5 comes FIRST**: Tab must toggle. It selects and never deselects, and
-        falls back to the player row on a miss, so the LIVE panel cannot be dismissed. Every
-        Sprint 4 system is inspected through that panel, so fixing it first makes the rest of the
-        sprint faster. `DebugOverlay` already treats `_selected_row = -1` as nothing-selected;
-        only `PlayerInputBridge._select_under_cursor` needs to change.
-    4.  Close the ADR-10 perf gap. Rust/GDExtension port of the CA and the spatial hash. The
-        vendored performance skill flagged `ViewManager`'s one `MeshInstance3D` per entity as
-        the next lead — the terrain already uses MultiMesh; entities do not.
+    1.  **Play it.** The remediation checks table in RUNNING.md §3a is the route: the water
+        spell, the burning rat, the lectern, overclocking, succession-then-war, the Residence
+        respawn. Everything is test-covered and NOTHING is judged for feel.
+    2.  **Send `OUTPUT-IMPL-AUDIT-remediation-sprints1-4.md` to external auditors.** The
+        highest-yield attack is unchanged: grep every FIXED item's symbol for its second
+        PRODUCTION reference.
+    3.  Close the ADR-10 perf gap — the one big engineering debt this pass deliberately did
+        not touch. Rust/GDExtension port of the CA and the spatial hash; `ViewManager`'s
+        one-MeshInstance3D-per-entity remains the flagged viewer-side lead.
+    4.  The declared list in RUNNING.md is the content backlog: swarms materializing as
+        creatures, doors/arrest/tavern-gating, NPC casting, reagent costs, trauma cures,
+        disease, gear. Each is scoped and none is concealed.
+    5.  **Mutation-harness lesson, for the next agent:** restore mutated files from the saved
+        source STRING, never `git checkout` (it reverts uncommitted work), always re-import
+        after editing an autoload, and treat "test file did not run" as its own verdict —
+        Godot's cyclic-parse quirk makes a skipped file read as a green one.

@@ -122,3 +122,68 @@ func test_spatial_hash_rebuild_cost_is_reported() -> void:
 	var per_tick_ms: float = float(Time.get_ticks_usec() - start) / 1000.0 / float(SAMPLE_TICKS)
 	gut.p("PERF  spatial hash rebuild, 1500 entities = %.3f ms" % per_tick_ms)
 	assert_lt(per_tick_ms, WorldConstants.MICRO_BUDGET_MS, "the rebuild fits inside one frame")
+
+
+## The reaction matrix runs at 60 Hz over every entity with a ChemistryComponent, and does a
+## SpatialHash radius query per uncooled candidate. That is a new per-frame cost in the Micro
+## budget, and ADR-10's whole lesson was that an unmeasured budget is a wrong one.
+##
+## The worst case for it is a room full of reactants: every entity is a candidate, none is on
+## cooldown at the start, and each one pays a proximity query. `MAX_REACTIONS_PER_TICK` bounds
+## the reactions but not the scan, so the scan is what this measures.
+func test_reaction_matrix_cost_is_reported() -> void:
+	_populate(500)
+	for i in spawned.size():
+		var row: int = EH.index_of(spawned[i])
+		var chemistry := ChemistryComponent.new()
+		# Alternating reactants, so the pair test does real work rather than failing on the
+		# first tag every time.
+		chemistry.add_tag(&"Burning" if i % 2 == 0 else &"Spores")
+		ECSManager.chemistries[row] = chemistry
+		ECSManager.add_component_bit(row, ComponentMask.CHEMISTRY)
+	ECSManager.flush_structural_changes()
+	hash.rebuild(ECSManager.query(ComponentMask.SPATIAL))
+
+	var reactions := ReactionSystem.new()
+	var start: int = Time.get_ticks_usec()
+	for tick in SAMPLE_TICKS:
+		reactions.run(tick, chunk, hash)
+	var per_tick_ms: float = float(Time.get_ticks_usec() - start) / 1000.0 / float(SAMPLE_TICKS)
+	gut.p(
+		"PERF  reactions, 500 reactive entities = %.3f ms/tick  budget=%.1f ms  %s" % [
+			per_tick_ms,
+			WorldConstants.MICRO_BUDGET_MS,
+			"OVER" if per_tick_ms > WorldConstants.MICRO_BUDGET_MS else "ok",
+		]
+	)
+	assert_lt(
+		per_tick_ms,
+		WorldConstants.MICRO_BUDGET_MS,
+		"the reaction scan alone must not eat the whole Micro budget"
+	)
+
+
+## Ephemerals are the magic substrate and they run every Micro tick too. A screenful of spells in
+## flight is the case worth knowing the cost of, because it is what a fight looks like.
+func test_ephemeral_cost_is_reported() -> void:
+	var tags: Array[StringName] = [&"Burning"]
+	for i in 200:
+		spawned.append(
+			EphemeralSystem.spawn_aura(
+				Vector3(25.0 + float(i % 37), 0.9, 2.0 + float((i / 37) % 60)),
+				tags,
+				3.0,
+				60.0,
+				EH.INVALID
+			)
+		)
+	ECSManager.flush_structural_changes()
+	hash.rebuild(ECSManager.query(ComponentMask.SPATIAL))
+
+	var ephemerals := EphemeralSystem.new()
+	var start: int = Time.get_ticks_usec()
+	for _t in SAMPLE_TICKS:
+		ephemerals.run(1.0 / 60.0, hash)
+	var per_tick_ms: float = float(Time.get_ticks_usec() - start) / 1000.0 / float(SAMPLE_TICKS)
+	gut.p("PERF  ephemerals, 200 auras = %.3f ms/tick" % per_tick_ms)
+	assert_lt(per_tick_ms, WorldConstants.MICRO_BUDGET_MS, "200 auras fit inside one frame")

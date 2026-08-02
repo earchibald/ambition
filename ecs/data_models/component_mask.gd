@@ -45,11 +45,7 @@ const SPATIAL: int = POSITION | BOUNDS
 ## An agent that can perceive.
 const PERCEIVER: int = POSITION | PERCEPTION
 
-## A Tier-2 agent with a daily life.
-const AGENT: int = POSITION | BODY | NEEDS | SCHEDULE
 
-## Something that can be damaged.
-const DAMAGEABLE: int = POSITION | BODY | PHYSICAL
 
 
 ## Human-readable mask for the debug inspector.

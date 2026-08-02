@@ -5,7 +5,6 @@ class_name InventoryComponent
 extends RefCounted
 
 var held_items: PackedInt64Array = PackedInt64Array()
-var sub_containers: PackedInt64Array = PackedInt64Array()
 var total_volume_used: float = 0.0
 var total_mass_kg: float = 0.0
 

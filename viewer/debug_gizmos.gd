@@ -23,6 +23,8 @@ const COLOUR_FACING := Color(1.0, 0.95, 0.3)
 const COLOUR_MELEE := Color(1.0, 0.35, 0.3, 0.9)
 const COLOUR_INTERACT := Color(0.4, 0.9, 1.0, 0.9)
 const COLOUR_SIGHT := Color(0.6, 0.5, 1.0, 0.7)
+const COLOUR_NPC_SIGHT := Color(0.35, 0.8, 0.5, 0.55)
+const COLOUR_FLUID := Color(0.3, 0.6, 1.0, 0.8)
 
 @export var input_bridge_path: NodePath
 
@@ -75,7 +77,55 @@ func _process(_delta: float) -> void:
 	_draw_wedge(origin, aim, PickSystem.MELEE_REACH_M, MELEE_HALF_ARC_DEG, COLOUR_MELEE)
 	_draw_facing(origin, aim)
 	_draw_sight(row, origin, aim)
+	if DebugFlags.perception_overlay_enabled:
+		_draw_perceivers(row)
+	if DebugFlags.fluid_overlay_enabled:
+		_draw_fluid_cells()
 	_mesh.surface_end()
+
+
+## The perception overlay the debugging spec assigns to Sprint 1 (§9): NPC sight ranges and
+## last-known-target markers. The flag was parsed and snapshotted since Sprint 0 and READ BY
+## NOTHING — a config surface for an overlay that did not exist. Bounded, because the overlay
+## must never cost more than the system it watches.
+func _draw_perceivers(player_row: int) -> void:
+	var drawn: int = 0
+	for row in ECSManager.query(ComponentMask.PERCEIVER):
+		if drawn >= 24:
+			return
+		if row == player_row:
+			continue
+		var perception: PerceptionComponent = ECSManager.perceptions.get(row)
+		if perception == null:
+			continue
+		var at: Vector3 = ECSManager.position_of(row)
+		at.y += GROUND_LIFT_M - _half_height(row)
+		_draw_circle(at, perception.sight_range_m, COLOUR_NPC_SIGHT)
+		for handle in perception.last_known_targets:
+			_line(at, perception.last_known_targets[handle] + Vector3.UP * 0.2, COLOUR_NPC_SIGHT)
+		drawn += 1
+
+
+## The fluid overlay: a tick over every wet cell in the active chunk, taller for deeper. This
+## is the debug view of the CA's SPARSE state — the water mesh shows where water looks like it
+## is; this shows which cells the simulation believes are wet, which is the number that must be
+## conserved.
+func _draw_fluid_cells() -> void:
+	var chunk: ChunkData = World.active_chunk
+	if chunk == null:
+		return
+	var drawn: int = 0
+	for idx in chunk.dirty_cells:
+		if drawn >= 200:
+			return
+		var x: int = int(idx) % WorldConstants.CHUNK_TILES
+		var y: int = int(idx) / WorldConstants.CHUNK_TILES
+		var units: int = chunk.fluid_at(x, y)
+		if units <= 0:
+			continue
+		var base: Vector3 = chunk.tile_to_world(x, y) + Vector3(0.0, GROUND_LIFT_M, 0.0)
+		_line(base, base + Vector3.UP * (0.1 + 0.02 * float(units)), COLOUR_FLUID)
+		drawn += 1
 
 
 ## An arrow, because "which way am I pointing" had no answer on screen at all — the player is a

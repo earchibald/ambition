@@ -39,6 +39,18 @@ var last_declaration: String = ""
 ## target is how a faction marches on ground where nobody lives.
 var objective_target: int = -1
 
+## The Tier 2 citizen currently leading, or EH.INVALID while the faction is abstract or
+## leaderless. Succession (factions doc §3) promotes the highest-prestige member here when the
+## holder dies. The macro-entity still carries the ledger and does the reasoning either way —
+## the leader is WHO the reasoning speaks as, holds the memories the prompt draws on, and is the
+## body the player can actually kill to force a succession.
+var leader_handle: int = EH.INVALID
+
+## The reasoner's own one-line account of WHY it chose the current objective, capped at 200
+## characters on the way in (declared gap G-4: the cap was requested in the prompt and never
+## enforced against the response). Read by the F1 inspector; empty until the first decision.
+var last_reasoning: String = ""
+
 
 static func from_dag_node(node: DAGNode) -> FactionCoreComponent:
 	var core := FactionCoreComponent.new()

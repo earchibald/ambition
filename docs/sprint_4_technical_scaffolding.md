@@ -129,3 +129,81 @@ Mutation -> faction alignment (review D3): the SocialSystem shift from player mu
 propagates via the witness/gossip reputation path (factions doc §6), not an instant hivemind;
 the Spore-Lord shift toward neutral / Village toward hostile is a reputation delta, gossip-
 propagated. Mutations reset on death; insight persists (magic doc §6).
+
+
+6. Corrections made during implementation (2026-08-01)
+
+Dated in place rather than silently fixed, because a future agent copy-pasting from the sketches
+above would reintroduce each of these. The code is authoritative; these notes say why it differs.
+
+§1 REACTION SCOPE NEEDS A THIRD VALUE. The sketch offers INTRA and INTER. Fire spread needs BOTH,
+and the omission was a live hole rather than a nicety: a fireball whose catalyst tags a spore
+cloud `Burning` leaves ONE entity carrying `Burning` and `Spores`, and an INTER-only rule never
+matches a pair that lives on a single entity. The roadmap's own success state — a torch into a
+room of spores — therefore produced nothing at all, while every unit test passed, because they all
+arranged the two tags on two neighbouring entities. `ReactionSystem.SCOPE_BOTH` registers one
+authored rule under both keys.
+
+§1 `energy_delta: 800` IS NOT A UNIT. The rule table's energy figures are gone. A rule now names
+WHICH participant burns, and `MaterialLibrary.combustion_energy_j` derives the joules from that
+body's mass and its heat of combustion — so a spore cloud (1.9 MJ) and a barn do not release the
+same energy because someone typed a number. The ambient rise is then real arithmetic over the
+chunk's air: 12,288 m^3 at 1,206 J/(m^3*K) is 14.8 MJ per degree, which makes one cloud +0.13 C
+and a room full of them a couple of degrees. Capped per tick at `MAX_AMBIENT_STEP_C`.
+
+§1 `duration=1.0s` IS COUNTED IN FRAMES, NOT SECONDS. `Reaction_Cooldown` expires at a MICRO-FRAME
+deadline (`REACTION_COOLDOWN_FRAMES = 60`). A cooldown measured in scaled deltas would be six
+times longer while bullet-time is held, which is a physics rule quietly depending on a viewer
+setting. Expiry is stored on `ChemistryComponent.tag_expiry`, NOT in a system-side dictionary
+keyed by row: `destroy_entity` clears every registry atomically, so a component field is cleaned
+up with the entity and a system map would hand a recycled row the previous occupant's lock.
+
+§2 `return null` IS NOT AN ERROR REPORT. The sketch prints to stdout and returns null, which from
+the UI's seat is indistinguishable from a crash. `compile` returns `{ok, spell, reason}` and the
+Grimoire prints the reason.
+
+§2 THE TWO CAPS MUST FAIL DIFFERENTLY. Complexity REFUSES — it is a knowledge gate, and the player
+can act on it. Geometry CLAMPS and records what it clamped in `caps_applied` — a 400 m radius is
+not a knowledge problem, and refusing it would let a player author a spell they can never cast and
+never learn why. The sketch's `rune.radius = 15.0` also mutated the RUNE, which is shared content:
+the second caster would find the table permanently rewritten.
+
+§2 CAP THE FINAL EXTENT, NOT THE STARTING RADIUS. An expanding aura reaches
+`radius + expansion * ttl`, so clamping the initial radius alone leaves the cap defeatable by any
+rune with an expansion rate.
+
+§2 `Rune_Stability` HAD NO BOOTSTRAP VALUE, as an input audit noted and left to this sprint. At 0
+the budget is 0 and nothing compiles, so the entire magic layer would have shipped built, tested,
+and unreachable. Seeded at 10 in `MindComponent.seed_field_primer`, giving a budget of 15.
+
+§3 `ECSManager.minds[ECSManager.player_handle()]` IS AN ADR-19 VIOLATION. Registries are keyed by
+ROW; `player_handle()` returns a packed handle. Resolve first.
+
+§3 TRIGGERS MUST DRIVE BEHAVIOUR. Written and read by nobody in the first implementation:
+`trigger`, `delay_s`, and the Cone's angle all compiled, cost complexity, and changed nothing —
+four trigger runes with identical behaviour and a cone that was a sphere. Now the TRIGGER decides
+when the payload fires and the SHAPE decides where, which is what makes the magic doc's Trap
+(proximity + aura) and its fireball (impact + projectile) different spells rather than the same
+one. Multiple triggers resolve by precedence, not last-wins, because the doc's own standard
+fireball carries two and last-wins would make behaviour depend on key-press order.
+
+§3 PROJECTILES DO NOT GO THROUGH `CollisionResolveSystem`. That system slides a body along a wall
+and steps it up a ledge, which is right for a person and wrong for a fireball — a spell that slid
+along the wall it was aimed at would never detonate. `EphemeralSystem` advances them.
+
+§4 `body.exposure[...] = 0.0` MUST RESET UNCONDITIONALLY. The sketch resets only after a successful
+roll, so an entity already at `MAX_MUTATIONS` sits pinned at the threshold and re-enters the
+mutation branch every tick, forever.
+
+§4 `WorldGrid.chunks[current_chunk].has_tag(...)` — chunks had no tags. Added as
+`ChunkData.hazard_tags` (registry §6), and exposure also accrues from the entity's OWN chemistry
+tags, which is how wading through sludge works.
+
+§4 EVERY MUTATION MUST CHANGE A NUMBER. A table of evocative tag names that alters nothing is this
+codebase's signature defect and a mutation table is the ideal shape for it. Each entry carries its
+stat deltas, and `test_mutation.gd` fails if one is added without any.
+
+§5 THE MUTATION AFFINITY TABLE MUST NAME REAL CULTURES. Its first draft invented `CULTURE_FUNGAL`
+and three siblings that no generated faction has ever carried, which would have made every
+affinity branch unreachable and the whole mechanism a constant revulsion wearing a lookup table.
+It now names tags from `DAGGenerator.CULTURES`, and an invariant test fails if the two drift.

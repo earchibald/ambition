@@ -35,7 +35,6 @@ const SLIDE_EPSILON_M: float = 0.001
 const REPORTABLE_LANDING_MPS: float = 2.0
 
 const SAFE_FALL_MPS: float = 5.0
-const FALL_DAMAGE_M: float = 3.0
 
 # --- Movement (ADR-18). ---
 ## 4.0 m/s is a real brisk walk and reads as a CRAWL from this camera: the rig sits 11 m up, so
@@ -55,11 +54,50 @@ const ARM_MASS_FRAC: float = 0.10
 const J_PER_HP: float = 3.0
 const TOUGHNESS_J: float = 120.0
 
-# --- Fluid CA (Sprint 1 §5). 1 unit = 1 litre; a tile is 1 m^2. ---
-const CA_UNIT_CM3: int = 1000
 const MAX_CELL_VOLUME: int = 1000
 const FLOW_MIN_DIFF: int = 2
 const FLOOD_PUMP_UNITS_PER_TICK: int = 50
+
+# --- Chemistry reactions (Sprint 4 §1). ---
+## The anti-recursion lock, in Micro frames. One second at 60 Hz, exactly as the scaffolding
+## specifies. Counted in FRAMES rather than seconds so bullet-time cannot change how long a
+## reaction stays locked out — a cooldown measured in scaled deltas would be six times longer
+## while `T` is held, which is a physics rule quietly depending on a viewer setting.
+const REACTION_COOLDOWN_FRAMES: int = 60
+
+## Volumetric heat capacity of air at room temperature, J/(m^3 * K): 1.2 kg/m^3 * 1005 J/(kg*K).
+## Real, so the ambient rise a fire produces is arguable rather than tuned.
+const AIR_J_PER_M3_PER_C: float = 1206.0
+
+## Ceiling height used to turn a chunk's floor area into a volume of air. The world is 2.5D, so
+## there is no modelled ceiling; 3 m is a room.
+const CHUNK_AIR_HEIGHT_M: float = 3.0
+
+## No single reaction may move the ambient temperature more than this in one tick. A blast big
+## enough to exceed it is still capped, because ambient feeds conduction into every entity in the
+## chunk and an unbounded spike is how a thermodynamics bug becomes a world-wide one.
+const MAX_AMBIENT_STEP_C: float = 40.0
+
+## Blast impulse falls to zero at this multiple of the reaction radius.
+const BLAST_FALLOFF_EXPONENT: float = 2.0
+
+## Hard ceiling on the speed a blast may impart, m/s. Without it a light entity next to a large
+## explosion leaves the chunk in one frame and the collision sweep has nothing to sweep against.
+const MAX_BLAST_SPEED_MPS: float = 25.0
+
+# --- Magic (Sprint 4 §2/§3). Geometric caps are ANTI-CRASH rules, not balance. ---
+const MAX_SPELL_RADIUS_M: float = 15.0
+const MAX_SPELL_SPEED_MPS: float = 40.0
+const MAX_SPELL_TTL_S: float = 5.0
+const MAX_SPELL_RUNES: int = 8
+## Strain per point of spell complexity (scaffolding §2).
+const STRAIN_PER_COMPLEXITY: float = 2.5
+## Complexity budget is this multiple of the caster's Rune_Stability insight (scaffolding §2).
+const RUNE_STABILITY_MULTIPLIER: float = 1.5
+
+# --- Mutation (Sprint 4 §4). ---
+const EXPOSURE_MUTATION_THRESHOLD: float = 100.0
+const MAX_MUTATIONS: int = 3
 
 # --- Performance budgets (ADR-10). TEST ASSERTIONS — never tunable. ---
 const MICRO_BUDGET_MS: float = 8.0

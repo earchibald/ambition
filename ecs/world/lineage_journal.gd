@@ -63,14 +63,26 @@ static func record_death(row: int) -> Dictionary:
 
 
 ## Dresses a new adventurer in what the lineage knows.
+##
+## MERGES, and takes the HIGHER value — it used to replace the whole dictionary and clear the
+## rune list. That was a live defect the moment Sprint 4 made insight load-bearing: a successor
+## spawns with the field primer already seeded (including `Rune_Stability`, which the spell
+## compiler gates every cast on), and an empty journal — a first death with no file on disk, or a
+## journal refused as too new — would then wipe it back to zero. The result is an adventurer who
+## cannot compile any spell at all, with no error to explain why. Merging upward has the same
+## effect as replacing whenever the journal is richer, which is every case that was working.
 static func apply_to(row: int, journal: Dictionary) -> void:
 	var mind: MindComponent = ECSManager.minds.get(row)
 	if mind == null:
 		return
-	mind.insight = journal.get("insight", {}).duplicate()
-	mind.known_runes.clear()
+	for subject in journal.get("insight", {}):
+		mind.insight[subject] = maxi(
+			int(mind.insight.get(subject, 0)), int(journal["insight"][subject])
+		)
 	for rune in journal.get("known_runes", []):
-		mind.known_runes.append(StringName(rune))
+		var rune_id := StringName(rune)
+		if not mind.known_runes.has(rune_id):
+			mind.known_runes.append(rune_id)
 
 
 static func load_journal() -> Dictionary:

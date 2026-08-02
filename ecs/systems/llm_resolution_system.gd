@@ -19,6 +19,11 @@
 class_name LLMResolutionSystem
 extends RefCounted
 
+## The prompt asks for 200 characters (`PromptBuilder.SCHEMA_INSTRUCTION`); this is where the ask
+## becomes a rule. Applied to `reason_summary` and `public_declaration` both — they are the two
+## free-text fields a model can pad without limit.
+const MAX_SUMMARY_CHARS: int = 200
+
 var accepted: int = 0
 var rejected_dead: int = 0
 var rejected_malformed: int = 0
@@ -78,12 +83,16 @@ func resolve(
 		objective = ECSEnums.Objective.FORTIFY
 
 	accepted += 1
+	# THE 200-CHARACTER CAP, ENFORCED (declared gap G-4). The prompt asks for it; a remote model
+	# is under no obligation to comply, and an uncapped response went straight into the overlay.
+	# `left()` is byte-honest truncation — losing the tail of a rant is the point.
+	core.last_reasoning = String(response.get("reason_summary", "")).left(MAX_SUMMARY_CHARS)
 	return _apply(
 		core,
 		objective as ECSEnums.Objective,
 		_parse_emotion(String(response.get("emotion_state", ""))),
 		target,
-		String(response.get("public_declaration", ""))
+		String(response.get("public_declaration", "")).left(MAX_SUMMARY_CHARS)
 	)
 
 
@@ -117,8 +126,27 @@ func _apply(
 	core.last_declaration = declaration
 	core.objective_target = target
 	objectives_applied += 1
+	_let_leader_remember(core, declaration)
 	ECSEvents.faction_decided.emit(core.faction_id, ECSEnums.Objective.keys()[objective], declaration)
 	return objective
+
+
+## The declaration goes into the LEADER'S OWN memory, marked core so gossip carries it (declared
+## gap G-9). `core.last_declaration` alone is a display field: the overlay can show it once and
+## nobody in the world can ever repeat it. A memory on a walking citizen is what neighbours can
+## overhear and pass on — which is the entire mechanism the llm doc says declarations exist for.
+func _let_leader_remember(core: FactionCoreComponent, declaration: String) -> void:
+	if declaration == "" or not ECSManager.is_alive(core.leader_handle):
+		return
+	var leader_row: int = ECSManager.resolve(core.leader_handle)
+	var memory: MemoryComponent = ECSManager.memories.get(leader_row)
+	if memory == null:
+		return
+	memory.remember(
+		MemoryEvent.create(
+			&"DECLARATION", StringName("DECLARED: %s" % declaration), GameClock.total_hours(), true
+		)
+	)
 
 
 ## Enum names are matched exactly. A loose match would quietly accept "raid" or "Raid_Faction"

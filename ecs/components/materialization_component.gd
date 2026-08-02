@@ -7,7 +7,6 @@ extends RefCounted
 
 var policy: ECSEnums.MaterializationPolicy = ECSEnums.MaterializationPolicy.PRESERVE_ENTITY
 var item_class: StringName = &""
-var manifest_id: int = -1
 
 
 func can_ledgerize() -> bool:

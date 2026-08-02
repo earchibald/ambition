@@ -16,11 +16,6 @@ enum Page { LIVE, HISTORY, FACTIONS, MAP, HIDDEN }
 
 const REFRESH_INTERVAL_S: float = 0.25
 
-## How far the cursor ray is marched, and how finely. 0.25 m is a quarter tile, which is well
-## under the smallest feature in the arena, and 240 samples at 4 Hz costs nothing.
-const CURSOR_MAX_DIST_M: float = 60.0
-const CURSOR_STEP_M: float = 0.25
-
 ## How many outcome events the feed keeps. Enough to see a fight, short enough to read.
 const FEED_CAPACITY: int = 8
 
@@ -38,7 +33,8 @@ var _drag_offset: Vector2 = Vector2.ZERO
 var _selected_row: int = -1
 var _accumulator: float = 0.0
 var _feed: Array[String] = []
-var _remembered_names: Dictionary = {}
+## Worst micro-tick duration since the panel last redrew, fed by the per-frame signal.
+var _worst_micro_ms: float = 0.0
 var _page: Page = Page.LIVE
 var _lmb_presses: int = 0
 var _rmb_presses: int = 0
@@ -52,6 +48,12 @@ func _ready() -> void:
 	DebugFlags.initialize()
 	_build_panel()
 	_page = clampi(DebugFlags.boot_overlay_page, 0, Page.size() - 1) as Page
+	# HIDDEN at boot since the player HUD took over the player-facing duties. `F1` summons the
+	# panel at `boot_overlay_page` exactly as before; captures that need it up from frame one set
+	# `overlay_visible_on_boot` in the config alongside the page.
+	if not DebugFlags.overlay_visible_on_boot:
+		_page = Page.HIDDEN
+	_panel.visible = _page != Page.HIDDEN
 	visible = DebugFlags.tick_counters_enabled
 
 	# Listen only. The overlay never writes ECS state (Prime Directive / invariants §2).
@@ -61,8 +63,21 @@ func _ready() -> void:
 	ECSEvents.action_rejected.connect(_on_rejected)
 	ECSEvents.entity_landed.connect(_on_landed)
 	ECSEvents.faction_decided.connect(_on_faction_decided)
+	ECSEvents.faction_thinking.connect(_on_faction_thinking)
+	ECSEvents.player_died.connect(_on_player_died)
+	ECSEvents.player_reborn.connect(_on_player_reborn)
+	ECSEvents.faction_leader_succeeded.connect(_on_leader_succeeded)
+	ECSEvents.faction_schism.connect(_on_schism)
+	ECSEvents.caravan_departed.connect(_on_caravan_departed)
+	ECSEvents.caravan_arrived.connect(_on_caravan_arrived)
+	ECSEvents.caravan_lost.connect(_on_caravan_lost)
 	ECSEvents.player_changed_floor.connect(_on_changed_floor)
 	ECSEvents.faction_relationship_changed.connect(_on_relationship_changed)
+	ECSEvents.spell_cast.connect(_on_spell_cast)
+	ECSEvents.spell_detonated.connect(_on_spell_detonated)
+	ECSEvents.entity_mutated.connect(_on_mutated)
+	ECSEvents.runes_learned.connect(_on_runes_learned)
+	ECSEvents.tick_completed.connect(_on_tick_completed)
 
 
 ## A DRAGGABLE, NON-MODAL panel rather than text painted on the screen.
@@ -295,6 +310,11 @@ func _compose_live() -> String:
 	out.append(PanelFormat.row("micro", PanelFormat.against_budget(
 		float(counters["last_micro_ms"]), float(counters["micro_budget_ms"]), "ms"
 	)))
+	# Fed by the `tick_completed` SIGNAL, which fires every frame — the poll above samples
+	# whichever frame the overlay happened to redraw on, so a 12 ms spike between redraws was
+	# invisible. The signal existed for overlays since Sprint 0 and had zero listeners.
+	out.append(PanelFormat.row("worst", "%.2f ms since last redraw" % _worst_micro_ms))
+	_worst_micro_ms = 0.0
 	out.append(PanelFormat.row("other", PanelFormat.tally([
 		["%.2f" % counters["last_sim_ms"], "sim"],
 		["%.2f" % counters["last_fluid_ms"], "fluid"],
@@ -323,6 +343,19 @@ func _compose_live() -> String:
 		[counters.get("total_los_marches", 0), "LoS"],
 		[counters.get("total_perceived", 0), "perceived"],
 		[counters.get("witness_events", 0), "witnesses"],
+	])))
+	out.append(PanelFormat.row("chemistry", PanelFormat.tally([
+		[counters.get("reactions_fired", 0), "reactions"],
+		[counters.get("reaction_cooldowns", 0), "locked"],
+		["%.0fC" % counters.get("reaction_ambient_c", 0.0), "air"],
+		[counters.get("ca_gas_cells", 0), "gas cells"],
+	])))
+	out.append(PanelFormat.row("magic", PanelFormat.tally([
+		[counters.get("casts_resolved", 0), "cast"],
+		[counters.get("casts_fizzled", 0), "fizzled"],
+		[counters.get("spell_detonations", 0), "detonations"],
+		[counters.get("ephemerals_active", 0), "in flight"],
+		[counters.get("mutations", 0), "mutations"],
 	])))
 	out.append(PanelFormat.row("factions", PanelFormat.tally([
 		[counters.get("plans_made", 0), "plans"],
@@ -405,39 +438,6 @@ func _cursor_value() -> String:
 	]
 
 
-## Health, stamina and airborne state. Fall damage was resolving correctly and reporting nowhere,
-## so a 2.5 m drop and a 0.4 m step looked identical from the player's seat.
-func _vitals() -> String:
-	var row: int = ECSManager.resolve(ECSManager.player_handle())
-	if row < 0:
-		return "vitals: <no player>"
-	var body: BodyComponent = ECSManager.bodies.get(row)
-	if body == null:
-		return "vitals: <no body>"
-	var velocity: Vector3 = ECSManager.velocity_of(row)
-	var state: String = "grounded"
-	if velocity.y < -0.05:
-		state = "FALLING %.1f m/s" % -velocity.y
-	elif velocity.y > 0.05:
-		state = "rising"
-	return "vitals: health %.1f/%.1f   stamina %.1f   %s   (safe fall < %.0f m/s)" % [
-		body.health, body.max_health, body.stamina, state, WorldConstants.SAFE_FALL_MPS
-	]
-
-
-## Raw mouse-button state. Requested during play-testing, and immediately useful: it separates
-## "the click never registered" from "the click registered and the action was refused".
-func _mouse_state() -> String:
-	var left: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
-	var right: bool = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-	return "mouse: LMB %s  RMB %s   attack-presses %d  interact-presses %d" % [
-		"HELD" if left else "up",
-		"HELD" if right else "up",
-		_lmb_presses,
-		_rmb_presses,
-	]
-
-
 ## Newest-first ring of outcome events. Bounded, so a long session cannot grow it without limit.
 func _remember(text: String) -> void:
 	_feed.push_front("%s  %s" % [GameClock.to_display_string(), text])
@@ -481,6 +481,15 @@ func _on_rejected(actor: int, action: StringName, reason: StringName) -> void:
 	_remember("%s: %s refused — %s" % [_name_of(actor), action, reason])
 
 
+## The "thinking" bark (roadmap review F1). Deliberation used to be invisible until the answer
+## landed, so a leader mid-decision looked identical to a leader doing nothing — and with a slow
+## remote provider that could be many seconds of apparent inertness. The decided line below is
+## what replaces this one when the response arrives.
+func _on_faction_thinking(faction_id: int, is_crisis: bool) -> void:
+	var why: String = "URGENTLY " if is_crisis else ""
+	_remember("faction %d is %sdeliberating..." % [faction_id, why])
+
+
 ## Factions talk. Without this the entire reasoning layer runs invisibly and the only evidence
 ## it exists at all is that NPCs occasionally walk somewhere different.
 func _on_faction_decided(faction_id: int, objective: String, declaration: String) -> void:
@@ -502,116 +511,110 @@ func _on_relationship_changed(
 	_remember("faction %d is now HOSTILE to %s (%.0f)" % [faction_id, who, score])
 
 
+func _on_spell_cast(caster: int, spell_id: StringName, strain: float) -> void:
+	_remember("%s cast %s (%.1f strain)" % [_name_of(caster), spell_id, strain])
+
+
+## The detonation is a SEPARATE line from the cast. A fireball that leaves the hand and never
+## goes off is the exact failure the projectile path can have, and one combined line could not
+## tell the two apart.
+func _on_spell_detonated(_caster: int, spell_id: StringName, at: Vector3) -> void:
+	_remember("%s went off at (%.1f, %.1f)" % [spell_id, at.x, at.z])
+
+
+## A permanent change to your body earns a line of its own. It is also the moment the faction
+## consequence starts, so the feed showing it makes the delay before the village reacts legible
+## as a delay rather than as nothing happening.
+func _on_mutated(entity: int, mutation: StringName) -> void:
+	_remember("%s MUTATED — %s" % [_name_of(entity), mutation])
+
+
+## The biggest event in the game had NO LISTENER anywhere — `player_died` was emitted into
+## silence, so the run ending produced no feed line and the freeze that follows (the loop pauses
+## on death) read as a crash. Found by the dead-symbol sweep, not by any test or play session.
+func _on_player_died(_corpse: int, _killer: int, lineage_generation: int) -> void:
+	_remember("YOU DIED — generation %d ends here" % lineage_generation)
+
+
+func _on_player_reborn(_player: int, lineage_generation: int) -> void:
+	_remember("a new adventurer arrives — generation %d" % lineage_generation)
+
+
+func _on_leader_succeeded(faction_id: int, _new_leader: int, prestige: float) -> void:
+	_remember("faction %d has a new leader (prestige %.0f)" % [faction_id, prestige])
+
+
+func _on_schism(parent_faction: int, splinter_faction: int, defectors: int) -> void:
+	_remember(
+		"SCHISM — %d citizens of faction %d break away as faction %d"
+		% [defectors, parent_faction, splinter_faction]
+	)
+
+
+func _on_caravan_departed(from_faction: int, to_faction: int, _carrier: int) -> void:
+	_remember("caravan: faction %d -> faction %d departs" % [from_faction, to_faction])
+
+
+func _on_caravan_arrived(
+	from_faction: int, to_faction: int, material: StringName, quantity: int
+) -> void:
+	_remember(
+		"caravan: %d %s delivered, faction %d -> %d"
+		% [quantity, material, from_faction, to_faction]
+	)
+
+
+func _on_caravan_lost(from_faction: int, to_faction: int) -> void:
+	_remember("caravan: faction %d -> %d LOST on the road" % [from_faction, to_faction])
+
+
+func _on_tick_completed(
+	tick_class: StringName, duration_ms: float, _entities: int
+) -> void:
+	if tick_class == &"micro":
+		_worst_micro_ms = maxf(_worst_micro_ms, duration_ms)
+
+
+func _on_runes_learned(_reader: int, runes: Array) -> void:
+	if runes.is_empty():
+		_remember("you read the inscription — nothing new")
+		return
+	var names: Array[String] = []
+	for rune in runes:
+		names.append(String(rune))
+	_remember("LEARNED: %s" % ", ".join(names))
+
+
 func _on_changed_floor(from_floor: int, to_floor: int) -> void:
 	var verb: String = "descend" if to_floor < from_floor else "climb"
 	_remember("you %s to floor %d" % [verb, to_floor])
 
 
 ## A handle is not a name. Without this the feed reads "entity 4294967296 took 3.2 damage".
-##
-## Names are REMEMBERED, because the interesting events are exactly the ones that end an entity.
-## A stack that merges on pickup is destroyed inside the operation that reports it, so resolving
-## the handle afterwards yields nothing and the log read "you picked up <gone>". The last known
-## name is the honest answer.
+## Delegated to `EntityCard.title_or_last` — one naming truth AND one last-known-name memory,
+## shared with the player HUD's log, so the two feeds can never call one object two things.
 func _name_of(entity: int) -> String:
-	var row: int = ECSManager.resolve(entity)
-	if row < 0:
-		return _remembered_names.get(EH.index_of(entity), "<gone>")
-	var name: String = _describe(row)
-	_remembered_names[row] = name
-	return name
+	return EntityCard.title_or_last(entity)
 
 
-## What a thing IS, in words. Material and count first for items, because "618 x MAT_CLOTH" is
-## the answer to "what is this" and a component list is not.
+## What a thing IS, in words. Delegated to `EntityCard` so the inspector header, the event feed
+## and the hover card cannot drift apart — three names for one object is how "you picked up
+## Item #2 / you picked up <gone>" happened. The debug-only detail (the raw handle) is appended
+## by the caller, not baked in here.
 func _label_for(row: int) -> String:
-	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
-	if chemistry != null and chemistry.active_tags.has(&"Corpse"):
-		return "corpse"
-	if row == 0:
-		return "you"
-
-	var policy: MaterializationComponent = ECSManager.materializations.get(row)
-	if policy != null and policy.item_class == &"Citizen":
-		return "villager"
-	if ECSManager.has_components(row, ComponentMask.FACTION_CORE):
-		return "faction ledger"
-	if ECSManager.bodies.has(row):
-		return "creature"
-	return _describe_stack(row, policy)
+	return EntityCard.title(row)
 
 
-## Items read as "618 x MAT_CLOTH (Commodity)" — the count and the material ARE the answer to
-## "what is this", where a component list is not.
-func _describe_stack(row: int, policy: MaterializationComponent) -> String:
-	var physical: PhysicalPropertyComponent = ECSManager.physicals.get(row)
-	var composition: MaterialCompositionComponent = ECSManager.materials.get(row)
-	if physical == null or composition == null:
-		return "object"
-	var kind: String = ""
-	if policy != null and policy.item_class != &"":
-		kind = " (%s)" % policy.item_class
-	return "%d x %s%s" % [physical.quantity, composition.dominant_material(), kind]
-
-
-func _describe(row: int) -> String:
-	if row == 0:
-		return "you"
-	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
-	if chemistry != null and chemistry.active_tags.has(&"Corpse"):
-		return "corpse #%d" % row
-	if ECSManager.bodies.has(row):
-		return "creature #%d" % row
-	return "item #%d" % row
-
-
-## Selects an entity for inspection. Called by the input bridge via PickSystem.
+## Selects an entity for inspection, or clears with a negative row. Called by the input bridge
+## via PickSystem.
 func select_row(row: int) -> void:
 	_selected_row = row
 
 
-## Where the player is, in BOTH coordinate systems. Every arena feature is specified in tile
-## coordinates (`ecs/world/test_arena.gd`, and the table in RUNNING.md), but the ECS stores
-## metres — so without this line neither number can be checked against the other, and "walk to
-## the ledge and confirm the step rule" is not a runnable instruction.
-func _player_location() -> String:
-	var row: int = ECSManager.resolve(ECSManager.player_handle())
-	if row < 0:
-		return "you: <no player entity>"
-	var pos: Vector3 = ECSManager.position_of(row)
-	var chunk: ChunkData = World.chunk_containing(pos)
-	if chunk == null:
-		return "you: world (%.2f, %.2f, %.2f)   <no active chunk>" % [pos.x, pos.y, pos.z]
-	var tile: Vector2i = chunk.world_to_tile(pos)
-	return "you: tile %s   world (%.2f, %.2f, %.2f)   %s" % [
-		_format_tile(tile), pos.x, pos.y, pos.z, _tile_readout(chunk, tile)
-	]
-
-
-## The tile under the mouse. This is a SURVEY tool: it answers "what is over there" for any tile
-## on screen, with no walking involved. Walking is only needed to test the movement RULES, which
-## are a separate question — see the two tables in RUNNING.md.
-##
-## Marched against the actual height map rather than intersected with the y=0 plane. A flat-plane
-## approximation is wrong at exactly the two places worth inspecting — the raised ledge and the
-## pit — because those are the only tiles whose elevation is not zero.
-##
-## Not routed through PickSystem: the DDA march registers a hit only on SOLID tiles, so over open
-## floor it correctly reports nothing at all, which is useless for a terrain survey.
-func _cursor_location() -> String:
-	var chunk: ChunkData = World.active_chunk
-	var camera: Camera3D = get_viewport().get_camera_3d()
-	if chunk == null or camera == null:
-		return "cursor: <no camera>"
-	var tile: Vector2i = _cursor_tile(chunk, camera)
-	if tile.x < 0:
-		return "cursor: <not over the world>"
-	var owner: ChunkData = World.chunk_containing(
-		chunk.tile_to_world(tile.x, tile.y)
-	) if World.grid == null else _owner_for(camera)
-	return "cursor: tile %s   %s" % [
-		_format_tile(tile), _tile_readout(owner if owner != null else chunk, tile)
-	]
+## What is currently being inspected, or -1 for nothing. The input bridge needs this to decide
+## whether a Tab press is a re-select of the same target (which clears) or a new one.
+func selected_row() -> int:
+	return _selected_row
 
 
 ## The chunk under the cursor, so the readout describes the tile it names.
@@ -709,9 +712,21 @@ func _inspect(row: int) -> String:
 				physical.quantity,
 			]
 		)
+	# Tags carry their COUNTDOWN where they have one. `Reaction_Cooldown` with no number beside it
+	# cannot be told from a lock that is stuck, which is the single most likely Sprint 4 bug and
+	# the one the inspector should be able to answer on sight.
 	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
 	if chemistry != null and not chemistry.active_tags.is_empty():
-		lines.append("tags: %s" % ", ".join(chemistry.active_tags))
+		lines.append("tags: %s" % ", ".join(_tags_with_countdowns(chemistry)))
+	if body != null and not body.mutations.is_empty():
+		lines.append("mutations: %s" % ", ".join(body.mutations))
+	if body != null and not body.exposure.is_empty():
+		lines.append("exposure: %s" % _exposure_text(body))
+	var mind: MindComponent = ECSManager.minds.get(row)
+	if mind != null and mind.active_spell != &"":
+		lines.append("bound spell: %s  (%d known runes)" % [
+			mind.active_spell, mind.known_runes.size()
+		])
 	var perception: PerceptionComponent = ECSManager.perceptions.get(row)
 	if perception != null:
 		lines.append(
@@ -733,6 +748,31 @@ func _inspect(row: int) -> String:
 	if lod != null:
 		lines.append("LoD %s" % _enum_name(ECSEnums.LoD, lod.current_state))
 	return "\n".join(lines)
+
+
+## Tag list with `(Nf)` after anything that is counting down.
+func _tags_with_countdowns(chemistry: ChemistryComponent) -> Array[String]:
+	var now: int = GameLoopManager.micro_frames
+	var out: Array[String] = []
+	for tag in chemistry.active_tags:
+		var left: int = chemistry.frames_left(tag, now)
+		out.append(String(tag) if left < 0 else "%s(%df)" % [tag, left])
+	return out
+
+
+## Exposure as a percentage of the mutation threshold, because 47.3 means nothing on its own and
+## "47%" says how close the next permanent change is.
+func _exposure_text(body: BodyComponent) -> String:
+	var parts: Array[String] = []
+	for track in body.exposure:
+		parts.append("%s %d%%" % [
+			track,
+			int(
+				100.0 * float(body.exposure[track])
+				/ WorldConstants.EXPOSURE_MUTATION_THRESHOLD
+			),
+		])
+	return ", ".join(parts)
 
 
 ## Enums printed as raw integers are unreadable, and worse, they invite guesses: `awareness 0`

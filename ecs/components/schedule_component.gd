@@ -18,12 +18,3 @@ func block_for_hour(hour: int) -> Block:
 		return Block.LEISURE
 	return Block.SLEEP
 
-
-func block_name(block: Block) -> StringName:
-	match block:
-		Block.SLEEP:
-			return &"Sleep"
-		Block.WORK:
-			return &"Work"
-		_:
-			return &"Leisure"

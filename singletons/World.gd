@@ -60,7 +60,23 @@ func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) 
 ## arrives last, into a world that is already running.
 func _boot_generated_world(seed_value: int) -> ChunkData:
 	boot_report = Bootstrapper.new()
-	boot_report.execute_boot_sequence(seed_value)
+	# Per-phase timing, printed every boot (scope doc §7: "Print a per-phase breakdown so a
+	# regression is actionable"). The stopwatch lives HERE because ADR-20 bans wall-clock reads
+	# inside `ecs/`; the bootstrapper reports phase completions and this closure times the gaps.
+	var phase_started: Array[int] = [Time.get_ticks_usec()]
+	boot_report.on_phase = func(phase: StringName) -> void:
+		var now: int = Time.get_ticks_usec()
+		print("boot phase %-12s %6.1f ms" % [phase, float(now - phase_started[0]) / 1000.0])
+		phase_started[0] = now
+	# THE PRE-WARM RUNS REAL SIMULATION TICKS. The injection point existed so a test could drive
+	# it — and the shipped boot passed NOTHING, so `pre_warm_ticks_run` counted to 100 while zero
+	# ticks ran and the roadmap's success state ("NPCs are already working when the player gains
+	# control") was false every boot. The test proved the injection point; nothing proved the
+	# production wiring, which is this codebase's signature defect at boot scale.
+	boot_report.execute_boot_sequence(seed_value, false, func(_gravity_suppressed: bool) -> void:
+		var home: ChunkData = boot_report.grid.chunk_at(Vector3i.ZERO)
+		GameLoopManager._run_sim_tick(home)
+	)
 	grid = boot_report.grid
 	chunks = grid.chunks
 	# The village centre is the player's chunk, and it is Active from the first frame.
@@ -165,6 +181,21 @@ static func spawn_position_in(chunk: ChunkData) -> Vector3:
 	return chunk.tile_to_world(centre, centre) + Vector3(0.0, 0.9, 0.0)
 
 
+## The Residence interior when this is the generated origin village chunk; the centre-search
+## fallback otherwise (a chunk handed in by a test, or a future scenario with no residence).
+## The fallback matters: a residence tile that happened to be solid in some other chunk would
+## spawn the player inside a wall, which reads as broken controls rather than a spawn bug.
+static func residence_position(chunk: ChunkData) -> Vector3:
+	var tile: Vector2i = FloorGenerator.RESIDENCE_TILE
+	if (
+		chunk.chunk_id == Vector3i.ZERO
+		and not chunk.is_solid(tile.x, tile.y)
+	):
+		var ground: Vector3 = chunk.tile_to_world(tile.x, tile.y)
+		return Vector3(ground.x, ground.y + 0.9, ground.z)
+	return spawn_position_in(chunk)
+
+
 ## What collision and picking resolve terrain against. The grid when the world is streamed, the
 ## single chunk when it is the debug arena — both satisfy the same TileSampler contract, so the
 ## systems never branch on which one they have.
@@ -204,12 +235,13 @@ func _spawn_player(chunk: ChunkData) -> void:
 	var row: int = EH.index_of(handle)
 
 	# The arena AUTHORS its spawn — west of the interior wall, so walking east exercises the
-	# doorway, the ledge and the pit in order. A generated chunk has no such intent, so one is
-	# searched for instead.
+	# doorway, the ledge and the pit in order. The generated world spawns at the Adventurer's
+	# Residence (Sprint 3 roadmap Step 6): every generation of adventurer wakes in the same house,
+	# which is what makes a respawn read as an arrival rather than a reset.
 	var spawn: Vector3 = (
 		TestArena.spawn_position(chunk)
 		if scenario == SCENARIO_TEST_ARENA
-		else spawn_position_in(chunk)
+		else residence_position(chunk)
 	)
 	ECSManager.set_position(row, spawn)
 	ECSManager.set_velocity(row, Vector3.ZERO)
@@ -254,7 +286,13 @@ func _spawn_player(chunk: ChunkData) -> void:
 	ECSManager.containers[row] = container
 	ECSManager.add_component_bit(row, ComponentMask.CONTAINER)
 
-	ECSManager.chemistries[row] = ChemistryComponent.new()
+	# Guest_Status is the Sprint 2 roadmap's explicit spawn requirement, and it was never granted:
+	# the perception invariant "an unseen crime does not revoke Guest_Status" was tested against a
+	# fixture tag no real player ever carried. The tag means the village treats the newcomer as a
+	# guest until they are seen doing something that forfeits it.
+	var player_chemistry := ChemistryComponent.new()
+	player_chemistry.add_tag(&"Guest_Status")
+	ECSManager.chemistries[row] = player_chemistry
 	ECSManager.add_component_bit(row, ComponentMask.CHEMISTRY)
 
 	var mind := MindComponent.new()
@@ -273,12 +311,41 @@ func _spawn_player(chunk: ChunkData) -> void:
 	ECSManager.social_identities[row] = identity
 	ECSManager.add_component_bit(row, ComponentMask.SOCIAL_IDENTITY)
 
+	_grant_starting_kit(row)
+
 	# ViewManager spawns visuals ONLY in response to this signal. Without it the player had no
 	# body at all: the camera tracked an invisible point, and every movement bug looked instead
 	# like a camera bug. Emitted last, so the entity is fully assembled before anyone sees it.
 	ECSEvents.emit_entity_created(
 		handle, [&"Player"] as Array[StringName], ECSManager.position_of(row)
 	)
+
+
+## "A starting inventory based on Village Wealth" (Sprint 2 roadmap spawn step). WITHDRAWN from
+## the richest faction's ledger, never minted: the village equips its guest, so a starting kit
+## that appeared from nowhere would break the economy conservation invariant on the first frame.
+## A poor village hands over less; a village with no copper at all hands over nothing, and both
+## are the correct reading of "based on wealth".
+func _grant_starting_kit(row: int) -> void:
+	var richest: FactionCoreComponent = null
+	for core_row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[core_row]
+		if richest == null or core.ledger_total() > richest.ledger_total():
+			richest = core
+	if richest == null:
+		return
+	var granted: int = richest.withdraw(
+		MaterialLibrary.MAT_COPPER, clampi(richest.ledger_total() / 200, 1, 8)
+	)
+	if granted <= 0:
+		return
+	var kit: int = spawn_item(
+		ECSManager.position_of(row), MaterialLibrary.MAT_COPPER, 112.0, granted
+	)
+	if not GameLoopManager.inventory.try_insert(row, kit):
+		# A full pack cannot happen at spawn; if it ever does, the coins stay on the floor of the
+		# Residence rather than vanishing — conservation again.
+		push_warning("starting kit did not fit the player's pack; left at the Residence")
 
 
 ## Spawns a simple creature for testing and for the perception/combat gates.
@@ -300,6 +367,7 @@ func spawn_creature(position: Vector3, species: StringName = &"SPC_CORPSE_RAT") 
 	ECSManager.add_component_bit(row, ComponentMask.BOUNDS)
 
 	var body := BodyComponent.new()
+	body.species = species
 	body.max_health = 8.0 if is_rat else 100.0
 	body.health = body.max_health
 	body.strength = 2.0 if is_rat else 10.0
@@ -338,6 +406,60 @@ func spawn_creature(position: Vector3, species: StringName = &"SPC_CORPSE_RAT") 
 
 
 ## Spawns a dropped item that falls and comes to rest via the loose-item integrator.
+## A tagged lump of matter with the components a reaction needs: chemistry to react, physical and
+## material to carry energy, bounds so the SpatialHash can find it.
+func spawn_reactant(
+	at: Vector3, material_id: StringName, volume_cm3: float, tag: StringName
+) -> int:
+	var handle: int = ECSManager.allocate_entity()
+	var row: int = EH.index_of(handle)
+	ECSManager.set_position(row, at)
+	ECSManager.add_component_bit(row, ComponentMask.POSITION)
+	ECSManager.bounds[row] = BoundsComponent.new(Vector3(0.5, 0.5, 0.5))
+	ECSManager.add_component_bit(row, ComponentMask.BOUNDS)
+
+	var physical := PhysicalPropertyComponent.new()
+	physical.volume_cm3 = volume_cm3
+	var composition := MaterialCompositionComponent.new({material_id: 1.0})
+	MaterialLibrary.recompute_mass(physical, composition)
+	physical.set_temperature_c(20.0)
+	ECSManager.physicals[row] = physical
+	ECSManager.materials[row] = composition
+	ECSManager.add_component_bit(row, ComponentMask.PHYSICAL | ComponentMask.MATERIAL)
+
+	var chemistry := ChemistryComponent.new()
+	chemistry.add_tag(tag)
+	ECSManager.chemistries[row] = chemistry
+	ECSManager.add_component_bit(row, ComponentMask.CHEMISTRY)
+
+	var tags: Array[StringName] = [tag]
+	ECSEvents.emit_entity_created(handle, tags, at)
+	return handle
+
+
+## A readable stand: interact (`E`) to learn what is inscribed on it. Too heavy to pick up —
+## `capacity` refusal is not how it works; the `Inscribed` tag reroutes the TAKE intent into a
+## read before the inventory is ever consulted.
+func spawn_lectern(at: Vector3, runes: Array[StringName]) -> int:
+	var handle: int = spawn_item(at, MaterialLibrary.MAT_STONE, 40000.0, 1)
+	var row: int = EH.index_of(handle)
+	ECSManager.chemistries[row].add_tag(&"Inscribed")
+	ECSManager.loose_items[row].inscribed_runes = runes.duplicate()
+	return handle
+
+
+## Something already alight, so the `Absorb_Heat` rune has an environmental resource to consume
+## and the quench rule has a fire to put out.
+func spawn_brazier(at: Vector3) -> int:
+	var handle: int = spawn_reactant(at, MaterialLibrary.MAT_STONE, 4000.0, &"Burning")
+	var row: int = EH.index_of(handle)
+	var source := HeatSourceComponent.new()
+	source.stored_energy = 5000000.0
+	ECSManager.heat_sources[row] = source
+	ECSManager.add_component_bit(row, ComponentMask.HEAT_SOURCE)
+	return handle
+
+
 func spawn_item(
 	position: Vector3, material_id: StringName, volume_cm3: float, quantity: int = 1
 ) -> int:

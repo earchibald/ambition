@@ -12,6 +12,11 @@ var resting: bool = false
 ## mid-bounce.
 var still_ticks: int = 0
 
+## Runes readable off this object (a lectern, a tablet — anything tagged `Inscribed`). The route
+## into rune knowledge that play never had: ten of seventeen runes were reachable only from
+## tests, because the DAG placed "ruined libraries" and nothing made them readable (gap G-3).
+var inscribed_runes: Array[StringName] = []
+
 
 ## Returns true when the item has come to rest and should leave the active mover set.
 func update_rest(speed_mps: float) -> bool:

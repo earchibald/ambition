@@ -199,3 +199,122 @@ func test_overflow_evicts_mundane_before_core() -> void:
 		if event.event_id == core.event_id:
 			kept = true
 	assert_true(kept, "the core memory survived 200 mundane insertions")
+
+
+# --- Remediation pass (2026-08-01): the planner/utility handoff and the job lifecycle ------------
+
+## The LLM decided, the planner assigned, and half a second later everyone went back to what
+## they were doing: planner jobs claimed at score 0.0, so ANY nonzero personal utility preempted
+## them on the next Simulation tick. A faction order must outrank habit.
+func test_a_faction_order_survives_routine_utility_evaluation() -> void:
+	var handle: int = _spawn_agent(10.0, 90.0)
+	var row: int = EH.index_of(handle)
+	var job := JobComponent.new()
+	job.current_action = &"PatrolBorders"
+	job.claim(handle, FactionPlanner.PLANNER_CLAIM_SCORE)
+	ECSManager.jobs[row] = job
+	ECSManager.add_component_bit(row, ComponentMask.JOB)
+
+	jobs.run(1)
+
+	assert_eq(job.current_action, &"PatrolBorders", "the patrol continues")
+	assert_true(job.is_latched(), "still latched")
+
+
+## ...but not survival. A guard who starves at their post is a planner bug wearing a uniform.
+func test_a_starving_guard_abandons_the_patrol_to_eat() -> void:
+	var handle: int = _spawn_agent(98.0, 90.0)
+	var row: int = EH.index_of(handle)
+	var job := JobComponent.new()
+	job.current_action = &"PatrolBorders"
+	job.claim(handle, FactionPlanner.PLANNER_CLAIM_SCORE)
+	ECSManager.jobs[row] = job
+	ECSManager.add_component_bit(row, ComponentMask.JOB)
+
+	jobs.run(1)
+
+	assert_eq(job.current_action, ActionIntent.CONSUME, "an emergency still interrupts")
+
+
+## DONE was an enum value with no producer: no job in the history of the build had ever
+## finished. Standing at the work site for the work duration is what finishing means.
+func test_a_job_worked_to_completion_reaches_done() -> void:
+	var handle: int = _spawn_agent(10.0, 90.0)
+	var row: int = EH.index_of(handle)
+	var job := JobComponent.new()
+	job.current_action = &"Barricade"
+	job.claim(handle, FactionPlanner.PLANNER_CLAIM_SCORE)
+	job.status = ECSEnums.JobStatus.IN_PROGRESS
+	ECSManager.jobs[row] = job
+	ECSManager.add_component_bit(row, ComponentMask.JOB)
+
+	for tick in JobResolutionSystem.WORK_DURATION_TICKS:
+		if job.status == ECSEnums.JobStatus.IN_PROGRESS:
+			jobs.run(tick)
+
+	assert_eq(jobs.jobs_completed, 1, "the job completed")
+	assert_ne(
+		job.current_action, &"Barricade",
+		"and the worker moved on — the same evaluation that completes hands out the next task"
+	)
+
+
+## A walking job whose route was refused must ABORT with a cooldown, not sit CLAIMED forever on
+## a worker who is never going to arrive.
+func test_an_unreachable_job_aborts_instead_of_stranding_the_worker() -> void:
+	var handle: int = _spawn_agent(10.0, 90.0)
+	var row: int = EH.index_of(handle)
+	var job := JobComponent.new()
+	job.current_action = &"MarchToTarget"
+	job.claim(handle, FactionPlanner.PLANNER_CLAIM_SCORE)
+	ECSManager.jobs[row] = job
+	ECSManager.add_component_bit(row, ComponentMask.JOB)
+	# The signature of a refused search: locomotion exists, destination cleared, no waypoints.
+	var locomotion := LocomotionComponent.new()
+	locomotion.has_destination = false
+	ECSManager.locomotions[row] = locomotion
+	ECSManager.add_component_bit(row, ComponentMask.LOCOMOTION)
+
+	jobs.run(1)
+
+	assert_eq(jobs.jobs_aborted, 1, "the impossible errand was abandoned")
+	assert_true(
+		jobs._on_cooldown(row, &"MarchToTarget", 2),
+		"and is on cooldown, so the failure cannot livelock"
+	)
+
+
+## The three personal actions never walk; the abort path must not eat lunch.
+func test_personal_actions_are_not_aborted_for_having_no_route() -> void:
+	var handle: int = _spawn_agent(95.0, 90.0)
+	var row: int = EH.index_of(handle)
+	jobs.run(1)
+	var job: JobComponent = ECSManager.jobs[row]
+	assert_eq(job.current_action, ActionIntent.CONSUME)
+	var locomotion := LocomotionComponent.new()
+	locomotion.has_destination = false
+	ECSManager.locomotions[row] = locomotion
+	ECSManager.add_component_bit(row, ComponentMask.LOCOMOTION)
+	jobs.run(2)
+	assert_eq(jobs.jobs_aborted, 0, "eating needs no route and is not a failed walk")
+
+
+## `release_jobs_of` had zero production callers, so a dead hauler's job stayed CLAIMED by a
+## corpse forever. Death is the moment the no-orphaned-jobs rule exists for.
+func test_death_releases_the_job() -> void:
+	var handle: int = _spawn_agent(10.0, 90.0)
+	var row: int = EH.index_of(handle)
+	ECSManager.bodies[row] = BodyComponent.new()
+	ECSManager.add_component_bit(row, ComponentMask.BODY)
+	ECSManager.chemistries[row] = ChemistryComponent.new()
+	ECSManager.add_component_bit(row, ComponentMask.CHEMISTRY)
+	var job := JobComponent.new()
+	job.current_action = &"Haul"
+	job.claim(handle, 1.0)
+	ECSManager.jobs[row] = job
+	ECSManager.add_component_bit(row, ComponentMask.JOB)
+
+	var combat := ActionResolutionSystem.new()
+	combat._convert_to_corpse(row)
+
+	assert_true(job.is_open(), "the corpse holds no claim; the job is back in the pool")

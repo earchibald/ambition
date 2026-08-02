@@ -11,7 +11,6 @@ extends Node
 
 signal entity_created(entity: int, tags: Array, initial_pos: Vector3)
 signal entity_destroyed(entity: int)
-signal entity_moved(entity: int, new_pos: Vector3)
 signal chunk_state_changed(chunk_id: Vector3i, is_active: bool)
 signal clock_advanced(hour: int, day: int, season: int, year: int)
 
@@ -37,6 +36,12 @@ signal entity_landed(entity: int, speed_mps: float, damage: float)
 ## than only what it decided — the difference between a log line and a world that talks.
 signal faction_decided(faction_id: int, objective: String, declaration: String)
 
+## A leader just joined the reasoning queue (roadmap review F1: the "thinking" bark). Emitted at
+## SUBMIT, not at dispatch, because the requirement is that deliberation is visible the moment it
+## starts — the async answer replaces it via `faction_decided` whenever it lands. `is_crisis`
+## lets the feed distinguish an emergency from the weekly review.
+signal faction_thinking(faction_id: int, is_crisis: bool)
+
 ## The run ended. Carries the CORPSE handle, not the old player handle: row 0's generation has
 ## been bumped, so the old handle is deliberately dead by the time anyone reads this.
 signal player_died(corpse: int, killer: int, lineage_generation: int)
@@ -47,11 +52,43 @@ signal player_reborn(player: int, lineage_generation: int)
 ## assembled from a template that only ever meant to describe failures.
 signal player_changed_floor(from_floor: int, to_floor: int)
 
+## Magic, reported like everything else. A cast that resolves silently is indistinguishable from
+## one that was never registered, which is the failure mode this bus was added for in Sprint 1.
+## `reason` is empty on success and names the refusal otherwise (not enough stamina, fizzled for
+## want of an environmental resource, compilation refused).
+signal spell_bound(caster: int, spell_id: StringName, ok: bool, reason: StringName)
+signal spell_cast(caster: int, spell_id: StringName, strain: float)
+signal spell_detonated(caster: int, spell_id: StringName, at: Vector3)
+
+## A permanent physiological change. Its own signal rather than a feed line, because the faction
+## reputation path and the UI both need it and neither should have to poll `BodyComponent`.
+signal entity_mutated(entity: int, mutation: StringName)
+
+## Something Inscribed was read. `runes` holds only the NEWLY learned ids — an empty array means
+## "you already knew all of this", which is worth reporting distinctly from silence.
+signal runes_learned(reader: int, runes: Array)
+
+
 ## A faction's opinion of another crossed a threshold. Carries the score so the feed can say how
 ## bad it is, and `now_hostile` so it can say what changed rather than just that something did.
 signal faction_relationship_changed(
 	faction_id: int, about_faction: int, score: float, now_hostile: bool
 )
+
+## Succession (factions doc §3): the leader died and the highest-prestige member took over.
+## A story beat the feed must carry — a decapitated faction recovering is the entire point of
+## the mechanic, and invisibly recovering is indistinguishable from never having been hurt.
+signal faction_leader_succeeded(faction_id: int, new_leader: int, prestige: float)
+
+## The Schism Mechanic: disloyal citizens broke away as a new faction, at war with the old one.
+signal faction_schism(parent_faction: int, splinter_faction: int, defectors: int)
+
+## Trade caravans (factions doc §4). Departure and arrival are separate signals because the gap
+## between them is where interception lives — a caravan that leaves and never arrives is the
+## player-facing event, and one signal could not express it.
+signal caravan_departed(from_faction: int, to_faction: int, carrier: int)
+signal caravan_arrived(from_faction: int, to_faction: int, material: StringName, quantity: int)
+signal caravan_lost(from_faction: int, to_faction: int)
 
 
 ## Tag arrays are `Array[StringName]`. Emitting an untyped array literal into a typed

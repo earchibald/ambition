@@ -46,6 +46,7 @@ var collision: CollisionResolveSystem = CollisionResolveSystem.new()
 var picking: PickSystem = PickSystem.new()
 var fluids: FluidDynamicsSystem = FluidDynamicsSystem.new()
 var thermodynamics: ThermodynamicsSystem = ThermodynamicsSystem.new()
+var reactions: ReactionSystem = ReactionSystem.new()
 var ephemerals: EphemeralSystem = EphemeralSystem.new()
 var perception: PerceptionSystem = PerceptionSystem.new()
 var metabolism: MetabolismSystem = MetabolismSystem.new()
@@ -62,6 +63,9 @@ var reasoning: ReasoningQueue = ReasoningQueue.new()
 var llm: LLMResolutionSystem = LLMResolutionSystem.new()
 var death_loop: DeathLoopSystem = DeathLoopSystem.new()
 var reputation: ReputationSystem = ReputationSystem.new()
+var social: SocialSystem = SocialSystem.new()
+var mutation: MutationSystem = MutationSystem.new()
+var spells: SpellCompilerSystem = SpellCompilerSystem.new()
 
 ## faction_id -> the hour it last joined the reasoning queue. Private, so it lives last.
 var _last_thought: Dictionary = {}
@@ -74,6 +78,34 @@ func _ready() -> void:
 	var remote: OpenAICompatibleProvider = OpenAICompatibleProvider.create_if_configured(self)
 	if remote != null:
 		reasoning.provider = remote
+	_connect_event_trace()
+
+
+## The structured trace records the OUTCOME bus (debugging spec §3). Wired here — the one place
+## with a view of every signal — and gated inside `EventTrace.record`, so a disabled trace costs
+## a boolean per event. The dump-on-death is the spec's dump-on-failure, at the granularity the
+## build has: the run ending IS the failure a play session traces toward.
+func _connect_event_trace() -> void:
+	ECSEvents.entity_died.connect(func(entity: int, cause: StringName) -> void:
+		EventTrace.record(&"combat", &"died", entity, String(cause)))
+	ECSEvents.entity_damaged.connect(
+		func(entity: int, amount: float, _left: float, cause: StringName) -> void:
+			EventTrace.record(&"combat", &"damaged", entity, "%s %.1f" % [cause, amount]))
+	ECSEvents.spell_cast.connect(func(caster: int, spell_id: StringName, _strain: float) -> void:
+		EventTrace.record(&"magic", &"cast", caster, String(spell_id)))
+	ECSEvents.spell_detonated.connect(func(caster: int, spell_id: StringName, _at: Vector3) -> void:
+		EventTrace.record(&"magic", &"detonated", caster, String(spell_id)))
+	ECSEvents.entity_mutated.connect(func(entity: int, mutation: StringName) -> void:
+		EventTrace.record(&"mutation", &"mutated", entity, String(mutation)))
+	ECSEvents.faction_decided.connect(
+		func(faction_id: int, objective: String, _say: String) -> void:
+			EventTrace.record(&"reasoning", &"decided", faction_id, objective))
+	ECSEvents.faction_schism.connect(func(parent: int, splinter: int, _count: int) -> void:
+		EventTrace.record(&"social", &"schism", parent, "splinter %d" % splinter))
+	ECSEvents.player_died.connect(func(_corpse: int, _killer: int, generation: int) -> void:
+		EventTrace.record(&"death", &"player_died", 0, "generation %d" % generation)
+		if DebugFlags.event_trace_enabled:
+			print("event trace dumped: %s" % EventTrace.dump_to_file("death")))
 
 
 func _physics_process(delta: float) -> void:
@@ -142,6 +174,14 @@ func _run_micro_tick(scaled_delta: float, chunk: ChunkData) -> void:
 	)
 	last_spatial_ms = float(Time.get_ticks_usec() - spatial_start) / 1000.0
 
+	# CHEMISTRY BEFORE HEAT, and both after the hash rebuild. Reactions need post-collision
+	# positions to decide what is touching what, they release energy into the chunk's air, and
+	# thermodynamics is what carries that air temperature into every body in the chunk. Running
+	# them the other way round costs a frame of latency on every fire.
+	reactions.run(micro_frames, chunk, spatial_hash, combat)
+	# Projectiles need the tile grid to know what a wall is. Handed in per tick rather than held,
+	# because the sampler changes when the player crosses a chunk seam or a floor.
+	ephemerals.sampler = World.sampler()
 	ephemerals.run(scaled_delta, spatial_hash)
 	thermodynamics.run(scaled_delta, chunk)
 
@@ -150,16 +190,33 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	metabolism.run(chunk)
 	jobs.run(sim_ticks)
 	perception.run(chunk, spatial_hash, sim_ticks)
+	# The ecology loop. Runs BEFORE the consequence chain so a mutation gained this tick is seen
+	# this tick rather than next, and so it joins the same witness batch a murder would.
+	mutation.run(_sim_seconds(), chunk)
 	# THE CONSEQUENCE CHAIN, in order and on the Simulation tick. Combat only reports that an act
 	# happened; perception decides who was in a position to see it; reputation turns each witness
-	# into a grievance; gossip carries it to people who were not there.
-	for act in combat.witnessed_actions:
-		perception.report_crime(
+	# into a grievance; gossip carries it to people who were not there. Sprint 4 adds mutation to
+	# the same chain rather than beside it: a defilement the village never saw must not change how
+	# they treat you, for the same reason a murder in a back alley does not.
+	var acts: Array[Dictionary] = combat.witnessed_actions.duplicate()
+	acts.append_array(mutation.take_witnessed_mutations())
+	for act in acts:
+		perception.report_witnessed_act(
 			int(act["subject"]), act["action"], act["location"], chunk, spatial_hash
 		)
 	combat.witnessed_actions.clear()
 	reputation.run(perception)
 	reputation.spread_gossip(spatial_hash)
+	# The consequence chain's LAST link: loyalty, succession, schism, and hostile engagement act
+	# on the relationship states the links above just moved. After reputation, so a grievance
+	# filed this tick can tip a faction to WAR and be answered this tick; before LoD, so a
+	# schism's new macro-entity is seen by the same tick's streaming pass.
+	social.run(
+		spatial_hash,
+		null if World.boot_report == null else World.boot_report.generator,
+		reasoning,
+		combat
+	)
 	lod.run(World.player_chunk_id)
 	# Chunk streaming rides the Simulation tick, not the Micro tick: promoting a chunk spawns
 	# stockpiles and pumps fluid, and doing that 60 times a second would be both wasteful and
@@ -167,6 +224,18 @@ func _run_sim_tick(chunk: ChunkData) -> void:
 	if World.grid != null:
 		streaming.update_chunk_states(World.player_chunk_id, World.grid)
 	_check_player_death()
+
+
+## Simulated seconds between two Simulation ticks. Derived from the FRAME COUNT, not measured:
+## ADR-9 fixes the Micro tick at 60 Hz and the Simulation tick at every 30th, so this is exact.
+## Bullet-time is included because it scales the delta every other system integrates with, and an
+## exposure clock that ignored it would accrue six times faster than the world it is timing.
+func _sim_seconds() -> float:
+	return (
+		float(WorldConstants.SIM_TICK_EVERY_N_MICRO)
+		/ float(WorldConstants.MICRO_TICK_HZ)
+		* time_scale
+	)
 
 
 ## Death is detected on the Simulation tick rather than inside the damage path, so every way of
@@ -194,6 +263,9 @@ func _run_macro_tick(chunk: ChunkData) -> void:
 	spoilage.run(chunk)
 	# The off-screen economy. Ledger integers only — it may not create a single entity.
 	economy.run()
+	# Trade caravans ride the Macro tick: dispatch is an hour-scale decision, and the walk
+	# between dispatch and arrival is where interception lives.
+	social.run_trade(World.grid, inventory)
 	_think()
 	_replan_factions()
 
@@ -224,13 +296,28 @@ func _think() -> void:
 		)
 		if not scheduled and not crisis:
 			continue
-		if reasoning.submit(handle):
+		# A crisis jumps the line (queue priority, declared gap G-5): a faction under attack must
+		# not think after twenty routine weekly reviews. The bark (review F1) is emitted the
+		# moment the request is accepted, so deliberation is visible before the answer exists.
+		var priority: int = (
+			ReasoningQueue.PRIORITY_CRISIS if crisis else ReasoningQueue.PRIORITY_ROUTINE
+		)
+		if reasoning.submit(handle, priority):
 			_last_thought[core.faction_id] = hour
+			ECSEvents.faction_thinking.emit(core.faction_id, crisis)
 
 	# Pumped EVERY macro tick regardless. The cadence governs who joins the queue, not how fast
 	# the queue drains — a request that waited a week to be made should not wait another to fire.
+	#
+	# AN EMPTY RESPONSE REQUEUES (fallback matrix: "timeout -> maintain current objective AND
+	# requeue next Macro tick"). The resolver's half — keep the plan — shipped in Sprint 3; this
+	# half was asserted in a comment and implemented nowhere, so one failed call cost a faction a
+	# week of thinking. Routine priority: a timeout is not a crisis, and with a remote provider
+	# the retry is bounded by the session budget rather than by hope.
 	reasoning.pump(generator, func(handle: int, response: Dictionary) -> void:
 		llm.resolve(handle, response, generator)
+		if response.is_empty() and ECSManager.is_alive(handle):
+			reasoning.submit(handle, ReasoningQueue.PRIORITY_ROUTINE)
 	)
 
 
@@ -276,16 +363,44 @@ func _apply_intent(row: int, intent: ActionIntent, _scaled_delta: float) -> void
 			# Report the outcome either way. A pickup that silently fails a volume or tag filter
 			# is indistinguishable from a pickup that was never attempted.
 			var actor: int = ECSManager.handle_of(row)
-			if inventory.try_insert(row, intent.target):
+			if _try_read(row, intent.target):
+				pass
+			elif inventory.try_insert(row, intent.target):
 				ECSEvents.item_taken.emit(actor, intent.target, &"taken")
 			else:
 				ECSEvents.action_rejected.emit(actor, &"take", inventory.last_rejection)
+		ActionIntent.CAST:
+			combat.resolve_cast(row, intent.name_data, intent.vector_data)
+		ActionIntent.BIND:
+			spells.bind(row, intent.name_list, intent.scalar_data > 0.5)
 		ActionIntent.CONSUME:
 			var need: NeedsComponent = ECSManager.needs.get(row)
 			if need != null:
 				MetabolismSystem.consume_meal(need)
 		_:
 			pass
+
+
+## Interacting with an `Inscribed` object READS it instead of pocketing it (declared gap G-3:
+## no way to learn runes in play). Returns false for everything else so the normal take path
+## runs. Reading is repeatable and idempotent — a lectern is a book, not a consumable.
+func _try_read(reader_row: int, target: int) -> bool:
+	var target_row: int = ECSManager.resolve(target)
+	if target_row < 0:
+		return false
+	var chemistry: ChemistryComponent = ECSManager.chemistries.get(target_row)
+	if chemistry == null or not chemistry.has_tag(&"Inscribed"):
+		return false
+	var mind: MindComponent = ECSManager.minds.get(reader_row)
+	var item: LooseItemComponent = ECSManager.loose_items.get(target_row)
+	if mind == null or item == null:
+		return false
+	var learned: Array[StringName] = []
+	for rune_id in item.inscribed_runes:
+		if mind.learn_rune(rune_id):
+			learned.append(rune_id)
+	ECSEvents.runes_learned.emit(ECSManager.handle_of(reader_row), learned)
+	return true
 
 
 ## Minimum world corner the spatial grid covers: one chunk out from the player's chunk.
@@ -314,9 +429,16 @@ func counters() -> Dictionary:
 		"time_scale": time_scale,
 		"clock": GameClock.to_display_string(),
 	}
+	# EVERY registered system, not a hand-picked subset. Seven Sprint 3 systems — planner,
+	# reasoning, llm, locomotion, death_loop, streaming, economy — were missing from this list,
+	# so the F1 page rendered `0 plans, 0 thoughts, 0 rejected` forever and the entire reasoning
+	# layer looked idle from the only surface built to watch it. The overlay reads keys with
+	# `.get(key, 0)`, which is exactly the API shape that turns an omission here into a plausible
+	# zero instead of an error.
 	for system in [
-		spatial_hash, collision, picking, fluids, thermodynamics, ephemerals, perception,
-		metabolism, jobs, combat, spoilage, lod, inventory
+		spatial_hash, collision, picking, fluids, thermodynamics, reactions, ephemerals,
+		perception, metabolism, jobs, combat, spoilage, lod, inventory, mutation, reputation,
+		spells, planner, reasoning, llm, locomotion, death_loop, streaming, economy, social
 	]:
 		out.merge(system.counters())
 	out.merge(ECSManager.counters())

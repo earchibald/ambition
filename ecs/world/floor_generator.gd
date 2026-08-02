@@ -39,6 +39,14 @@ const STAIR_UP_TILE := Vector2i(30, 32)
 ## no faction lives on would produce an empty shaft to nowhere.
 const DEEPEST_FLOOR: int = -5
 
+## The Adventurer's Residence (Sprint 3 roadmap Step 6, declared gap G-3): where each new
+## adventurer wakes. A FIXED tile in the origin village chunk, carved AFTER the random
+## buildings so no roll can wall it in. The successor spawning "at the same spot the last body
+## started from" was the placeholder; a residence is what makes the respawn read as a person
+## arriving somewhere rather than the world resetting.
+const RESIDENCE_TILE := Vector2i(20, 44)
+const RESIDENCE_HALF: int = 3
+
 
 static func generate(chunk_id: Vector3i, master_seed: int) -> ChunkData:
 	var chunk := ChunkData.new(chunk_id)
@@ -88,6 +96,27 @@ static func _generate_village(chunk: ChunkData, rng: RandomNumberGenerator) -> v
 		var origin_y: int = rng.randi_range(3, CHUNK_TILES - depth - 4)
 		_carve_building(chunk, origin_x, origin_y, width, depth, rng)
 
+	# The Residence goes in LAST and only in the origin chunk, where the player spawns. Carved
+	# last so a random building drawn over the same ground cannot leave a wall segment standing
+	# inside it — determinism of the spawn point beats the aesthetics of one overlap.
+	if chunk.chunk_id.x == 0 and chunk.chunk_id.y == 0:
+		_carve_residence(chunk)
+
+
+## A one-room house with the interior fully re-opened and a south door, centred on
+## RESIDENCE_TILE. The interior clear pass is what makes this safe to carve over anything the
+## random pass already placed.
+static func _carve_residence(chunk: ChunkData) -> void:
+	var lo: int = -RESIDENCE_HALF
+	var hi: int = RESIDENCE_HALF
+	for dy in range(lo, hi + 1):
+		for dx in range(lo, hi + 1):
+			var x: int = RESIDENCE_TILE.x + dx
+			var y: int = RESIDENCE_TILE.y + dy
+			var on_wall: bool = dx == lo or dx == hi or dy == lo or dy == hi
+			chunk.set_tile(x, y, ChunkData.TILE_SOLID if on_wall else ChunkData.TILE_OPEN, 0.0)
+	chunk.set_tile(RESIDENCE_TILE.x, RESIDENCE_TILE.y + lo, ChunkData.TILE_OPEN, 0.0)
+
 
 ## Walls only, so the inside stays enterable, plus exactly one doorway per building.
 static func _carve_building(
@@ -124,6 +153,22 @@ static func _generate_ruins(chunk: ChunkData, rng: RandomNumberGenerator) -> voi
 			for x in range(origin_x, origin_x + width):
 				chunk.set_tile(x, y, ChunkData.TILE_OPEN, 0.0)
 		centres.append(Vector2i(origin_x + width / 2, origin_y + depth / 2))
+
+	# Ruins are inhabited. The swarm counter was declared, capped by the Interregnum tax, and
+	# NEVER SEEDED — nothing in the build ever set it above zero, so the "swarm tax" clamped a
+	# counter that was always already zero. Vermin scale loosely with depth: the deep floors are
+	# older, wetter and less picked-over.
+	chunk.swarm_population = rng.randi_range(0, 3) + mini(3, absi(chunk.chunk_id.z))
+
+	# NATURAL HAZARD ZONES (declared gap G-11): worldgen placed none, so the `H` debug key was a
+	# stand-in for content that did not exist and the whole mutation loop was unreachable in
+	# play. Spore groves from floor -2, toxic seeps deeper — the environment-as-skill-tree the
+	# mutation doc designs around, scaling with the depth that already scales everything else.
+	var depth: int = absi(chunk.chunk_id.z)
+	if depth >= 2 and rng.randf() < 0.35:
+		chunk.hazard_tags.append(&"Spores")
+	if depth >= 4 and rng.randf() < 0.25:
+		chunk.hazard_tags.append(&"Toxic")
 
 	# Chain every room to the previous one. A chain is a spanning tree, so no room can be
 	# stranded — which is the failure mode that makes generated floors unplayable.

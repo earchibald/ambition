@@ -18,6 +18,25 @@ var state: ECSEnums.LoD = ECSEnums.LoD.ACTIVE
 var biome_tag: StringName = &"BIOME_TEST"
 var ambient_temperature_c: float = 20.0
 
+## ZONE-LEVEL HAZARDS (Sprint 4 §4). A whole region that is sporing, filthy, or irradiated, as
+## distinct from a tag on one entity. `MutationSystem` accrues exposure from these for anything
+## standing in the chunk, which is what makes "spend too long in a High_Filth zone" a real rule
+## rather than a description of one. Chunks are not entities, so this is chunk data and NOT a
+## ChemistryComponent (registry §6).
+var hazard_tags: Array[StringName] = []
+
+## One-shot flag for prop spawning at first promotion (a ruined library's lectern). The same
+## transaction-flag pattern as `wealth_materialized`: promotion is re-entrant, prop spawning
+## must not be, or every visit to a chunk grows another lectern.
+var props_spawned: bool = false
+
+## The ClaimTag (factions doc §4: "factions exert influence over zones via ClaimTags"). The
+## faction that considers this chunk THEIRS, or -1 for the unclaimed dark. Set when a faction
+## materializes here; read by the trespass rule in `SocialSystem` — standing on claimed ground
+## without Guest_Status is a grievance, which is what makes "their territory" a fact with
+## consequences instead of a colour on a map that does not exist yet.
+var claim_faction_id: int = -1
+
 ## Tile solidity and per-tile elevation in metres (2.5D, ADR-3).
 var tile_map: PackedInt32Array = PackedInt32Array()
 var height_map: PackedFloat32Array = PackedFloat32Array()
@@ -73,6 +92,12 @@ func intern_material(material_id: StringName) -> int:
 		return existing
 	_material_ids.append(material_id)
 	return _material_ids.size() - 1
+
+
+## How many distinct materials this chunk has interned, including the empty id 0. Lets a system
+## build a per-material lookup table once per tick instead of asking per cell.
+func material_count() -> int:
+	return _material_ids.size()
 
 
 func material_name(interned: int) -> StringName:
@@ -140,11 +165,6 @@ func mutate_tile(x: int, y: int, kind: int, elevation: float = 0.0) -> void:
 	topology_dirty = true
 	if state == ECSEnums.LoD.ACTIVE:
 		nav_region_dirty = true
-
-
-func mark_dirty_cell(x: int, y: int) -> void:
-	if in_bounds(x, y):
-		dirty_cells[WorldConstants.cell_index(x, y)] = true
 
 
 func fluid_at(x: int, y: int) -> int:

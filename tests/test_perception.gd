@@ -119,7 +119,7 @@ func test_unseen_crime_does_not_revoke_guest_status() -> void:
 	var criminal: int = _spawn_observer(chunk.tile_to_world(10, 10) + Vector3(0.0, 1.0, 0.0))
 	_rebuild()
 	# The crime happens behind the interior wall, out of sight.
-	var witnesses: int = perception.report_crime(
+	var witnesses: int = perception.report_witnessed_act(
 		EH.index_of(criminal), &"THEFT", ECSManager.position_of(EH.index_of(criminal)), chunk, hash
 	)
 	assert_eq(witnesses, 0, "nobody could see the crime")
@@ -136,7 +136,7 @@ func test_witnessed_crime_creates_a_witness_event_and_memory() -> void:
 	var observer: int = _spawn_observer(chunk.tile_to_world(12, 10) + Vector3(0.0, 1.0, 0.0))
 	var criminal: int = _spawn_observer(chunk.tile_to_world(10, 10) + Vector3(0.0, 1.0, 0.0))
 	_rebuild()
-	var witnesses: int = perception.report_crime(
+	var witnesses: int = perception.report_witnessed_act(
 		EH.index_of(criminal), &"MURDER", ECSManager.position_of(EH.index_of(criminal)), chunk, hash
 	)
 	assert_gt(witnesses, 0, "a visible crime is witnessed")

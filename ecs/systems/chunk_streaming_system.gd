@@ -27,6 +27,9 @@ var stacks_materialized: int = 0
 var stacks_ledgerized: int = 0
 var projectiles_resolved: int = 0
 var movers_frozen: int = 0
+var lecterns_spawned: int = 0
+var abstract_wall_hits: int = 0
+var abstract_flights: int = 0
 
 var _active_ids: Dictionary = {}
 
@@ -77,6 +80,32 @@ func shift_to_active(chunk: ChunkData) -> void:
 	# cannot instantiate a tsunami in one frame.
 	FluidDynamicsSystem.promote_from_pools(chunk, STOCKPILE_TILE)
 	_materialize_faction_wealth(chunk)
+	_spawn_ruin_props(chunk)
+
+
+## Ruined libraries, made READABLE (declared gap G-3). Roughly a third of dungeon chunks hold a
+## lectern inscribed with a few runes, placed deterministically from the chunk's own seed
+## (ADR-1: the same world always holds the same knowledge in the same rooms). Spawned at first
+## promotion because worldgen produces tiles, not entities, and props only matter when someone
+## is there to read them.
+func _spawn_ruin_props(chunk: ChunkData) -> void:
+	if chunk.props_spawned or chunk.chunk_id.z >= 0:
+		return
+	chunk.props_spawned = true
+	var rng: RandomNumberGenerator = FloorGenerator.chunk_rng(chunk.chunk_id, 777)
+	if rng.randf() > 0.34:
+		return
+	var rune_ids: Array[StringName] = []
+	for rune_id in RuneLibrary.RUNES:
+		rune_ids.append(rune_id)
+	var inscribed: Array[StringName] = []
+	for _pick in 3:
+		var candidate: StringName = rune_ids[rng.randi_range(0, rune_ids.size() - 1)]
+		if not inscribed.has(candidate):
+			inscribed.append(candidate)
+	var ground: Vector3 = World.spawn_position_in(chunk)
+	World.spawn_lectern(Vector3(ground.x, ground.y + 0.5, ground.z), inscribed)
+	lecterns_spawned += 1
 
 
 func shift_to_simulated(chunk: ChunkData) -> void:
@@ -87,7 +116,7 @@ func shift_to_simulated(chunk: ChunkData) -> void:
 			# Projectiles CANNOT sleep. A frozen arrow hanging in mid-air at a chunk seam is
 			# both absurd and an exploit: walk away, walk back, and it resumes as if no time
 			# passed. Resolve it against the abstract tiles and remove it.
-			_resolve_abstract_hit(row)
+			_resolve_abstract_hit(row, chunk)
 			ECSManager.destroy_entity(ECSManager.handle_of(row))
 			projectiles_resolved += 1
 			continue
@@ -106,6 +135,7 @@ func _materialize_faction_wealth(chunk: ChunkData) -> void:
 	var core: FactionCoreComponent = _core_anchored_at(chunk.chunk_id)
 	if core == null:
 		return
+	chunk.claim_faction_id = core.faction_id
 	var taken: Dictionary = core.withdraw_all()
 	var slot: int = 0
 	for material in taken:
@@ -199,11 +229,25 @@ func _is_kinetic_ephemeral(row: int) -> bool:
 	return chemistry.active_tags.has(&"Kinetic_Ephemeral")
 
 
-## An in-flight projectile leaving the Active set is resolved by maths rather than animation.
-func _resolve_abstract_hit(row: int) -> void:
+## An in-flight projectile leaving the Active set is resolved by maths rather than animation:
+## the roadmap's "math-based raycast against abstract chunk data". A DDA march along the
+## remaining flight path decides whether it strikes a wall in this chunk or flies its full
+## range into the dark. The function claimed this for two sprints while doing neither — it set
+## TTL to zero and returned. What it still cannot do is DAMAGE an abstract target: Simulated
+## entities are not in a spatial hash, and per-entity ballistics against a frozen crowd is
+## recorded as not built. The hit-or-flew fact is real, counted, and testable.
+func _resolve_abstract_hit(row: int, chunk: ChunkData) -> void:
 	var ephemeral: EphemeralComponent = ECSManager.ephemerals.get(row)
 	if ephemeral == null:
 		return
+	var origin: Vector3 = ECSManager.position_of(row)
+	var flight_m: float = ephemeral.speed_mps * maxf(ephemeral.time_to_live, 0.0)
+	if chunk != null and flight_m > 0.01 and ephemeral.heading.length() > 0.01:
+		var terminus: Vector3 = origin + ephemeral.heading.normalized() * flight_m
+		if GridDDA.has_line_of_sight(origin, terminus, chunk):
+			abstract_flights += 1
+		else:
+			abstract_wall_hits += 1
 	ephemeral.time_to_live = 0.0
 
 
@@ -326,4 +370,7 @@ func counters() -> Dictionary:
 		"stacks_ledgerized": stacks_ledgerized,
 		"projectiles_resolved": projectiles_resolved,
 		"movers_frozen": movers_frozen,
+		"lecterns_spawned": lecterns_spawned,
+		"projectile_abstract_wall_hits": abstract_wall_hits,
+		"projectile_abstract_flights": abstract_flights,
 	}

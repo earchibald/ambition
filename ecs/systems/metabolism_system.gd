@@ -19,6 +19,16 @@ const IDEAL_TEMP_C: float = 20.0
 const COLD_DRAIN_COEFFICIENT: float = 0.1
 const BASE_STAMINA_DRAIN: float = 0.05
 
+## REST. Nothing in the build restored stamina — not sleep, not meals, not standing still — so
+## every body in the world ground monotonically to zero, and casting Strain was unrecoverable.
+## Standing still is resting: stamina refills toward the strain-reduced ceiling, and Strain
+## itself heals at half that rate, so a drained caster is ~80 s of standing from a clear head.
+## "Rest in a safe zone" (magic doc §2) is read as "rest"; a safe-zone distinction is recorded
+## as not built.
+const REST_STAMINA_PER_TICK: float = 0.5
+const REST_STRAIN_PER_TICK: float = 0.25
+const RESTING_SPEED_MPS: float = 0.05
+
 var entities_processed: int = 0
 var starving_count: int = 0
 
@@ -51,11 +61,16 @@ func run(chunk: ChunkData) -> void:
 
 
 ## Stamina drain including environmental exposure. The cold term is why a torch or warm clothing
-## is a real decision on a 5C floor.
+## is a real decision on a 5C floor. A body at rest RECOVERS instead: standing still is the
+## universal rest action, available to the player and to NPCs alike.
 func _drain_stamina(row: int, chunk: ChunkData) -> void:
 	var body: BodyComponent = ECSManager.bodies.get(row)
 	if body == null:
 		return
+	var resting: bool = (
+		ECSManager.has_components(row, ComponentMask.POSITION)
+		and ECSManager.velocity_of(row).length() <= RESTING_SPEED_MPS
+	)
 	var drain: float = BASE_STAMINA_DRAIN
 	var deficit: float = IDEAL_TEMP_C - chunk.ambient_temperature_c
 	if deficit > 0.0:
@@ -64,7 +79,18 @@ func _drain_stamina(row: int, chunk: ChunkData) -> void:
 		if not insulated:
 			drain += deficit * COLD_DRAIN_COEFFICIENT
 			body.exposure[&"Cold"] = float(body.exposure.get(&"Cold", 0.0)) + deficit * 0.01
-	body.stamina = clampf(body.stamina - drain, 0.0, body.max_stamina)
+			resting = false
+	if resting:
+		# Trauma tags from magic mishaps cripple recovery (the Mercy Cap's price): an
+		# Arcane_Burn quarters the rest rate and stops strain healing entirely until cured.
+		var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
+		var burned: bool = chemistry != null and chemistry.has_tag(&"Arcane_Burn")
+		if not burned:
+			body.strain = maxf(0.0, body.strain - REST_STRAIN_PER_TICK)
+		var rate: float = REST_STAMINA_PER_TICK * (0.25 if burned else 1.0)
+		body.stamina = clampf(body.stamina + rate, 0.0, body.effective_max_stamina())
+		return
+	body.stamina = clampf(body.stamina - drain, 0.0, body.effective_max_stamina())
 
 
 static func consume_meal(need: NeedsComponent) -> void:
