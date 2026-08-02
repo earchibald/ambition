@@ -5,6 +5,10 @@
 class_name PlayerInputBridge
 extends Node
 
+## Damage per press of the debug injure key. A quarter of a full health bar, so reaching death
+## takes four deliberate presses rather than one twitch.
+const DEBUG_HURT_AMOUNT: float = 25.0
+
 @export var camera_path: NodePath
 @export var overlay_path: NodePath
 
@@ -14,6 +18,7 @@ var intents_pushed: int = 0
 ## so DebugGizmos can DRAW it: without this the player is a featureless box with no on-screen
 ## indication of facing, and the swing arc is invisible.
 var last_aim: Vector3 = Vector3(0.0, 0.0, 1.0)
+
 
 var _camera: Camera3D = null
 var _overlay: DebugOverlay = null
@@ -53,12 +58,20 @@ func _physics_process(_delta: float) -> void:
 	ECSManager.push_intent(row, ActionIntent.create(ActionIntent.MOVE, EH.INVALID, direction))
 	intents_pushed += 1
 
-	if Input.is_action_just_pressed(&"attack"):
+	# A click on the debug panel belongs to the panel. The bridge POLLS rather than consuming
+	# events, so it has to ask rather than relying on the event being marked handled.
+	var ui_has_mouse: bool = _overlay != null and _overlay.wants_mouse()
+
+	if not ui_has_mouse and Input.is_action_just_pressed(&"attack"):
 		_push_attack(row, last_aim)
-	if Input.is_action_just_pressed(&"interact"):
+	if not ui_has_mouse and Input.is_action_just_pressed(&"interact"):
 		_push_interact(row)
-	if Input.is_action_just_pressed(&"inspect"):
+	if not ui_has_mouse and Input.is_action_just_pressed(&"inspect"):
 		_select_under_cursor()
+	if Input.is_action_just_pressed(&"debug_hurt"):
+		_debug_hurt(row)
+	if Input.is_action_just_pressed(&"debug_respawn"):
+		_debug_respawn()
 	if Input.is_action_just_pressed(&"slow_time"):
 		# Bullet-time scales delta, never the 60 Hz tick rate (ADR-9).
 		GameLoopManager.time_scale = 0.2 if GameLoopManager.time_scale == 1.0 else 1.0
@@ -126,6 +139,38 @@ func _push_attack(row: int, swing: Vector3) -> void:
 	intents_pushed += 1
 
 
+## DEBUG ONLY: injure the player, so the death loop can be reached at all.
+##
+## Sprint 3's headline feature is that death is a loop rather than a screen, and in the generated
+## world there was NO WAY TO TRIGGER IT. That world has no pit, no hazard, and nothing hostile —
+## so the one thing the sprint was built to demonstrate could not be demonstrated. A play-tester
+## should never have to edit code to reach a feature.
+func _debug_hurt(row: int) -> void:
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body == null or not body.is_alive():
+		return
+	var before: float = body.health
+	body.health = maxf(0.0, body.health - DEBUG_HURT_AMOUNT)
+	ECSEvents.entity_damaged.emit(
+		ECSManager.handle_of(row), before - body.health, body.health, &"debug"
+	)
+
+
+## DEBUG ONLY: run the Interregnum and bring in the successor.
+##
+## The year-skip and the successor spawn were implemented and TESTED in Sprint 3, and nothing
+## triggered them from the keyboard — so on death the game simply paused forever. The loop only
+## reads as a loop if you can complete it.
+func _debug_respawn() -> void:
+	if ECSManager.is_alive(ECSManager.player_handle()):
+		return
+	GameLoopManager.death_loop.run_interregnum(World.boot_report, World.grid)
+	GameLoopManager.death_loop.spawn_successor(
+		World.active_chunk, LineageJournal.load_journal()
+	)
+	GameLoopManager.paused = false
+
+
 ## Mouse-cursor entity inspection. `DebugOverlay.select_row` existed but NOTHING called it, so
 ## the inspector — the single highest-value debug surface — was unreachable from the game.
 ##
@@ -135,17 +180,19 @@ func _select_under_cursor() -> void:
 	if _overlay == null or _camera == null or World.active_chunk == null:
 		return
 	var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
-	var result: Dictionary = GameLoopManager.picking.pick(
+	var player_row: int = EH.index_of(ECSManager.player_handle())
+	# Forgiving selection: nearest entity to the ground point, not an exact ray-AABB thread.
+	# A villager is a 0.6 m box seen from 14 m up, and demanding a precise hit made Tab feel
+	# broken rather than precise.
+	var handle: int = GameLoopManager.picking.cursor_target(
 		_camera.project_ray_origin(mouse),
 		_camera.project_ray_normal(mouse),
 		GameLoopManager.spatial_hash,
-		World.active_chunk
+		World.sampler(),
+		player_row
 	)
-	var handle: int = result["entity_handle"]
-	# Nothing under the cursor falls back to the player, so Tab always shows something useful.
-	_overlay.select_row(
-		EH.index_of(handle) if EH.is_valid(handle) else EH.index_of(ECSManager.player_handle())
-	)
+	# Nothing near the cursor falls back to the player, so Tab always shows something useful.
+	_overlay.select_row(EH.index_of(handle) if EH.is_valid(handle) else player_row)
 
 
 ## `E` takes what is under the cursor, or failing that the nearest thing within arm's reach.
@@ -155,6 +202,12 @@ func _select_under_cursor() -> void:
 ## travel against a 2.5 m reach — the camera sits ~14 m away, so it never once succeeded.
 func _push_interact(row: int) -> void:
 	if _camera == null or World.active_chunk == null:
+		return
+	# CONTEXT-SENSITIVE, as the spec calls for: standing on a stairwell, `E` uses the stairs.
+	# A separate key would be one more thing to document and one more thing to forget.
+	var stairs: int = World.stairs_under(row)
+	if stairs != 0:
+		World.change_floor(stairs)
 		return
 	var mouse: Vector2 = _camera.get_viewport().get_mouse_position()
 	var target: int = GameLoopManager.picking.interact_target(

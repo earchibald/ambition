@@ -7,6 +7,13 @@
 class_name DebugOverlay
 extends CanvasLayer
 
+## Pages, cycled with F1. The live counters are page one because that is what you want while
+## moving; the rest answer questions you ask while standing still.
+## HIDDEN is a real page, not an absence. Cycling round to it dismisses the panel entirely, so
+## one key both drives the tool and gets it out of the way — asked for during play-testing, and
+## the alternative is a second key that does nothing else.
+enum Page { LIVE, HISTORY, FACTIONS, MAP, HIDDEN }
+
 const REFRESH_INTERVAL_S: float = 0.25
 
 ## How far the cursor ray is marched, and how finely. 0.25 m is a quarter tile, which is well
@@ -17,24 +24,34 @@ const CURSOR_STEP_M: float = 0.25
 ## How many outcome events the feed keeps. Enough to see a fight, short enough to read.
 const FEED_CAPACITY: int = 8
 
-var _label: Label = null
+## Tallest the panel may grow before it starts scrolling, as a fraction of the window. Leaves
+## enough of the world visible that the overlay never becomes the whole screen.
+const MAX_PANEL_SCREEN_FRACTION: float = 0.8
+
+var _panel: PanelContainer = null
+var _header: Label = null
+var _scroll: ScrollContainer = null
+var _label: RichTextLabel = null
+var _minimap: MinimapView = null
+var _dragging: bool = false
+var _drag_offset: Vector2 = Vector2.ZERO
 var _selected_row: int = -1
 var _accumulator: float = 0.0
 var _feed: Array[String] = []
 var _remembered_names: Dictionary = {}
+var _page: Page = Page.LIVE
 var _lmb_presses: int = 0
 var _rmb_presses: int = 0
 
 
 func _ready() -> void:
-	_label = Label.new()
-	_label.position = Vector2(12, 12)
-	# Dark outline: the overlay is drawn over a mid-grey stone floor, and unoutlined light text
-	# on it is barely readable regardless of size.
-	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
-	_label.add_theme_constant_override("outline_size", 6)
-	_apply_font_size()
-	add_child(_label)
+	# Godot readies CHILDREN before their parent, so this runs before `Main._ready` — which is
+	# where DebugFlags was being initialised. Every flag read below was therefore reading a
+	# default, and a font size set in `debug_config.json` silently never applied. `initialize`
+	# is idempotent, so asking here costs nothing and removes the ordering dependency.
+	DebugFlags.initialize()
+	_build_panel()
+	_page = clampi(DebugFlags.boot_overlay_page, 0, Page.size() - 1) as Page
 	visible = DebugFlags.tick_counters_enabled
 
 	# Listen only. The overlay never writes ECS state (Prime Directive / invariants §2).
@@ -44,6 +61,100 @@ func _ready() -> void:
 	ECSEvents.action_rejected.connect(_on_rejected)
 	ECSEvents.entity_landed.connect(_on_landed)
 	ECSEvents.faction_decided.connect(_on_faction_decided)
+	ECSEvents.player_changed_floor.connect(_on_changed_floor)
+
+
+## A DRAGGABLE, NON-MODAL panel rather than text painted on the screen.
+##
+## Two problems with the bare label it replaces. It sat over the top-left corner of the world
+## permanently, and there was no way to move it off whatever you were trying to look at. And a
+## click anywhere — including on the text — went straight through to the game and swung a weapon.
+##
+## MONOSPACE IS NOT COSMETIC. The `F1` map is a grid of characters, and in a proportional font the
+## columns do not line up, so the map is unreadable as a map. Every other page benefits too:
+## numbers that change each frame stop jittering sideways.
+func _build_panel() -> void:
+	_panel = PanelContainer.new()
+	_panel.position = Vector2(12, 12)
+	# STOP, deliberately: a click on the panel belongs to the panel. Without it, reading the
+	# overlay means attacking whatever is behind it.
+	_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.05, 0.05, 0.07, 0.78)
+	style.border_color = Color(0.45, 0.45, 0.55, 0.9)
+	style.set_border_width_all(1)
+	style.set_content_margin_all(8)
+	_panel.add_theme_stylebox_override("panel", style)
+	add_child(_panel)
+
+	var column := VBoxContainer.new()
+	_panel.add_child(column)
+
+	_header = Label.new()
+	_header.text = "  ☰  debug  —  drag me    [F1] page / hide    [G] gizmos    [=/-] size"
+	_header.mouse_filter = Control.MOUSE_FILTER_STOP
+	_header.add_theme_color_override("font_color", Color(0.72, 0.78, 0.95))
+	column.add_child(_header)
+
+	# SCROLLABLE. The chronicle and the faction list are both longer than a screen, and a panel
+	# that simply runs off the bottom hides exactly the recent events you opened it to read.
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	column.add_child(_scroll)
+
+	# RICH TEXT, not a plain Label: the panel needs per-value colour and that is the only way to
+	# get it without one Control per row.
+	_label = RichTextLabel.new()
+	_label.bbcode_enabled = true
+	_label.fit_content = true
+	_label.scroll_active = false
+	_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_label.add_theme_constant_override("outline_size", 4)
+	_scroll.add_child(_label)
+
+	# The map is DRAWN, not spelled out. See MinimapView for why the ASCII version was the wrong
+	# tool: it depended on a monospace font to line up at all, and a grid of letters is a poor
+	# answer to a spatial question in an engine that can simply draw one.
+	_minimap = MinimapView.new()
+	_minimap.visible = false
+	column.add_child(_minimap)
+	_apply_font_size()
+
+
+## True while the pointer is over the panel, so gameplay input can ignore that click.
+##
+## The input bridge POLLS `Input.is_action_just_pressed` rather than consuming events, so marking
+## an event handled does not reach it. It has to ask.
+func wants_mouse() -> bool:
+	if not visible or _panel == null or not _panel.visible:
+		return false
+	return _panel.get_global_rect().has_point(_panel.get_global_mouse_position())
+
+
+## Dragging is handled here rather than on the header, because the pointer routinely leaves the
+## header's rect mid-drag and a Control only receives `_gui_input` while the pointer is inside it.
+func _input(event: InputEvent) -> void:
+	if not visible or _panel == null or not _panel.visible:
+		return
+	if event is InputEventMouseButton:
+		var button: InputEventMouseButton = event
+		if button.button_index != MOUSE_BUTTON_LEFT:
+			return
+		if button.pressed and _header.get_global_rect().has_point(button.position):
+			_dragging = true
+			_drag_offset = _panel.position - button.position
+			get_viewport().set_input_as_handled()
+		elif not button.pressed:
+			_dragging = false
+	elif event is InputEventMouseMotion and _dragging:
+		var motion: InputEventMouseMotion = event
+		# Clamped so the panel can never be dragged entirely off-screen and stranded.
+		var limit: Vector2 = get_viewport().get_visible_rect().size - Vector2(60, 24)
+		_panel.position = (motion.position + _drag_offset).clamp(Vector2.ZERO, limit)
+		get_viewport().set_input_as_handled()
 
 
 ## Text size is adjustable at runtime, because "edit a JSON file in the user data directory and
@@ -59,6 +170,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			_rmb_presses += 1
 		return
 	var delta: int = 0
+	if event.is_action(&"cycle_debug_page"):
+		_page = ((_page + 1) % Page.size()) as Page
+		# HIDDEN dismisses the panel rather than drawing an empty one.
+		_panel.visible = _page != Page.HIDDEN
+		_accumulator = REFRESH_INTERVAL_S
+		get_viewport().set_input_as_handled()
+		return
 	if event.is_action(&"overlay_text_bigger"):
 		delta = 2
 	elif event.is_action(&"overlay_text_smaller"):
@@ -75,90 +193,215 @@ func _unhandled_input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
+## Grows the panel to fit its text, up to a ceiling, then scrolls.
+##
+## A Control has no `max_size`, so the height is computed: take what the label wants, and clamp it
+## to a fraction of the viewport. Below the ceiling the panel is exactly as tall as its content
+## and there is no scrollbar to notice; above it, the wheel works.
+func _fit_scroll() -> void:
+	if _scroll == null or _label == null:
+		return
+	var ceiling: float = get_viewport().get_visible_rect().size.y * MAX_PANEL_SCREEN_FRACTION
+	_scroll.custom_minimum_size.y = minf(_label.get_combined_minimum_size().y, ceiling)
+
+
+## MONOSPACE. The `F1` map is a grid of characters and a proportional font shreds its columns,
+## which is what made the map "very poorly rendered and not aligned". A system monospace font is
+## requested by name so the panel does not depend on a font asset being present.
 func _apply_font_size() -> void:
 	if _label == null:
 		return
-	_label.add_theme_font_size_override("font_size", DebugFlags.overlay_font_size)
+	var mono := SystemFont.new()
+	mono.font_names = PackedStringArray(
+		["JetBrains Mono", "SF Mono", "Menlo", "DejaVu Sans Mono", "Consolas", "monospace"]
+	)
+	# RichTextLabel keys its fonts by role. `normal_font` and `bold_font` must BOTH be set, or a
+	# [b] heading silently falls back to a proportional face and the columns under it stop
+	# lining up — which is the exact failure the monospace switch was made to fix.
+	for role in ["normal_font", "bold_font", "italics_font", "mono_font"]:
+		_label.add_theme_font_override(role, mono)
+	_label.add_theme_font_size_override("normal_font_size", DebugFlags.overlay_font_size)
+	_label.add_theme_font_size_override("bold_font_size", DebugFlags.overlay_font_size)
+	if _header != null:
+		_header.add_theme_font_override("font", mono)
+		_header.add_theme_font_size_override("font_size", DebugFlags.overlay_font_size)
 
 
 func _process(delta: float) -> void:
-	if not visible:
+	if not visible or _panel == null or not _panel.visible:
 		return
 	_accumulator += delta
 	if _accumulator < REFRESH_INTERVAL_S:
 		return
 	_accumulator = 0.0
-	_label.text = _compose()
+	var on_map: bool = _page == Page.MAP
+	_scroll.visible = not on_map
+	_minimap.visible = on_map
+	if on_map:
+		_minimap.refresh()
+	else:
+		_label.text = _compose()
+		_fit_scroll()
 
 
 func _compose() -> String:
+	var header: String = "[F1] %s   (%d of %d)\n" % [
+		Page.keys()[_page], int(_page) + 1, Page.size()
+	]
+	match _page:
+		Page.HISTORY:
+			return header + WorldInspector.history_text()
+		Page.FACTIONS:
+			return header + WorldInspector.factions_text()
+		Page.MAP:
+			return header + WorldInspector.map_text()
+		_:
+			return header + _compose_live()
+
+
+func _compose_live() -> String:
 	var counters: Dictionary = GameLoopManager.counters()
-	var lines: Array[String] = []
-	lines.append("%s  |  scenario %s" % [counters["clock"], World.scenario])
-	lines.append(_player_location())
-	lines.append(_cursor_location())
-	lines.append(_vitals())
-	lines.append(_mouse_state())
-	lines.append(
-		"micro %.2fms / %.1fms budget%s   sim %.2fms   fluid %.2fms   spatial %.2fms" % [
-			counters["last_micro_ms"],
-			counters["micro_budget_ms"],
-			"  << OVER" if counters["over_micro_budget"] else "",
-			counters["last_sim_ms"],
-			counters["last_fluid_ms"],
-			counters["last_spatial_ms"],
+	var fps: float = maxf(float(Engine.get_frames_per_second()), 1.0)
+	var out: Array[String] = []
+
+	out.append(PanelFormat.heading("world"))
+	out.append(PanelFormat.row("time", PanelFormat.plain(String(counters["clock"]))))
+	out.append(PanelFormat.row("scenario", PanelFormat.accent(String(World.scenario))))
+	out.append(PanelFormat.row(
+		"frame",
+		"%s %s" % [
+			PanelFormat.plain("%d fps" % int(fps)),
+			PanelFormat.muted("(%.1f ms)" % (1000.0 / fps)),
 		]
-	)
-	lines.append(
-		"entities alive %d (active %d / cap %d)   rows %d   free %d" % [
-			counters["alive_count"],
-			counters.get("lod_active_entities", 0),
-			WorldConstants.ACTIVE_ENTITY_HARD_CAP,
-			counters["row_capacity"],
-			counters["free_rows"],
-		]
-	)
-	lines.append(
-		"movers %d  substeps %d  tile-hits %d  entity-hits %d" % [
-			counters.get("movers_processed", 0),
-			counters.get("substeps_run", 0),
-			counters.get("tile_collisions", 0),
-			counters.get("entity_collisions", 0),
-		]
-	)
-	lines.append(
-		"CA updates %d  dirty %d%s   pumped %d" % [
-			counters.get("ca_cell_updates", 0),
-			counters.get("ca_dirty_cells", 0),
-			"  << BUDGET" if counters.get("ca_budget_exhausted", false) else "",
-			counters.get("ca_pumped_units", 0),
-		]
-	)
-	lines.append(
-		"LoS marches %d (cache %d, fail %d)  perceived %d  witnesses %d" % [
-			counters.get("los_marches", 0),
-			counters.get("los_cache_hits", 0),
-			counters.get("los_failures", 0),
-			counters.get("targets_perceived", 0),
-			counters.get("witness_events", 0),
-		]
-	)
-	lines.append(
-		"stale-handle rejections %d   destroys %d   query rebuilds %d" % [
-			counters["stale_handle_rejections"],
-			counters["destroy_count"],
-			counters["query_cache_rebuilds"],
-		]
-	)
+	))
+
+	out.append(PanelFormat.heading("you"))
+	for line in _player_rows():
+		out.append(line)
+
+	out.append(PanelFormat.heading("cursor"))
+	out.append(PanelFormat.row("pointing", _cursor_value()))
+	out.append(PanelFormat.row(
+		"mouse",
+		PanelFormat.tally([
+			["LMB " + ("down" if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT) else "up"), ""],
+			["RMB " + ("down" if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) else "up"), ""],
+			[_lmb_presses, "clicks"],
+		])
+	))
+
+	out.append(PanelFormat.heading("performance"))
+	out.append(PanelFormat.row("micro", PanelFormat.against_budget(
+		float(counters["last_micro_ms"]), float(counters["micro_budget_ms"]), "ms"
+	)))
+	out.append(PanelFormat.row("other", PanelFormat.tally([
+		["%.2f" % counters["last_sim_ms"], "sim"],
+		["%.2f" % counters["last_fluid_ms"], "fluid"],
+		["%.2f" % counters["last_spatial_ms"], "spatial"],
+	])))
+
+	out.append(PanelFormat.heading("world state"))
+	out.append(PanelFormat.row("entities", PanelFormat.tally([
+		[counters["alive_count"], "alive"],
+		[counters.get("lod_active_entities", 0), "active"],
+		[WorldConstants.ACTIVE_ENTITY_HARD_CAP, "cap"],
+		[counters["free_rows"], "free rows"],
+	])))
+	out.append(PanelFormat.row("movement", PanelFormat.tally([
+		[counters.get("movers_processed", 0), "movers"],
+		[counters.get("walkers", 0), "walking"],
+		[counters.get("tile_collisions", 0), "wall hits"],
+		[counters.get("entity_collisions", 0), "bumps"],
+	])))
+	out.append(PanelFormat.row("fluids", PanelFormat.tally([
+		[counters.get("ca_cell_updates", 0), "updates"],
+		[counters.get("ca_dirty_cells", 0), "dirty"],
+		[counters.get("ca_pumped_units", 0), "pumped"],
+	])))
+	out.append(PanelFormat.row("senses", PanelFormat.tally([
+		[counters.get("total_los_marches", 0), "LoS"],
+		[counters.get("total_perceived", 0), "perceived"],
+		[counters.get("witness_events", 0), "witnesses"],
+	])))
+	out.append(PanelFormat.row("factions", PanelFormat.tally([
+		[counters.get("plans_made", 0), "plans"],
+		[counters.get("reason_dispatched", 0), "thoughts"],
+		[counters.get("llm_hallucinated_targets", 0), "rejected"],
+	])))
+
+	var stale: int = int(counters["stale_handle_rejections"])
+	out.append(PanelFormat.row(
+		"handles",
+		# Stale rejections are the one counter here that should ALWAYS be zero. Anything else is
+		# a handle outliving its generation, so it earns red rather than sitting in a grey list.
+		(PanelFormat.bad("%d stale" % stale) if stale > 0 else PanelFormat.tally([
+			[stale, "stale"], [counters["destroy_count"], "destroyed"]
+		]))
+	))
+
 	if _selected_row >= 0:
-		lines.append("")
-		lines.append(_inspect(_selected_row))
+		out.append(PanelFormat.heading("inspecting"))
+		out.append(_inspect(_selected_row))
 	if not _feed.is_empty():
-		lines.append("")
-		lines.append("recent events (newest first):")
+		out.append(PanelFormat.heading("recent"))
 		for entry in _feed:
-			lines.append("  " + entry)
-	return "\n".join(lines)
+			out.append("  " + entry)
+	return "\n".join(out)
+
+
+## The player block: position, condition, and what is under their feet.
+func _player_rows() -> Array[String]:
+	var row: int = ECSManager.resolve(ECSManager.player_handle())
+	if row < 0:
+		return [PanelFormat.row("status", PanelFormat.bad("no player entity"))] as Array[String]
+
+	var position: Vector3 = ECSManager.position_of(row)
+	var chunk: ChunkData = World.chunk_containing(position)
+	var out: Array[String] = []
+	if chunk != null:
+		var tile: Vector2i = chunk.world_to_tile(position)
+		out.append(PanelFormat.row(
+			"at",
+			"%s %s" % [
+				PanelFormat.plain("tile %d, %d" % [tile.x, tile.y]),
+				PanelFormat.muted("(%.1f, %.1f, %.1f)" % [position.x, position.y, position.z]),
+			]
+		))
+		out.append(PanelFormat.row("standing", PanelFormat.plain(_tile_readout(chunk, tile))))
+
+	var body: BodyComponent = ECSManager.bodies.get(row)
+	if body != null:
+		out.append(PanelFormat.row("health", PanelFormat.bar(body.health, body.max_health)))
+		out.append(PanelFormat.row("stamina", PanelFormat.bar(body.stamina, body.max_stamina)))
+
+	var velocity: Vector3 = ECSManager.velocity_of(row)
+	var state: String = PanelFormat.plain("grounded")
+	if velocity.y < -0.05:
+		state = PanelFormat.bad("FALLING %.1f m/s" % -velocity.y)
+	elif velocity.y > 0.05:
+		state = PanelFormat.plain("rising")
+	out.append(PanelFormat.row(
+		"state",
+		"%s %s" % [
+			state, PanelFormat.muted("safe fall < %.0f m/s" % WorldConstants.SAFE_FALL_MPS)
+		]
+	))
+	return out
+
+
+func _cursor_value() -> String:
+	var chunk: ChunkData = World.active_chunk
+	var camera: Camera3D = get_viewport().get_camera_3d()
+	if chunk == null or camera == null:
+		return PanelFormat.muted("no camera")
+	var tile: Vector2i = _cursor_tile(chunk, camera)
+	if tile.x < 0:
+		return PanelFormat.muted("not over the world")
+	var owner: ChunkData = _owner_for(camera)
+	return "%s %s" % [
+		PanelFormat.plain("tile %d, %d" % [tile.x, tile.y]),
+		PanelFormat.muted(_tile_readout(owner if owner != null else chunk, tile)),
+	]
 
 
 ## Health, stamina and airborne state. Fall damage was resolving correctly and reporting nowhere,
@@ -244,6 +487,11 @@ func _on_faction_decided(faction_id: int, objective: String, declaration: String
 		_remember("faction %d -> %s" % [faction_id, objective])
 		return
 	_remember("faction %d -> %s: \"%s\"" % [faction_id, objective, declaration])
+
+
+func _on_changed_floor(from_floor: int, to_floor: int) -> void:
+	var verb: String = "descend" if to_floor < from_floor else "climb"
+	_remember("you %s to floor %d" % [verb, to_floor])
 
 
 ## A handle is not a name. Without this the feed reads "entity 4294967296 took 3.2 damage".
@@ -356,7 +604,7 @@ func _cursor_location() -> String:
 ## The chunk under the cursor, so the readout describes the tile it names.
 func _owner_for(camera: Camera3D) -> ChunkData:
 	var mouse: Vector2 = get_viewport().get_mouse_position()
-	var hit: Dictionary = GameLoopManager.picking.ground_hit(
+	var hit: Dictionary = GameLoopManager.picking.cursor_ground(
 		camera.project_ray_origin(mouse), camera.project_ray_normal(mouse), World.sampler()
 	)
 	return null if not hit["hit"] else World.chunk_containing(hit["point"])
@@ -368,7 +616,7 @@ func _cursor_tile(_chunk: ChunkData, camera: Camera3D) -> Vector2i:
 	var mouse: Vector2 = get_viewport().get_mouse_position()
 	# Marched through the SAMPLER, so the readout stays correct across a chunk seam rather than
 	# reporting "outside chunk" the moment the cursor leaves the player's own chunk.
-	var hit: Dictionary = GameLoopManager.picking.ground_hit(
+	var hit: Dictionary = GameLoopManager.picking.cursor_ground(
 		camera.project_ray_origin(mouse), camera.project_ray_normal(mouse), World.sampler()
 	)
 	if not hit["hit"]:
@@ -383,8 +631,13 @@ func _tile_readout(chunk: ChunkData, tile: Vector2i) -> String:
 	if not _in_chunk(tile):
 		return "<outside chunk>"
 	var units: int = chunk.fluid_at(tile.x, tile.y)
+	var kind: String = "open"
+	if chunk.is_solid(tile.x, tile.y):
+		kind = "SOLID"
+	elif chunk.tile_map[WorldConstants.cell_index(tile.x, tile.y)] == ChunkData.TILE_STAIRS:
+		kind = "STAIRS (press E)"
 	return "%s  elev %+.2fm  fluid %d" % [
-		"SOLID" if chunk.is_solid(tile.x, tile.y) else "open",
+		kind,
 		chunk.height_at(tile.x, tile.y),
 		units,
 	]

@@ -37,6 +37,9 @@ static var gizmos_enabled: bool = true
 ## scope doc budgets at under 2 seconds, kept reachable because it is the loop paid ~50 times
 ## a day while iterating on movement and combat.
 static var boot_scenario: StringName = &"world"
+## Overlay page index the game opens on. Only useful for capturing a specific page in a headless
+## render; the default is the live counters.
+static var boot_overlay_page: int = 0
 
 static var _loaded: bool = false
 
@@ -83,6 +86,7 @@ static func _load_config() -> void:
 	trace_capacity = int(parsed.get("trace_capacity", trace_capacity))
 	gizmos_enabled = bool(parsed.get("gizmos_enabled", gizmos_enabled))
 	boot_scenario = StringName(parsed.get("boot_scenario", String(boot_scenario)))
+	boot_overlay_page = int(parsed.get("boot_overlay_page", boot_overlay_page))
 	overlay_font_size = clampi(
 		int(parsed.get("overlay_font_size", overlay_font_size)),
 		MIN_OVERLAY_FONT_SIZE,
@@ -101,6 +105,7 @@ static func snapshot() -> Dictionary:
 		"overlay_font_size": overlay_font_size,
 		"gizmos_enabled": gizmos_enabled,
 		"boot_scenario": String(boot_scenario),
+		"boot_overlay_page": boot_overlay_page,
 	}
 
 

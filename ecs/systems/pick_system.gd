@@ -24,6 +24,11 @@ const HORIZON_EPSILON: float = 0.0001
 ## them is numerically meaningless.
 const MIN_AIM_RADIUS_M: float = 0.05
 
+## How far from the cursor's ground point an entity may be and still be considered "pointed at".
+## Roughly one and a half tiles: forgiving enough that a 0.6 m box seen from 14 m up is easy to
+## select, tight enough that it stays unambiguous in a crowd.
+const CURSOR_SNAP_RADIUS_M: float = 1.6
+
 var picks_attempted: int = 0
 var picks_hit_entity: int = 0
 var picks_hit_tile: int = 0
@@ -106,6 +111,53 @@ func interact_target(
 	return nearest_within_reach(actor_row, actor_position, hash)
 
 
+## The entity nearest to where the cursor is pointing, within a forgiving radius.
+##
+## Selection USED to demand an exact ray-AABB intersection. A villager is a 0.6 m box seen from
+## 14 m up, so the target on screen is a few pixels and the ray had to thread it — reported from
+## play as "the hitbox seems very very finicky", which is exactly what an exact-hit test feels
+## like at this camera distance.
+##
+## Pointing NEAR a thing is unambiguous to a human, so it should be unambiguous here.
+##
+## Deliberately does NOT use the ray pick. `GridDDA` works in chunk-LOCAL tiles and so takes a
+## ChunkData rather than the sampler, which means the ray path cannot cross a chunk seam; making
+## it sampler-based is a real refactor and is not what this fix is about. Proximity to the ground
+## point is both simpler and strictly more forgiving, which is the whole requirement.
+##
+## The tradeoff, stated plainly: pointing at a wall with a villager standing behind it will still
+## select the villager. For a debug inspector at a 1.6 m radius that is the right trade — this
+## chooses "always selects what you meant" over "never selects through cover".
+func cursor_target(
+	origin: Vector3, direction: Vector3, hash: SpatialHash, sampler: TileSampler, exclude: int
+) -> int:
+	var ground: Dictionary = cursor_ground(origin, direction, sampler)
+	if not ground["hit"]:
+		return EH.INVALID
+	var at: Vector3 = ground["point"]
+
+	var candidates: PackedInt32Array = hash.query_radius(at, CURSOR_SNAP_RADIUS_M)
+	var best_row: int = -1
+	var best_distance: float = INF
+	for i in candidates.size():
+		var row: int = candidates[i]
+		if row == exclude:
+			continue
+		# Compared on the FLAT plane. A villager is 1.8 m tall and the cursor point is on the
+		# floor, so a 3D distance would rank a small item above the person standing beside it.
+		var to: Vector3 = ECSManager.position_of(row) - at
+		var flat: float = Vector2(to.x, to.z).length()
+		# Standing INSIDE a footprint beats being merely near one, so a big entity you are
+		# clearly pointing at is never lost to a small one a few centimetres closer.
+		var bounds: BoundsComponent = ECSManager.bounds.get(row)
+		if bounds != null and flat <= bounds.max_horizontal_extent():
+			flat = -1.0
+		if flat <= CURSOR_SNAP_RADIUS_M and flat < best_distance:
+			best_distance = flat
+			best_row = row
+	return EH.INVALID if best_row < 0 else ECSManager.handle_of(best_row)
+
+
 ## Nearest other entity inside interaction reach, regardless of where the camera points.
 func nearest_within_reach(actor_row: int, actor_position: Vector3, hash: SpatialHash) -> int:
 	var candidates: PackedInt32Array = hash.query_radius(actor_position, INTERACT_DIST_M)
@@ -162,6 +214,54 @@ static func aim_direction(from: Vector3, origin: Vector3, direction: Vector3) ->
 	return heading
 
 
+## Where the cursor is pointing ON THE GROUND, anywhere on screen.
+##
+## `ground_hit` MARCHES, and its budget is `MAX_PICK_DIST_M` (30 m) because that is the right
+## limit for reaching things. The camera sits 14.2 m from the player, so a 30 m march covers only
+## about 16 m of ground past them — and the readout said "not over the world" across most of the
+## visible screen, which is ludicrous when you are plainly pointing at a floor tile.
+##
+## Marching further is the wrong fix twice over: a 250 m march is a thousand samples, and every
+## sample asks the grid for a tile, which GENERATES chunks. Waving the mouse would populate the
+## world.
+##
+## Instead this solves it analytically. A downward ray meets a horizontal plane exactly, in one
+## division. Take the plane through y=0, read the tile it lands on, and if that tile turns out to
+## be raised or sunken, re-solve against the plane at ITS height. Two iterations converge for the
+## ledge and the pit; flat ground — which is nearly everything — is exact on the first.
+func cursor_ground(origin: Vector3, direction: Vector3, sampler: TileSampler) -> Dictionary:
+	var miss: Dictionary = {"hit": false, "point": origin}
+	if direction.y > -HORIZON_EPSILON:
+		# Level or rising: it never meets the ground at all.
+		return miss
+
+	var plane_y: float = 0.0
+	var point: Vector3 = origin
+	for _refinement in 3:
+		var distance: float = (plane_y - origin.y) / direction.y
+		if distance <= 0.0:
+			return miss
+		point = origin + direction * distance
+		if not sampler.contains_world(point):
+			return miss
+		var surface: float = sampler.height_at_world(point)
+		if absf(surface - plane_y) < 0.01:
+			return {"hit": true, "point": point}
+		plane_y = surface
+	# Three refinements without settling means the ray is skimming across a staircase of
+	# elevations. The last sample is still the best answer available, and it is a tile.
+	return {"hit": true, "point": point}
+
+
+## Marches the camera ray until it meets terrain.
+##
+## SUPERSEDED for cursor work by `cursor_ground`, which solves the same thing analytically and is
+## not capped at 30 m. Kept because a march is the only way to answer "what is the FIRST solid
+## thing along this ray", which a plane solve cannot do — but do not reach for it to find where
+## the mouse is pointing.
+##
+## Original doc follows.
+##
 ## Marches the camera ray until it meets terrain — the side of a solid tile, or the floor surface
 ## of an open one. Shared by the aim vector and the debug cursor readout so both agree.
 ##

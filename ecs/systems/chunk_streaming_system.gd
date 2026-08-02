@@ -31,6 +31,17 @@ var movers_frozen: int = 0
 var _active_ids: Dictionary = {}
 
 
+## Forgets which chunks were Active. MUST be called when the world is rebuilt.
+##
+## The active set is remembered across calls so a steady player does not re-promote the same nine
+## chunks every tick. That memory is wrong the instant a NEW grid replaces the old one: the fresh
+## chunks have never been promoted, but their ids match, so `update_chunk_states` sees no
+## transition and skips them — leaving every chunk in the reboot unpromoted and every faction's
+## wealth unmaterialized. Found by an inspector test that booted the world twice.
+func reset() -> void:
+	_active_ids.clear()
+
+
 ## Drives every chunk into the state the player's position implies.
 func update_chunk_states(player_chunk_id: Vector3i, grid: WorldGrid) -> void:
 	promotions = 0

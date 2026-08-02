@@ -269,3 +269,32 @@ func _sweep_count_with_seed(seed_value: int) -> int:
 	var sweeper := DeathLoopSystem.new()
 	sweeper._collect_junk()
 	return sweeper.junk_collected
+
+
+## THE DEATH LOOP MUST BE COMPLETABLE. Sprint 3's headline feature is that death is a loop rather
+## than a screen, and until the debug keys existed there was no way to reach it in the generated
+## world — no pit, no hazard, nothing hostile — and no way to leave it once reached, because the
+## Interregnum had no trigger. A feature a play-tester cannot reach has not shipped.
+func test_a_full_death_and_rebirth_cycle_completes() -> void:
+	var body: BodyComponent = ECSManager.bodies[EH.index_of(ECSManager.player_handle())]
+	body.health = 0.0
+	var corpse: int = deaths.on_player_death(EH.INVALID, generator)
+	assert_true(ECSManager.is_alive(corpse), "there is a body")
+
+	deaths.run_interregnum(null, null)
+	var successor: int = deaths.spawn_successor(World.active_chunk, LineageJournal.load_journal())
+
+	assert_true(ECSManager.is_alive(successor), "and a new adventurer")
+	assert_true(
+		ECSManager.bodies[EH.index_of(successor)].is_alive(), "who is alive and at full health"
+	)
+	assert_true(
+		ECSManager.player_inputs.has(EH.index_of(successor)), "and can be controlled again"
+	)
+
+
+## The arena has no bootstrapper and no grid. Dying there must still complete rather than crash
+## on a null, or the fast iteration scenario cannot exercise the loop at all.
+func test_the_interregnum_survives_a_world_with_no_history() -> void:
+	deaths.run_interregnum(null, null)
+	assert_eq(deaths.swarms_capped, 0, "no grid means no swarms to cap, and no crash")

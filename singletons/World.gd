@@ -35,6 +35,10 @@ func boot_scenario(name: StringName = SCENARIO_TEST_ARENA, seed_value: int = 1) 
 	chunks.clear()
 	grid = null
 	boot_report = null
+	# The streaming system remembers which chunk ids were Active. Those ids are meaningless
+	# against a grid that is about to be replaced, and keeping them makes the new world's chunks
+	# look already-promoted.
+	GameLoopManager.streaming.reset()
 
 	var chunk: ChunkData
 	if name == SCENARIO_WORLD:
@@ -71,6 +75,65 @@ func _boot_generated_world(seed_value: int) -> ChunkData:
 			GameLoopManager.planner.plan(core.current_objective, core.faction_id, grid)
 		)
 	return home
+
+
+## Which way the stairs under `row` lead: -1 down, +1 up, 0 for "not on a stairwell".
+##
+## Identified by TILE POSITION rather than by a per-tile flag, because both directions share the
+## `TILE_STAIRS` kind and the landing chunk places them at known coordinates.
+func stairs_under(row: int) -> int:
+	if grid == null:
+		return 0
+	var position: Vector3 = ECSManager.position_of(row)
+	var chunk: ChunkData = chunk_containing(position)
+	if chunk == null or chunk.chunk_id.x != 0 or chunk.chunk_id.y != 0:
+		return 0
+	var tile: Vector2i = chunk.world_to_tile(position)
+	if tile == FloorGenerator.STAIR_DOWN_TILE:
+		return -1
+	if tile == FloorGenerator.STAIR_UP_TILE:
+		return 1
+	return 0
+
+
+## Takes the player one floor down (-1) or up (+1).
+##
+## The destination floor's landing chunk is generated on demand, and the player arrives at the
+## OPPOSITE stair — descend and you appear at the new floor's up-stair, which is where you would
+## be if you had walked down. Arriving on the stair you left by would put you on a tile that
+## sends you straight back.
+func change_floor(direction: int) -> bool:
+	if grid == null or direction == 0:
+		return false
+	var target: int = player_chunk_id.z + direction
+	if target > WorldGrid.VILLAGE_FLOOR or target < FloorGenerator.DEEPEST_FLOOR:
+		return false
+
+	# The SAMPLER must move first. Collision and picking resolve terrain through it, and a frame
+	# spent sampling the old floor while standing on the new one is a frame inside a wall.
+	grid.current_floor = target
+	player_chunk_id = Vector3i(0, 0, target)
+	var landing: ChunkData = grid.chunk_at(player_chunk_id)
+	active_chunk = landing
+
+	var arrival: Vector2i = (
+		FloorGenerator.STAIR_UP_TILE if direction < 0 else FloorGenerator.STAIR_DOWN_TILE
+	)
+	var ground: Vector3 = landing.tile_to_world(arrival.x, arrival.y)
+	var row: int = EH.index_of(ECSManager.player_handle())
+	ECSManager.set_position(row, Vector3(ground.x, ground.y + 0.9, ground.z))
+	ECSManager.set_velocity(row, Vector3.ZERO)
+	ECSManager.col_chunk_x[row] = 0
+	ECSManager.col_chunk_y[row] = 0
+	ECSManager.col_floor[row] = target
+
+	# Re-stream around the new position, then tell the viewer to rebuild — the terrain it is
+	# drawing belongs to a floor nobody is standing on any more.
+	GameLoopManager.streaming.reset()
+	GameLoopManager.streaming.update_chunk_states(player_chunk_id, grid)
+	world_ready.emit(player_chunk_id)
+	ECSEvents.player_changed_floor.emit(target - direction, target)
+	return true
 
 
 ## Chunk that owns a world position, for callers that genuinely need tile coordinates.

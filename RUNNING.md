@@ -58,9 +58,13 @@ place the specific test features in §3 exist.
 | `Shift` + move | **Precision** — 35% speed | For lining up on a ledge edge or a pit lip without overshooting. Full speed is for covering ground. |
 | `Left mouse` | Attack | You swing **where you point**. The aim vector runs from you to the tile under the cursor; `PickSystem.melee_target` then takes the nearest living entity inside a 2.0 m reach and a 120° arc around it. |
 | `Right mouse` | (reserved) | Mapped as `attack_secondary` and reported in the overlay; no behaviour bound yet. |
-| `E` | Interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
+| `E` | **Use stairs**, or interact / take | Takes what is under the cursor, or the nearest thing within 2.5 m **of you**. Takes a **handful** off a pile too big to carry whole; refuses only when not one unit fits, and then says how many litres are free. |
 | `Tab` | Inspect | Selects the entity under the **mouse cursor** and appends its full component dump to the overlay. Falls back to the player if the cursor hits nothing. |
 | `T` | Bullet time | Sets `GameLoopManager.time_scale` to 0.2. Scales delta only — the 60 Hz tick rate never changes (ADR-9). |
+| `K` | **DEBUG: injure yourself** — 25 damage | The only way to reach death in the generated world, which has no pit, no hazard and nothing hostile. Four presses kills you. |
+| `R` | **DEBUG: run the year and respawn** | Only works once dead. Runs the Interregnum and brings in the successor, so the loop can be completed rather than pausing forever. |
+| `F1` | **Cycle overlay page / hide** | LIVE -> CHRONICLE -> FACTIONS -> MAP -> hidden -> LIVE. See below. |
+| Drag the header | **Move the debug panel** | Grab the `☰ debug — drag me` bar. Clicks on the panel stay on the panel; they do not swing a weapon at the world behind it. |
 | `G` | Toggle debug gizmos | Wireframe facing arrow, melee arc, interact radius, sight radius. On by default. |
 | `=` / `-` | Overlay text bigger / smaller | Pure UI. Saved immediately, so it survives a restart. |
 | `Esc` | Cancel | Mapped, not yet consumed. |
@@ -131,17 +135,44 @@ ground intersection approaches as the ray flattens — so the two cases meet wit
 | 2 | A generated world: 500 years of history, a nine-chunk village, factions placed by that history |
 | 3 | **Villagers walk** planned routes. **Factions decide and speak** once an in-game hour. **Death is a loop** — corpse, loot spill, control detached |
 
+### Inspecting the generated world (`F1`)
+
+The history, the factions and the chunk layout are the whole output of Sprint 2, and until now
+none of it was visible. Faction ledgers deliberately have **no position** — they are not objects
+in the world — so `Tab` can never reach them, because picking resolves through the spatial hash.
+
+Press `F1` to cycle the pages. A **fifth press dismisses the panel** entirely:
+
+| Page | What it answers |
+|---|---|
+| **LIVE** | The counters. What the engine is doing right now |
+| **CHRONICLE** | The 500 years that produced this world — who was founded, who conquered whom, in which year |
+| **FACTIONS** | Every living faction: name, population (abstract vs embodied), culture, current objective and mood, wealth, home chunk, and the last thing it said |
+| **MAP** | A **drawn** chunk map of your floor: green active, blue simulated, grey generated, near-black unexplored, with your position, faction anchors and the stairwell marked. Colour-coded legend below it |
+
+Two readings that look wrong and are not:
+
+- **`pop 121 abstract / 0 embodied`** — that faction lives on a floor you have never visited, so
+  it exists only as integers. Bodies appear when its chunk is promoted. That is the LoD design.
+- **`wealth 1155 units, materialized as stacks`** — an Active faction's ledger is *empty*,
+  because promotion spent it into physical piles. The inspector reports the total from whichever
+  side currently holds it, so a village you are standing in never reads as destitute.
+
 ### The Sprint 3 checks
 
 Boot the `world` scenario (the default) and watch the overlay:
 
 | Check | How | What it proves |
 |---|---|---|
-| The village walks | Watch `movers` and `paths_requested` climb above zero | Grid A*, the job planner, and the locomotion tiers |
+| The village walks | Watch `movers` climb above zero, and `paths_requested` tick as they re-plan | Grid A*, the job planner, and the locomotion tiers |
+| You can go underground | Walk to tile (34, 32), press `E`. The map title reads `FLOOR -1` | Floor transitions, lazy dungeon generation, and the floor-filtered spatial query |
+| Villagers notice you | Stand near one. `perceived (N total)` climbs; Tab it and awareness reads `SUSPICIOUS(1)` | Sight cones, LoS marching, and awareness tiering |
 | They avoid walls | Watch a villager cross the village without clipping a building | Active movers are collided by the same system that moves you |
 | Factions think | Wait ~10 real seconds for a Macro tick. The feed prints `faction N -> OBJECTIVE: "..."` | The reasoner, the queue, and the validation gate |
 | It thinks with no API key | You did not set one. It still decides | ADR-5 as amended: the LLM is optional, and this is the shipped default |
-| Death is a loop | Take fatal damage. Control detaches, a corpse appears holding your gear | The handle discipline: row 0's generation bumps, the corpse is a separate entity |
+| Death is a loop | Press `K` four times. Control detaches, a corpse appears holding your gear. Then `R` | The handle discipline, the Interregnum taxes, and the Lineage Journal end to end |
+| The world has a history | `F1` to CHRONICLE. Read who conquered whom | The DAG really generated 500 years, and the factions you see came from it |
+| Factions are real places | `F1` to FACTIONS, then MAP. Anchors match the map | Spatial anchors: nobody spawned at the origin by accident |
 
 ### Still worth checking from earlier sprints
 
@@ -149,21 +180,40 @@ Boot the `world` scenario (the default) and watch the overlay:
 |---|---|
 | The village is a real place | Walk across a chunk seam. Sprint 1's collision would have stopped you dead at the boundary |
 | It is the same world twice | Note the building layout, restart, compare. Chunks are a pure function of (seed, chunk_id) |
-| Villagers are people | **Tall and green.** Monsters are **small and red**, corpses are **flat grey slabs** |
+| Villagers are people | **Tall and green.** Monsters are **small and red**, corpses are **flat grey slabs**. Villagers have 100 HP, so killing one takes about three hits |
 
 **For movement feel, combat, fall damage and fluids, use `test_arena`.** Those features have
 authored test geometry there and none of it exists in a generated village. Set
 `"boot_scenario": "test_arena"` in `debug_config.json`.
 
+### Claims in this file are checked against the code
+
+Every capability above was verified against the implementation before being written down, and the
+audit removed two claims that were not true:
+
+- *"Take fatal damage"* was listed as a Sprint 3 check while the generated world contained **no
+  pit, no hazard and nothing hostile**. There was no way to reach the death loop at all, and no
+  way to leave it once reached, because the Interregnum had no keyboard trigger. `K` and `R` now
+  exist for exactly that reason.
+- *"Hit a villager and it becomes a slab"* implied one hit. Villagers have 100 HP and a melee
+  swing does roughly 35, so it takes about three.
+
+If something here does not work as described, that is a bug in the code or in this file — report
+it either way.
+
 ### NOT built yet — as of Sprint 3
 
 Not bugs. Listed so play-testing stops rediscovering them:
 
-- **Nothing reacts to you.** Killing a villager produces a corpse and no witness, alarm, or
-  grudge. Faction politics is unowned until Sprint 3.5.
-- **No respawn UI.** Death detaches control and pauses. The Interregnum and the successor spawn
-  are implemented and tested, but nothing triggers them from the keyboard.
-- **No stairs.** Dungeon floors generate on demand; nothing takes you down to them.
+- **Nothing reacts to you.** Villagers DO perceive you — watch `perceived (N total)` climb, and
+  Tab one to see its awareness rise to `SUSPICIOUS`. But nothing is done with that: killing one
+  produces a corpse and no alarm, grudge, or reputation change. The consequence layer is
+  unowned until Sprint 3.5.
+- **No respawn UI.** `R` triggers the Interregnum from the keyboard, and it works, but there is
+  no fade, no "One Year Passes" card, and no death screen — you simply have control again.
+- **Nothing in the world can kill you.** No hazards, no hostile creatures outside the arena. `K`
+  exists so the death loop is reachable; a real threat is Sprint 4 and later.
+
 - **No loot placement.** Faction stockpiles materialize at anchors; nothing else is scattered.
 - **The doorway is a gap, not a door.** No door entities or openable fixtures exist.
 - **No ceilings.** Floors are 2.5D planes (ADR-3), so "indoors" is not a concept the renderer
@@ -188,8 +238,14 @@ rule, so "walking around" is a real test pass:
 
 ### Reading the debug overlay
 
+Colour is reserved for values measured against a threshold, so it always carries information:
+**green** inside budget, **amber** approaching it, **red** over — or, for `handles`, red the
+moment a stale rejection appears, since that counter should never be anything but zero.
+
+
+
 ```
-Spring 1 06:00  |  scenario test_arena
+Spring 1 06:00  |  scenario world  |  60 fps (16.7 ms/frame)
 you: tile (8, 32)   world (8.50, 0.90, 32.50)   open  elev +0.00m  fluid 0
 cursor: tile (24, 37)   SOLID  elev +0.00m  fluid 0
 vitals: health 100.0/100.0   stamina 99.8   grounded   (safe fall < 5 m/s)
@@ -287,6 +343,36 @@ witnesses 0` on a bare arena boot is expected. Its awareness reads `UNAWARE(0)` 
 Villagers in the `world` scenario do move, because a faction plans for them (Sprint 3).
 
 The full not-built-yet list lives in §3a, in one place, so it cannot drift out of date in three.
+
+### Going underground
+
+The village's landing chunk — chunk (0, 0) — has a **stairwell**. It is marked in the world by a **cyan beacon column** you can walk toward from
+anywhere in the village, and the tile itself is a sunken cyan slab. The cursor readout confirms
+`STAIRS (press E)`. Up-stairs are amber and raised.
+
+There are five floors below the surface. Each landing chunk has a way up and, unless it is the
+bottom, a way down. You arrive at the OPPOSITE stair from the one you used, which is where you
+would be if you had walked down — arriving on the stair you left by would put you on a tile that
+sends you straight back.
+
+The `F1` MAP page follows you: `FLOOR -2` in its title, and a fresh grid of chunks generated on
+demand as you explore.
+
+Dungeon floors are rooms-and-corridors, not village buildings, and they are **empty** — factions
+anchored down there exist as ledgers with no bodies until their chunk is promoted. Watch the
+FACTIONS page: `0 embodied` becomes a real number once you stand in their chunk.
+
+### The debug panel
+
+It **scrolls** once its content passes 80% of the window height, so the chronicle and the faction
+list are fully readable rather than running off the bottom.
+
+It is a draggable, non-modal window rather than text painted on the corner of the screen. Grab
+its header to move it off whatever you are trying to look at. Clicking anywhere on it is
+consumed by the panel, so reading the overlay no longer attacks the thing behind it.
+
+The font is **monospace** on purpose: the `F1` map is a grid of characters, and a proportional
+font shreds its columns until it stops being a map.
 
 ### If the text is too small
 
