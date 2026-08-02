@@ -33,7 +33,12 @@ enum NodeType { FACTION, LEADER, LOCATION, ARTIFACT, EVENT_ABSTRACT }
 ## holds that territory, and erasing it erases the explanation.
 enum NodeStatus { ACTIVE, DESTROYED, DORMANT }
 
-enum EdgeType { FOUNDED, DESTROYED, CONQUERED, MIGRATED_TO, FORGED, ALLIED_WITH }
+## KILLED_BY added 2026-08-01. The Sprint 3 roadmap asked for a "Player Death Event Edge" and
+## named it `Killed_By`, which was not in this enum, so the death loop overloaded DESTROYED and
+## recorded the death BACKWARDS — the edge read as the player having destroyed the killer's
+## faction. Direction convention, matching CONQUERED(aggressor, victim): source is the subject
+## the edge is about, target is the other party. KILLED_BY(victim, killer).
+enum EdgeType { FOUNDED, DESTROYED, CONQUERED, MIGRATED_TO, FORGED, ALLIED_WITH, KILLED_BY }
 
 enum MaterializationPolicy {
 	LEDGERIZE,

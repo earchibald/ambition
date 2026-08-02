@@ -97,6 +97,7 @@ static func factions_text() -> String:
 			PanelFormat.muted("(%s)" % ECSEnums.Emotion.keys()[core.current_emotion]),
 		]))
 		lines.append(PanelFormat.row("  wealth", PanelFormat.plain(_describe_wealth(core))))
+		lines.append(PanelFormat.row("  toward you", _standing_toward_player(core)))
 		lines.append(PanelFormat.row(
 			"  home", PanelFormat.muted("chunk %s" % core.anchor_chunk_id)
 		))
@@ -165,6 +166,26 @@ static func _anchor_lookup() -> Dictionary:
 	for row in ECSManager.query(ComponentMask.FACTION_CORE):
 		out[ECSManager.faction_cores[row].anchor_chunk_id] = true
 	return out
+
+
+## How this faction feels about the player, and why.
+##
+## The single most useful line on the page once consequences exist: it is the difference between
+## "a village" and "a village that has decided something about you".
+static func _standing_toward_player(core: FactionCoreComponent) -> String:
+	var score: float = ReputationSystem.relationship_score(
+		core, WorldConstants.PLAYER_FACTION_ID
+	)
+	var state: Dictionary = core.diplomacy.get(WorldConstants.PLAYER_FACTION_ID, {})
+	var grievances: Array = state.get("grievances", [])
+	var label: String = PanelFormat.plain("%+.0f neutral" % score)
+	if score <= ReputationSystem.HOSTILE_BELOW:
+		label = PanelFormat.bad("%+.0f HOSTILE" % score)
+	elif score >= ReputationSystem.FRIENDLY_ABOVE:
+		label = PanelFormat.good("%+.0f friendly" % score)
+	if grievances.is_empty():
+		return label
+	return "%s %s" % [label, PanelFormat.muted("(%s)" % ", ".join(grievances))]
 
 
 ## Wealth, wherever it currently lives.

@@ -43,9 +43,21 @@ func resolve(
 
 	# 2. Did we get anything usable at all? An empty Dictionary is how every provider reports
 	#    failure, so timeout, refusal and unparseable JSON all land here.
+	#
+	#    THE FAILURE KEEPS THE CURRENT PLAN. This forced FORTIFY until 2026-08-01, which meant a
+	#    faction mid-raid abandoned it because a network call timed out — the network deciding
+	#    strategy. FORTIFY is the specified fallback for a HALLUCINATED TARGET, which is a
+	#    different thing: there the leader did answer, and answered about a faction that does not
+	#    exist. Here the leader never answered at all, so the right move is to change nothing and
+	#    let the requeue try again next cycle.
+	#
+	#    `on_timeout()` was written to do exactly this and had NO CALLER. It was covered by a test
+	#    that called the helper directly, so the claim looked proven while the production path did
+	#    the opposite. The helper is now the one implementation of this rule.
 	if response.is_empty():
 		rejected_malformed += 1
-		return _apply(core, ECSEnums.Objective.FORTIFY, ECSEnums.Emotion.CALM, -1, "Hold fast.")
+		var held: ECSEnums.Objective = on_timeout(faction_handle)
+		return _apply(core, held, core.current_emotion, core.objective_target, core.last_declaration)
 
 	var objective: int = _parse_objective(String(response.get("objective", "")))
 	if objective < 0:

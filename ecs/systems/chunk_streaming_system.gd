@@ -274,6 +274,30 @@ static func _core_anchored_at(chunk_id: Vector3i) -> FactionCoreComponent:
 	return null
 
 
+## How much of ONE material a faction holds, wherever it currently lives.
+##
+## An Active faction's ledger is EMPTY, because promotion spends it into physical stacks. Any
+## caller that reads the ledger alone therefore sees zero for every faction whose territory the
+## player happens to be standing in — which had the reasoner concluding that every village it
+## could see was starving, permanently, for a structural reason nothing to do with food.
+static func owned_material_total(faction_id: int, material: StringName) -> int:
+	var total: int = 0
+	var core: FactionCoreComponent = DAGInstantiator.faction_core(faction_id)
+	if core != null:
+		total += int(core.abstract_wealth_ledger.get(material, 0))
+	for row in ECSManager.query(ComponentMask.OWNERSHIP):
+		var ownership: OwnershipComponent = ECSManager.ownerships[row]
+		if ownership.faction_id != faction_id:
+			continue
+		var composition: MaterialCompositionComponent = ECSManager.materials.get(row)
+		var physical: PhysicalPropertyComponent = ECSManager.physicals.get(row)
+		if composition == null or physical == null:
+			continue
+		if composition.dominant_material() == material:
+			total += physical.quantity
+	return total
+
+
 ## Ledger plus every physical stack the faction owns. THE number the conservation property test
 ## asserts is invariant across boundary crossings.
 static func total_faction_value(faction_id: int) -> int:

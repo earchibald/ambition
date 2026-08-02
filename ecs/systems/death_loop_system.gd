@@ -19,6 +19,17 @@ extends RefCounted
 ## Fraction of ledger wealth that survives a year of nobody minding the store.
 const WEALTH_RETAINED: float = 0.60
 
+## Fraction of a grudge against the player that survives a year of their absence.
+##
+## `meta_progression_and_death_loop_architecture.md` says to decay diplomacy toward Faction 0 by
+## "60-75% toward neutral" on each Interregnum pass, and ADR-9 makes the Interregnum 12 monthly
+## passes. Those two sentences do not compose. Read per-pass, the retained fraction is
+## 0.4^12 = 1.7e-5 at the gentle end — a faction that watched you murder its people forgets
+## completely, and the whole consequence layer resets every death. Read across the year it is one
+## application. This takes the annual reading, at the midpoint of the stated band, and the
+## arithmetic above is why. Recorded as a resolved spec ambiguity, not a silent choice.
+const GRUDGE_RETAINED: float = 0.30
+
 ## Carrying capacity per chunk. Rats and spiders breed geometrically in an abstract counter, and
 ## an unchecked exponential is a save-file-sized number by year two.
 const SWARM_CAP_PER_CHUNK: int = 10
@@ -33,6 +44,7 @@ var items_spilled: int = 0
 var wealth_taxed: int = 0
 var swarms_capped: int = 0
 var junk_collected: int = 0
+var grudges_decayed: int = 0
 
 
 ## Entity 0's health reached zero. Returns the corpse handle.
@@ -142,6 +154,7 @@ func run_interregnum(bootstrapper: Bootstrapper, grid: WorldGrid) -> void:
 	_levy_entropy_tax()
 	_cap_swarms(grid)
 	_collect_junk()
+	_decay_grudges()
 
 
 ## 40% of abstract wealth evaporates. Not punishment — it is what makes a year of absence cost
@@ -166,6 +179,30 @@ func _cap_swarms(grid: WorldGrid) -> void:
 		if chunk.swarm_population > SWARM_CAP_PER_CHUNK:
 			chunk.swarm_population = SWARM_CAP_PER_CHUNK
 			swarms_capped += 1
+
+
+## A year is long enough for the anger to cool, but not for the memory to go.
+##
+## This closes a gap nobody had implemented: reputation was permanent. Sprint 3.5 gave factions a
+## reason to hate the player and Sprint 3D gave the player a way to die, and nothing connected
+## them — so a village that turned hostile stayed hostile forever, across every future life,
+## which makes the death loop a respawn rather than a fresh start.
+##
+## The SCORE decays toward neutral. The GRIEVANCE LIST does not. That asymmetry is the point:
+## they no longer act on it, and they still remember what you did. It is also what lets a second
+## offence land harder than the first without any special case for repeat offenders.
+func _decay_grudges() -> void:
+	for row in ECSManager.query(ComponentMask.FACTION_CORE):
+		var core: FactionCoreComponent = ECSManager.faction_cores[row]
+		if not core.diplomacy.has(WorldConstants.PLAYER_FACTION_ID):
+			continue
+		var state: Dictionary = core.diplomacy[WorldConstants.PLAYER_FACTION_ID]
+		var before: float = float(state["score"])
+		if is_zero_approx(before):
+			continue
+		state["score"] = before * GRUDGE_RETAINED
+		state["status"] = ReputationSystem.status_for(float(state["score"]))
+		grudges_decayed += 1
 
 
 ## Residual physical sweep. Filth and scrap always go; unowned loose items go by chance, because
@@ -202,10 +239,21 @@ func spawn_successor(chunk: ChunkData, journal: Dictionary) -> int:
 
 ## The death becomes history. Faction 0 is the player (ADR-14), so the edge hangs off a synthetic
 ## node rather than a real faction — the adventurer is not an organisation.
+##
+## DIRECTION MATTERS, and this was wrong until 2026-08-01. The edge was written as
+## `DESTROYED(player, killer)`, which under this graph's own convention — `CONQUERED(aggressor,
+## victim)` — reads as the player having wiped out the killer's faction. Every reader scanning
+## for what happened to that faction would have found a destruction it never suffered. The type
+## was also an overload: `DESTROYED` is written elsewhere as a self-loop meaning "this node
+## ceased to exist", and a faction that kills the player has not ceased to exist.
+##
+## An unwitnessed death — a fall, starvation, drowning — has no killer, and is recorded as a
+## self-loop rather than an edge to faction -1. There is no node -1, so an edge pointing at it is
+## a dangling reference in the only record of why the world looks the way it does.
 func _record_death_in_history(killer_handle: int, generator: DAGGenerator) -> void:
 	if generator == null:
 		return
-	var killer_faction: int = -1
+	var killer_faction: int = WorldConstants.PLAYER_FACTION_ID
 	var killer_row: int = ECSManager.resolve(killer_handle)
 	if killer_row >= 0:
 		var identity: SocialIdentityComponent = ECSManager.social_identities.get(killer_row)
@@ -215,7 +263,7 @@ func _record_death_in_history(killer_handle: int, generator: DAGGenerator) -> vo
 		DAGEdge.create(
 			WorldConstants.PLAYER_FACTION_ID,
 			killer_faction,
-			ECSEnums.EdgeType.DESTROYED,
+			ECSEnums.EdgeType.KILLED_BY,
 			generator.current_epoch
 		)
 	)
@@ -229,4 +277,5 @@ func counters() -> Dictionary:
 		"interregnum_wealth_taxed": wealth_taxed,
 		"interregnum_swarms_capped": swarms_capped,
 		"interregnum_junk_collected": junk_collected,
+		"interregnum_grudges_decayed": grudges_decayed,
 	}

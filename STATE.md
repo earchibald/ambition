@@ -1,9 +1,63 @@
 # Agent Handoff State
 
-*   **Current Branch:** `feature/sprint1-vertical-slice`, stacked on
-    `feature/sprint0-setup`, stacked on `feature/spec-gestalt-review`, off `dev`.
-    `dev` was fast-forwarded to `main` (it was 1 commit BEHIND, so any branch cut from `dev`
-    would have missed the entire ADR-integration pass).
+*   **Current Branch:** `feature/sprint3.5-body-politic`, stacked on
+    `feature/sprint3-world-inspector` (PR #7), off `dev`. Sprint 3 proper is already on `dev`
+    via PR #6. PRs #7 and #8 are OPEN and UNMERGED — await human review.
+
+*   **SPRINT 3 + 3.5 (2026-07-31). Green, and under adversarial audit.**
+    375 tests across 28 scripts, gdlint clean, boot sentinel present.
+    Sprint 3 delivered: grid A* with bounded expansions and partial-route degradation; two-tier
+    locomotion; the `JOB_TEMPLATES` planner; the reasoner (heuristic default, remote optional per
+    the ADR-5 amendment) behind a Validation Gate; the death loop with corpse, generation bump,
+    Interregnum taxes and the Lineage Journal; stairs and floor streaming; and a rewritten F1
+    inspector. Sprint 3.5 delivered the consequence layer: grievances, per-faction-pair
+    reputation, hostility crossing, and gossip.
+    **Sprint 3.5 is deliberately PARTIAL and this is on the record.** Its spec names nine things;
+    three are built, one under a different shape, one partial, two exist as unread fields, two do
+    not exist. `docs/audits/OUTPUT-IMPL-AUDIT-sprint3-and-3.5.md` §4b enumerates every one, plus
+    four Sprint 3 requirements that were not built (per-faction reasoning cap, thinking bark,
+    Adventurer's Residence, `reason_summary` length cap). Do not treat that section as scope
+    creep to close silently — it is the declared baseline two external auditors are checking.
+    TWO EXTERNAL INPUT AUDITS ARE IN AND TRIAGED — see `docs/audits/TRIAGE--*.md`. The second
+    (GPT-5.5 via Copilot CLI) found three defects that were live in the SHIPPED CODE, not only in
+    the specs, all now fixed:
+    *   The player-death DAG edge was `DESTROYED(player, killer)`, which under this graph's own
+        convention read as the player having wiped out the killer's faction. `KILLED_BY` is now a
+        registered `EdgeType` with the direction convention written down. The old test asserted
+        only `source_id`, so it passed against an edge that said the opposite of the truth.
+    *   `PromptBuilder.salient_memories` and `FactionCoreComponent.prune_diplomacy` both sorted on
+        one field with the unstable `sort_custom`, so ties changed WHICH items were selected.
+        That violates ADR-20 and silently missed the prompt-hash response cache. Both now use a
+        total order ending in a unique id. **Any `sort_custom` comparing a single field is a
+        candidate for the same bug — check before adding one.**
+    *   Interregnum reputation decay was never implemented at all, so a hostile faction stayed
+        hostile across every future life and the death loop was a respawn. Now decays annually
+        (`GRUDGE_RETAINED`); the grievance LIST deliberately survives.
+    Also added: `test_every_registry_enum_matches_the_code`, because nothing enforced the
+    registry-is-canonical rule and that is how a roadmap came to name an `EdgeType` that did not
+    exist.
+
+*   **BOTH OUTPUT AUDITS ARE IN AND TRIAGED** — `docs/audits/TRIAGE--OUTPUT-AUDITS--20260801.md`.
+    392 tests. Ten more defects fixed, and **two of my own §4 claims were flatly FALSE**:
+    *   A timeout forced FORTIFY, so a faction mid-raid abandoned it because the network was slow.
+        `on_timeout()` — the function implementing the rule I claimed — had NO CALLER. Failures of
+        every kind now change nothing.
+    *   A fatal fall or blow ran `_convert_to_corpse` on ROW 0, tagging the reserved player row
+        `Corpse`/`Filth` before `DeathLoopSystem` ran, which then built a second corpse from the
+        mutated state. Guarded now.
+    *   Also fixed: unbounded response cache; `objective_target` written and never read (a raid
+        marched around its own village); reasoning running hourly instead of ADR-9's weekly;
+        registry COMPONENT drift in both directions; `was_recently_attacked` never checking when.
+    *   ONE FINDING REJECTED. An audit reported the `Authorization` header as a broken format
+        string. The auditor's own harness had masked the credential-shaped token and it analysed
+        its own redacted output. `od` shows `"Authorization: Bearer %s" % _api_key` intact.
+
+*   **THE RECURRING DEFECT IN THIS CODEBASE IS A DOC COMMENT THAT DESCRIBES BEHAVIOUR THE CODE
+    DOES NOT HAVE.** Four instances in Sprint 3 alone: `PREFERRED_PROFESSION` (declared, never
+    read), `on_timeout` (written, never called), `_convert_to_corpse` ("for non-player entities",
+    no check), `was_recently_attacked` ("recently", no time check). Every one read as covered and
+    passed review. **Before believing a comment, grep for a second reference to the symbol.**
+    A test that calls a helper directly does not prove the production path uses it.
 
 *   **SPRINT 2 COMPLETE (2026-07-31).** All six roadmap steps implemented and green:
     DAG history, world generation + tile sampler, DAG-to-ECS instantiator, LoD boundary two-way
@@ -18,8 +72,9 @@
     across boots; and Sprint 1's collision could not cross a chunk seam at all.
     STILL UNPLAYED BY A HUMAN in the world scenario — frames inspected only.
 
-*   **Active Goal:** Sprint 0 and Sprint 1 are implemented, visually verified, and merged into
-    `dev`. Next: Sprint 2.
+*   **Active Goal:** Sprint 3 and 3.5 are implemented and documented. External and Copilot input
+    audits now exist in `docs/audits/`; the implementation audit manifest is also present. Await
+    human review of #7/#8 and triage the remaining input-spec findings before starting Sprint 4.
 
 *   **START HERE IF YOU ARE NEW:** `RUNNING.md`. It has the exact commands to run the game, the
     control list, what every object in the test arena is there to test, how to read the debug
@@ -163,15 +218,29 @@
     *   NavigationServer3D is deliberately OUT of Sprint 1 (nothing bakeable exists yet and it
         is untestable under GUT). NavBridge/grid A* is not implemented either.
     *   Deferred to their own sprints: persistence build-out (Sprint P), economy (2.75),
-        faction politics (3.5), player-facing UI (U), content validators (5).
+        player-facing UI (U), content validators (5). Faction politics (3.5) is now PARTIALLY
+        built — see the Sprint 3.5 note at the top and §4b of the output audit manifest for
+        exactly which parts.
+    *   **Dead-code hazard, twice hit.** `FactionPlanner.PREFERRED_PROFESSION` was declared with
+        a doc comment describing behaviour it did not have, because nothing read it;
+        `SocialIdentityComponent.loyalty` and `.prestige` are still in that state. A declared
+        symbol with one reference is a claim with no implementation behind it. Grep for a second
+        reference before believing a doc comment.
 
 *   **Next Immediate Steps:**
-    1.  **Play it with hands.** `godot res://viewer/Main.tscn`. Judge movement feel, the
-        `SMOOTHING_RATE` guess, melee reach, and the ledge step. Write the result here. Do this
-        BEFORE Sprint 2, as the staged build order requires.
-    2.  Sprint 2 (world/floor generation, chunk streaming, LoD conservation property tests),
-        per `docs/scope_and_milestones.md` §6. Sprint 2's WorldGrid replaces `TestArena` as the
-        *producer* of ChunkData; the consumer contract must not change.
-    3.  Fold the ADR-5 amendment into `docs/llm_reasoner_and_planning_architecture.md` and into
-        the Sprint 3 roadmap, whose acceptance criteria now include a no-endpoint play session.
-    4.  Close the ADR-10 perf gap. Rust/GDExtension port of the CA and the spatial hash.
+    1.  **Wait for the two audits.** Findings land as
+        `docs/audits/{INPUT,OUTPUT}-AUDIT-RESULT--<slug>--<stamp>.md`. Triage them before
+        writing new features; a MAJOR finding against a claim outranks any Sprint 4 task.
+    2.  **Close the declared gaps in `OUTPUT-IMPL-AUDIT` §4b**, or move them into a spec with an
+        owner. The per-faction reasoning cap (G-1) is the one with a real failure mode: one
+        faction can currently fill the global queue.
+    3.  Sprint 4 (reaction matrix, spell compiler, ephemeral casting, mutation) per
+        `docs/scope_and_milestones.md`. Do not start until #7 and #8 are merged.
+        **Roadmap Step 5 comes FIRST**: Tab must toggle. It selects and never deselects, and
+        falls back to the player row on a miss, so the LIVE panel cannot be dismissed. Every
+        Sprint 4 system is inspected through that panel, so fixing it first makes the rest of the
+        sprint faster. `DebugOverlay` already treats `_selected_row = -1` as nothing-selected;
+        only `PlayerInputBridge._select_under_cursor` needs to change.
+    4.  Close the ADR-10 perf gap. Rust/GDExtension port of the CA and the spatial hash. The
+        vendored performance skill flagged `ViewManager`'s one `MeshInstance3D` per entity as
+        the next lead — the terrain already uses MultiMesh; entities do not.

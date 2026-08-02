@@ -17,6 +17,10 @@ var kills: int = 0
 var gibs: int = 0
 var damage_dealt: float = 0.0
 
+## Acts committed this tick that somebody might have seen. Drained by GameLoopManager and handed
+## to PerceptionSystem, which owns the question of who had line of sight.
+var witnessed_actions: Array[Dictionary] = []
+
 
 ## Weapon-tip speed. DECOUPLED from body velocity, which is what fixes the zero-damage bug. A
 ## forward lunge adds a capped charge bonus rather than being the sole source of damage.
@@ -92,6 +96,13 @@ func resolve_melee(
 	# hit produce INVESTIGATE rather than omniscient combat.
 	_emit_impact_noise(target_row, effective)
 	_report(target_row, damage, target.health, &"gib" if effective > threshold else &"melee")
+	# WITNESSABLE. There is no global crime flag: this only says the act happened somewhere, and
+	# perception decides who — if anyone — was in a position to see it.
+	witnessed_actions.append({
+		"subject": attacker_row,
+		"action": &"MURDER" if not target.is_alive() else &"ASSAULT",
+		"location": ECSManager.position_of(target_row),
+	})
 
 	if not target.is_alive():
 		kills += 1
@@ -144,7 +155,19 @@ func _emit_impact_noise(row: int, energy_j: float) -> void:
 ## Death converts the entity into a corpse IN PLACE for non-player entities. The PLAYER's death
 ## is different: it creates a SEPARATE corpse entity and retires handle 0 with a bumped
 ## generation, so the corpse and the next adventurer never compete for the reserved slot.
+##
+## THE GUARD BELOW WAS MISSING UNTIL 2026-08-01, and the comment above described an intention the
+## code did not implement — the same failure mode as a doc comment on unused code. A fatal fall
+## tagged ROW 0 itself `Corpse`/`Filth` and stripped its behaviour bits, and only afterwards did
+## `GameLoopManager._check_player_death()` run `DeathLoopSystem`, which then built a second corpse
+## out of already-mutated row-0 state. Two corpses, a player row wearing corpse tags, and ADR-14's
+## reserved-row rule broken for the width of a frame.
+##
+## Row 0 is left entirely alone here. `DeathLoopSystem.on_player_death` is the single owner of
+## what happens to the player, which is what C-D5 claims and what this now makes true.
 func _convert_to_corpse(row: int) -> void:
+	if row == WorldConstants.PLAYER_INDEX:
+		return
 	var chemistry: ChemistryComponent = ECSManager.chemistries.get(row)
 	if chemistry == null:
 		chemistry = ChemistryComponent.new()

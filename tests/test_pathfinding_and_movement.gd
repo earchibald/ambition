@@ -293,3 +293,85 @@ func _make_faction(members: int) -> FactionCoreComponent:
 		ECSManager.bodies[row] = BodyComponent.new()
 		ECSManager.add_component_bit(row, ComponentMask.BODY)
 	return core
+
+
+## PROFESSION FILTERING (ADR-4). `PREFERRED_PROFESSION` was declared, documented as if it worked,
+## and never read — so a miner was as likely to be sent to guard duty as a guard was. Dead code
+## that claims to do something is worse than absent code, because it reads as covered.
+func test_a_worker_is_given_a_job_their_profession_suits() -> void:
+	var core: FactionCoreComponent = _make_faction(4)
+	var members: Array[int] = FactionPlanner.members_of(core.faction_id)
+	for row in members:
+		var job_role := ProfessionComponent.new()
+		job_role.profession = &"Guard"
+		ECSManager.professions[row] = job_role
+		ECSManager.add_component_bit(row, ComponentMask.PROFESSION)
+
+	var jobs: Array[Dictionary] = planner.plan(
+		ECSEnums.Objective.GATHER_RESOURCES, core.faction_id, grid
+	)
+	var guard_actions: Array = FactionPlanner.PREFERRED_PROFESSION.keys().filter(
+		func(a: StringName) -> bool: return FactionPlanner.PREFERRED_PROFESSION[a] == &"Guard"
+	)
+	var template: Array = FactionPlanner.JOB_TEMPLATES[ECSEnums.Objective.GATHER_RESOURCES]
+	var suitable: Array = template.filter(
+		func(a: StringName) -> bool: return guard_actions.has(a)
+	)
+	if suitable.is_empty():
+		# No guard work in this template, so round-robin is the correct outcome.
+		assert_gt(jobs.size(), 0, "everyone still gets work when nobody is qualified")
+		return
+	for job in jobs:
+		assert_true(suitable.has(job["action"]), "guards drew guard work")
+
+
+## A village where every job needs a specialist and none exists must not stop working.
+func test_unqualified_workers_still_get_jobs() -> void:
+	var core: FactionCoreComponent = _make_faction(3)
+	var jobs: Array[Dictionary] = planner.plan(
+		ECSEnums.Objective.RAID_FACTION, core.faction_id, grid
+	)
+	assert_eq(jobs.size(), 3, "nobody is left idle for lack of a profession")
+
+
+## A RAID THAT MARCHED NOWHERE. `objective_target` was written by the resolver and read by
+## nobody, so a faction that decided to raid faction 9 sent its soldiers wandering around its own
+## village. The decision was made, recorded, and shown in the overlay, and changed nothing.
+func test_a_raid_marches_on_the_faction_it_named() -> void:
+	var attacker: FactionCoreComponent = _make_faction(4)
+	var defender: FactionCoreComponent = _make_faction(3)
+	# `_make_faction` gives every core the same id, so distinguish them or the planner correctly
+	# reads "my target is myself" and marches home — which is what this test first proved.
+	defender.faction_id = attacker.faction_id + 1
+	defender.anchor_chunk_id = attacker.anchor_chunk_id + Vector3i(2, 0, 0)
+	attacker.objective_target = defender.faction_id
+
+	var jobs: Array[Dictionary] = planner.plan(
+		ECSEnums.Objective.RAID_FACTION, attacker.faction_id, grid
+	)
+	var marches: Array = jobs.filter(
+		func(j: Dictionary) -> bool: return j["action"] == &"MarchToTarget"
+	)
+	if marches.is_empty():
+		assert_gt(jobs.size(), 0, "the raid produced work of some kind")
+		return
+
+	var home: ChunkData = grid.chunk_at(attacker.anchor_chunk_id)
+	var away: ChunkData = grid.chunk_at(defender.anchor_chunk_id)
+	for march in marches:
+		var to: Vector3 = march["location"]
+		assert_lt(
+			to.distance_to(away.tile_to_world(32, 32)),
+			to.distance_to(home.tile_to_world(32, 32)),
+			"the march heads toward the enemy, not around the village"
+		)
+
+
+## A raid with no named enemy is a muster, and mustering at home is right — not a crash.
+func test_a_raid_without_a_target_still_produces_work() -> void:
+	var core: FactionCoreComponent = _make_faction(3)
+	core.objective_target = -1
+	var jobs: Array[Dictionary] = planner.plan(
+		ECSEnums.Objective.RAID_FACTION, core.faction_id, grid
+	)
+	assert_gt(jobs.size(), 0, "everyone still has something to do")

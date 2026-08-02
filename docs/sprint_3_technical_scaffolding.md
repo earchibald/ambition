@@ -5,7 +5,9 @@ Context: This document provides the concrete code structures, API safety mechani
 
 AUTHORITATIVE CORRECTIONS (ADR): (1) LLM uses an LLMProvider interface over
 OpenAI-compatible endpoints; { endpoint, api_key(from env/user:// — NEVER committed),
-model } (ADR-5). Tests inject a NullLLMProvider stub so headless CI makes no network calls.
+model } (ADR-5). CORRECTED 2026-08-01: the local provider is not a stub injected by tests. It
+is the DEFAULT provider, selected whenever no endpoint is configured, and it is what CI exercises
+— so the no-network path is the shipped path and not a fallback. See the ADR-5 amendment.
 (2) Objective translation is, for now, deterministic objective->JobTemplate
 expansion (ADR-4), not a search planner. (3) The Interregnum Entropy/Swarm Tax operates on LEDGERS
 and abstract population counters, not physical entities — during the skip the world is
@@ -18,7 +20,18 @@ synthetic DAG node so targeting the player validates (ADR-14).
 Do not block the main thread. Do not store stale prompts.
 
 # LLMBridge.gd (Autoload)
-var request_queue: Array[EntityHandle] = [] # Store ONLY handles; build prompts lazily
+#
+# CORRECTED 2026-08-01 for ADR-19. This block predates ADR-19 and used `EntityHandle` as though
+# it were a type and query results as though they were handles. Neither is true:
+#   * A handle is a PACKED 64-BIT INT (index | generation), so the queue is `Array[int]`.
+#   * `ECSManager.query(mask)` returns DENSE ROW INDICES, never handles. Rows index the component
+#     columns directly; a row must be converted with `ECSManager.handle_of(row)` before it is
+#     stored, emitted, or compared, and a handle resolved with `ECSManager.resolve(handle)`
+#     before it is used to read a column.
+#   * The distinction is not pedantry. A row is only valid for this frame's layout; a handle
+#     carries a generation and fails validation once the entity dies. Storing a row where a
+#     handle belongs is how a queued leader silently becomes whoever recycled its slot.
+var request_queue: Array[int] = []  # PACKED HANDLES ONLY; build prompts lazily
 var is_request_in_flight: bool = false
 var http_node: HTTPRequest
 
@@ -31,14 +44,15 @@ func _process(delta):
     if not is_request_in_flight and request_queue.size() > 0:
         _dispatch_next_request()
 
-func request_reasoning(entity: EntityHandle):
+func request_reasoning(entity: int):   # a packed handle, not a row index
     if not request_queue.has(entity):
         request_queue.append(entity)
 
 func _dispatch_next_request():
     is_request_in_flight = true
     var entity = request_queue.pop_front()
-    
+    current_flight_data = { "entity": entity }   # CORRECTION 2026-08-01, see note below
+
     # LAZY GENERATION: Build the prompt right now, not when queued.
     var real_time_prompt = PromptBuilderSystem.build_context(entity)
     _send_to_api(real_time_prompt)
@@ -62,13 +76,19 @@ The prompt MUST instruct the LLM to return this exact schema.
 
 # LLMResolutionSystem.gd
 func _on_request_completed(result, response_code, headers, body):
+    # CORRECTION 2026-08-01. THIS MUST BE THE FIRST LINE, before any early return below.
+    # As originally written this function never cleared the flag, so the queue deadlocked on
+    # its first request and Tier-3 reasoning stopped for the rest of the session.
+    is_request_in_flight = false
+
     var json = JSON.parse_string(body.get_string_from_utf8())
     var entity = current_flight_data.entity
-    
+
     # 1. Check if the Leader is still alive
     if not ECSManager.is_alive(entity):
         return
-        
+
+
     # 2. Anti-Hallucination & Reality Check
     var target_id = json.get("target_faction_id", -1)
     if target_id != -1 and not DAG.has_active_faction(target_id):
@@ -84,7 +104,15 @@ func _on_request_completed(result, response_code, headers, body):
 # MetaProgressionManager.gd
 func execute_interregnum():
     # 1. Update DAG
-    DAG.add_event_edge(0, "Killed_By", last_attacker_id)
+    # CORRECTED 2026-08-01: "Killed_By" was a string naming an edge type that did not exist in
+    # the registry's EdgeType enum, so the first implementation overloaded DESTROYED and wrote
+    # the edge BACKWARDS — it read as the player having destroyed the killer's faction.
+    # KILLED_BY is now a registered EdgeType. Direction is (subject, other party):
+    #   KILLED_BY(PLAYER_FACTION_ID, killer_faction)
+    # A death with no killer — a fall, starvation — is a self-loop KILLED_BY(player, player).
+    # There is no node -1, so an edge pointing at one is a dangling reference in the only
+    # record of why the world looks the way it does.
+    DAG.add_event_edge(WorldConstants.PLAYER_FACTION_ID, EdgeType.KILLED_BY, killer_faction)
     
     # 2. Macro-Tick Burst
     for month in range(12):
@@ -98,6 +126,8 @@ func execute_interregnum():
         for mat in ledger.keys():
             ledger[mat] = int(ledger[mat] * 0.60) # 40% wealth entropy tax on the ledger
     # Residual physical-entity GC (clears any stray loose items / filth left Active):
+    # ADR-19 NOTE 2026-08-01: query() yields ROW INDICES, not handles. `item_id` below is a row.
+    # Read columns with it directly; call ECSManager.handle_of(row) before storing or emitting it.
     var all_physical_items = ECSManager.query(ECSManager.MASK_PHYSICAL) # archetype query (ADR-13)
     for item_id in all_physical_items:
         if ECSManager.has_tag(item_id, "Filth") or ECSManager.has_tag(item_id, "Scrap"):
@@ -107,6 +137,12 @@ func execute_interregnum():
                 ECSManager.destroy_entity(item_id)
                 
     # CRITICAL: Prevent Swarm Exponential Crash (abstract counter, ADR-11)
+    # DISAMBIGUATED 2026-08-01. The roadmap prose says "cap all Tier 1 Swarm populations (Rats,
+    # Spiders) to a maximum of 10 per chunk", which reads as a PER-SPECIES cap; this code clamps
+    # the single `ChunkData.swarm_population` counter, which is a PER-CHUNK TOTAL. The registry
+    # defines only the one counter, so the total reading is the canonical one and this code is
+    # correct. A per-species cap would need `ZonePopulationComponent.population_by_species`.
+    # The prose naming two species is illustrative, not a requirement for two separate caps.
     for chunk_id in WorldGrid.get_all_chunks():
         if WorldGrid.chunks[chunk_id].swarm_population > 10:
              WorldGrid.chunks[chunk_id].swarm_population = 10
@@ -118,11 +154,30 @@ func execute_interregnum():
 #   func request(prompt: String, schema: Dictionary, on_done: Callable) -> void
 # OpenAICompatibleProvider: POST {endpoint}/chat/completions with
 #   response_format = {"type": "json_object"}, model = {model}, Authorization: Bearer {api_key}.
-# NullLLMProvider (tests/CI): immediately returns a canned valid {"objective":"FORTIFY",...}.
+# CORRECTION 2026-08-01: this line contradicted the ADR-5 amendment and is superseded.
+# The amendment promotes the local provider from a test stub to a SHIPPED product mode, and
+# requires it to decide from real faction state rather than return a canned payload. A canned
+# FORTIFY makes the no-endpoint build unplayable, which is the exact case the amendment exists
+# to protect. Implemented as `HeuristicProvider`, which scores starvation, threat and
+# opportunity from the same context Dictionary the remote provider receives.
 #
 # Config: endpoint + model in a committed config file with env-var overrides; api_key is read
 # from an env var or user:// and is NEVER committed (add the key file path to .gitignore).
 # Cache responses by prompt hash within a run; keep the staggered queue + per-session budget.
+#
+# QUEUE LIMITS, ADDED 2026-08-01. The original text said "staggered queue + per-session budget"
+# and defined neither, so nothing bounded fairness. Required, and the reason for each:
+#   * Max queue depth. An unbounded queue is a leader acting on an hour-old decision.
+#   * PER-FACTION cap on concurrent submissions. Without it one faction fills the global queue
+#     and every other leader starves. THIS IS STILL NOT IMPLEMENTED — see G-1 in
+#     docs/audits/OUTPUT-IMPL-AUDIT-sprint3-and-3.5.md.
+#   * One request in flight, as a rate-limit and cost choice, not a throughput one.
+#   * Duplicate coalescing by FACTION, not by leader: two decisions for one faction in one hour
+#     is one wasted call.
+#   * Stale-entry eviction: a leader that dies while queued costs zero requests.
+#   * A timeout, and a timeout preserves the current objective rather than changing it.
+#   * reason_summary is capped at 200 chars in the prompt; the cap must ALSO be enforced on the
+#     way back in, or a remote provider's answer length is unbounded in practice (G-4).
 
 6. Objective -> JobTemplate Expansion (ADR-4)
 

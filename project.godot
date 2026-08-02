@@ -35,9 +35,13 @@ GameLoopManager="*res://singletons/GameLoopManager.gd"
 ; reference resolution below; 3D still renders at native resolution.
 window/size/viewport_width=1280
 window/size/viewport_height=720
-; The WINDOW is bigger than the design reference. 1280x720 stays the layout basis that
-; `canvas_items` scales against, while the actual window opens at 1728x972 — a 1280x720 window on
-; a high-DPI laptop is a postage stamp.
+; MAXIMIZED, not fullscreen. Mode 2 fills the work area and keeps the title bar, so the window
+; can still be moved, resized and put beside a terminal — which is how this is actually played
+; and debugged. Mode 3/4 would take the whole display and hide everything else.
+;
+; 1280x720 above stays the layout basis `canvas_items` scales against; the overrides are the
+; size the window falls back to if it is ever un-maximized.
+window/size/mode=2
 window/size/window_width_override=1728
 window/size/window_height_override=972
 window/stretch/mode="canvas_items"

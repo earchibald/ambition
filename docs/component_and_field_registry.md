@@ -29,7 +29,7 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 
 | Component | Fields |
 |-----------|--------|
-| `PositionComponent` | `floor_id:int`, `chunk_id:Vector3i`, `exact_pos:Vector3`, `velocity:Vector3`, `current_node_id:int`, `current_edge:int`, `edge_progress:float`, `edge_speed:float` |
+| `PositionComponent` | `floor_id:int`, `chunk_id:Vector3i`, `exact_pos:Vector3`, `velocity:Vector3`, `current_node_id:int`, `current_edge:int`, `edge_progress:float`, `edge_speed:float` | **STORED AS COLUMNS** — parallel `PackedFloat32Array`s on `ECSManager` (`col_pos_x`…), never a RefCounted per entity. This is the "Data Arrays over Nodes" directive: it is the hottest data in the build and one object per entity would defeat the point |
 | `PhysicalPropertyComponent` | `quantity:int`, `mass_kg:float` (derived cache — see §5), `volume_cm3:float`, `temperature:float`, `heat_capacity:float`, `phase:Phase(enum)` |
 | `MaterialCompositionComponent` | `volume_fractions:Dictionary{StringName:float}` (**VOLUME** fractions, sum = 1.0 ± 0.001 — see §5) |
 | `ChemistryComponent` | `active_tags:Array[StringName]` |
@@ -50,13 +50,24 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 | `MemoryComponent` | `events:Array[MemoryEvent]` |
 | `OwnershipComponent` | `faction_id:int` (THE single ownership representation — not a tag) |
 | `EphemeralComponent` | `time_to_live:float`, `source_entity:EntityHandle`, `payload` |
-| `FloodSourceComponent` | `pending_volume:int`, `material_id:MaterialID` |
+| `FloodSourceComponent` | `pending_volume:int`, `material_id:MaterialID` | **NOT YET IMPLEMENTED** |
 | `HeatSourceComponent` | `stored_energy:float`, `max_temperature:float`, `fuel_materials:Array[MaterialID]` |
 | `PerceptionComponent` | `sight_range_m:float`, `fov_degrees:float`, `hearing_sensitivity:float`, `awareness_state:AwarenessState(enum)`, `last_known_targets:Dictionary{EntityHandle:Vector3}` |
 | `SensoryEmitterComponent` | `noise_radius_m:float`, `visibility_modifier:float`, `scent_tags:Array[StringName]` |
-| `ZonePopulationComponent` | `population_by_species:Dictionary{StringName:int}` |
-| `LLMPromptComponent` | `persona_node_id:int`, `pending_reasoning:bool` |
+| `ZonePopulationComponent` | `population_by_species:Dictionary{StringName:int}` | **NOT YET IMPLEMENTED** — the per-species swarm cap needs this; Sprint 3 caps the single `ChunkData.swarm_population` total instead |
+| `LLMPromptComponent` | `persona_node_id:int`, `pending_reasoning:bool` | **NOT YET IMPLEMENTED** — succession is specified to grant this on promotion; neither exists yet |
 | `PlayerInputComponent` | (marker; attached only to Entity 0 while alive) |
+| `LooseItemComponent` | (marker; an item lying in the world rather than held or stored) |
+| `LocomotionComponent` | `waypoints:Array[Vector3]`, `waypoint_index:int`, `destination:Vector3`, `has_destination:bool`, `speed_mps:float` (route state lives here so a Simulated mover keeps its progress across a LoD demotion) |
+
+**"STORED AS COLUMNS"** marks a logical component realised as packed arrays rather than a class. It is exempt from the class check for the same reason it exists.
+
+**"NOT YET IMPLEMENTED" is load-bearing.** Added 2026-08-01 after an audit found three registry
+components with no class and one real component (`LooseItemComponent`) with no registry row. The
+registry is declared canonical, so an undeclared component is invisible to save/load, validators
+and every future agent, and a declared-but-absent one is a promise a later sprint will try to
+call in. `tests/invariants/test_forbidden_apis.gd` now enforces both directions: every row without
+that marker must have a class in `ecs/components/`, and every class there must have a row.
 
 ## 3. Enums (GDScript `enum`, never strings — ADR-13/C6)
 - `Phase { SOLID, LIQUID, GAS }`
@@ -71,7 +82,13 @@ Pure data (`RefCounted`/`Resource`), no `Node` inheritance.
 - `NodeType { FACTION, LEADER, LOCATION, ARTIFACT, EVENT_ABSTRACT }` (DAG history graph)
 - `NodeStatus { ACTIVE, DESTROYED, DORMANT }` — DESTROYED nodes are **retained, never deleted**:
   a conquered faction is the reason its conqueror holds that territory.
-- `EdgeType { FOUNDED, DESTROYED, CONQUERED, MIGRATED_TO, FORGED, ALLIED_WITH }`
+- `EdgeType { FOUNDED, DESTROYED, CONQUERED, MIGRATED_TO, FORGED, ALLIED_WITH, KILLED_BY }`
+  - Edge direction is `(source = the subject the edge is about, target = the other party)`.
+    `CONQUERED(aggressor, victim)`. `KILLED_BY(victim, killer)`. `DESTROYED` is written as a
+    self-loop `(node, node)` meaning "this node ceased to exist".
+  - `KILLED_BY` added 2026-08-01: the Sprint 3 roadmap asked for a player-death edge and named a
+    type that was not in this enum, so the implementation overloaded `DESTROYED` and recorded the
+    death with the direction reversed. A death with no killer is `KILLED_BY(victim, victim)`.
 
 ## 4. Shared record types
 - `RelationshipState` = `{ score:float(-100..100), status:RelationshipStatus, grievances:Array }`

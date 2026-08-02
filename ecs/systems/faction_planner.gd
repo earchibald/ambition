@@ -56,12 +56,15 @@ func plan(objective: ECSEnums.Objective, faction_id: int, grid: WorldGrid) -> Ar
 	if workers.is_empty():
 		return [] as Array[Dictionary]
 
+	# Profession-filtered, as ADR-4 requires. This table was previously declared, documented, and
+	# NEVER READ — a miner was as likely to be sent to guard duty as a guard was. Dead code that
+	# claims to do something is worse than absent code, because it reads as covered.
 	var out: Array[Dictionary] = []
 	var index: int = 0
 	for worker in workers:
 		if out.size() >= MAX_JOBS_PER_FACTION:
 			break
-		var action: StringName = template[index % template.size()]
+		var action: StringName = _best_action_for(worker, template, index)
 		index += 1
 		out.append({
 			"row": worker,
@@ -70,6 +73,19 @@ func plan(objective: ECSEnums.Objective, faction_id: int, grid: WorldGrid) -> Ar
 		})
 	jobs_issued += out.size()
 	return out
+
+
+## Picks this worker's job from the template, preferring one their profession suits.
+##
+## Falls back to round-robin so the whole template is still covered when nobody is qualified —
+## a village where every job needs a specialist and none exists would simply stop working.
+func _best_action_for(worker: int, template: Array, index: int) -> StringName:
+	var profession: ProfessionComponent = ECSManager.professions.get(worker)
+	if profession != null and profession.profession != &"":
+		for candidate in template:
+			if PREFERRED_PROFESSION.get(candidate, &"") == profession.profession:
+				return candidate
+	return template[index % template.size()]
 
 
 ## Applies a plan: writes each worker's job and points it somewhere to walk.
@@ -119,7 +135,13 @@ func _target_for(
 		Vector3i(worker, core.faction_id, int(action.hash() % 1000)), grid.master_seed
 	)
 	match action:
-		&"PatrolBorders", &"MarchToTarget":
+		&"MarchToTarget":
+			# MARCHING SOMEWHERE ELSE. `objective_target` was written by the resolver and read by
+			# nobody until 2026-08-01, so a faction that decided to raid faction 9 sent its
+			# soldiers to wander its own village. The decision was made, recorded, surfaced in
+			# the overlay, and had no effect on where anyone walked.
+			return _open_tile(_chunk_of_target(core, grid, chunk), rng, 4, 59)
+		&"PatrolBorders":
 			return _open_tile(chunk, rng, 4, 59)
 		&"Barricade", &"ReassignToGuard":
 			return _open_tile(chunk, rng, 2, 20)
@@ -127,6 +149,20 @@ func _target_for(
 			return _open_tile(chunk, rng, 26, 38)
 		_:
 			return _open_tile(chunk, rng, 8, 55)
+
+
+## The anchor chunk of whoever this faction decided to act against, or its own if there is no
+## target — a raid with no named enemy is a muster, and mustering at home is correct.
+func _chunk_of_target(
+	core: FactionCoreComponent, grid: WorldGrid, fallback: ChunkData
+) -> ChunkData:
+	if core.objective_target < 0 or core.objective_target == core.faction_id:
+		return fallback
+	var target: FactionCoreComponent = DAGInstantiator.faction_core(core.objective_target)
+	if target == null or target.anchor_chunk_id == DAGNode.NO_ANCHOR:
+		return fallback
+	var chunk: ChunkData = grid.chunk_at(target.anchor_chunk_id)
+	return fallback if chunk == null else chunk
 
 
 ## A walkable tile in a band of the chunk. Bounded search, then the chunk centre: an unbounded

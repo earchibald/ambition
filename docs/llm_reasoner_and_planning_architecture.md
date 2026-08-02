@@ -76,7 +76,13 @@ Authoritative note: governed by docs/architecture_decisions.md and the registry.
 
 Provider (ADR-5): OpenAI-compatible endpoints via an LLMProvider interface; config is
 { endpoint, model } (committed, env-overridable) + api_key (env/user://, NEVER committed).
-Tests/CI inject a NullLLMProvider stub returning a canned valid FORTIFY payload. Structured
+SUPERSEDED 2026-08-01 by the ADR-5 amendment; the original text read "Tests/CI inject a
+NullLLMProvider stub returning a canned valid FORTIFY payload." The local provider is a SHIPPED
+product mode, not a test double. It is selected automatically when no endpoint is configured, and
+it must decide from real faction state — starvation, threat, opportunity — so that a build with
+no endpoint is fully playable. A canned FORTIFY passes CI and makes the no-endpoint mode
+worthless, which is the exact outcome the amendment exists to prevent. Implemented as
+`HeuristicProvider`. Acceptance requires a complete play session with no endpoint configured. Structured
 output uses response_format {"type":"json_object"} (or provider equivalent). Identical prompts
 are cached by hash within a run to control cost; the staggered queue caps request rate.
 

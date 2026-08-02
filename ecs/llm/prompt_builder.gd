@@ -22,6 +22,10 @@ const CONTEXT_MARKER: String = "\n---CONTEXT---\n"
 const TOP_MEMORIES: int = 3
 const RECENT_MEMORIES: int = 3
 
+## How long a violent memory keeps a faction in "crisis". Two in-game weeks: long enough that a
+## running war stays a war, short enough that a grudge from year 300 is not an emergency.
+const ATTACK_MEMORY_WINDOW_HOURS: int = 336
+
 ## Hard ceiling on the brief. Cheap insurance against a memory text that is itself enormous.
 const MAX_PROMPT_CHARS: int = 4000
 
@@ -70,9 +74,14 @@ static func build_context(core: FactionCoreComponent, generator: DAGGenerator) -
 		"name": "Faction %d" % core.faction_id if node == null else String(node.name),
 		"population": core.abstract_population,
 		"culture": core.culture_tags.map(func(t: StringName) -> String: return String(t)),
-		"food": int(core.abstract_wealth_ledger.get(MaterialLibrary.MAT_BIOMASS, 0)),
+		# Counted from WHEREVER it lives. Reading the ledger alone reports zero for any faction
+		# whose chunk is Active, because promotion spent it into stacks — so every village the
+		# player could see looked like it was starving.
+		"food": ChunkStreamingSystem.owned_material_total(
+			core.faction_id, MaterialLibrary.MAT_BIOMASS
+		),
 		"strength": strength_of(core),
-		"recently_attacked": _was_recently_attacked(core),
+		"recently_attacked": was_recently_attacked(core),
 		"memories": salient_memories(core),
 		"valid_targets": valid_targets(core, generator),
 	}
@@ -80,27 +89,55 @@ static func build_context(core: FactionCoreComponent, generator: DAGGenerator) -
 
 ## Top-3 by weight plus the 3 most recent, de-duplicated. Sending the whole history is how a
 ## per-call cost becomes unbounded.
+##
+## TOTALLY ORDERED, and it was not until 2026-08-01. Both sorts compared one field, and
+## `sort_custom` is not stable, so two memories of equal weight could come back in either order.
+## That is not cosmetic: it changes WHICH THREE ARE SELECTED, so identical world state could
+## produce different prompts run to run. It breaks ADR-20's reproduce-from-seed requirement, and
+## it silently defeats the response cache in `ReasoningQueue`, which keys on the prompt hash — a
+## cache that misses on identical state is a paid call that should not have happened.
+## Tie-break to `event_id`, which is globally unique, so the order is total and no tie remains.
 static func salient_memories(core: FactionCoreComponent) -> Array[String]:
 	var chosen: Array[String] = []
 	var seen: Dictionary = {}
 
 	var by_weight: Array = core.faction_memory.duplicate()
-	by_weight.sort_custom(
-		func(a: Dictionary, b: Dictionary) -> bool:
-			return float(a.get("weight", 0.0)) > float(b.get("weight", 0.0))
-	)
+	by_weight.sort_custom(_more_salient)
 	for i in mini(TOP_MEMORIES, by_weight.size()):
 		_append_memory(by_weight[i], chosen, seen)
 
 	# Most recent = highest tick. Recency and weight overlap often, hence the dedup.
 	var by_tick: Array = core.faction_memory.duplicate()
-	by_tick.sort_custom(
-		func(a: Dictionary, b: Dictionary) -> bool:
-			return int(a.get("tick", 0)) > int(b.get("tick", 0))
-	)
+	by_tick.sort_custom(_more_recent)
 	for i in mini(RECENT_MEMORIES, by_tick.size()):
 		_append_memory(by_tick[i], chosen, seen)
 	return chosen
+
+
+## Weight, then recency, then the unique id. Every comparison ends in a strict decision.
+static func _more_salient(a: Dictionary, b: Dictionary) -> bool:
+	var weight_a: float = float(a.get("weight", 0.0))
+	var weight_b: float = float(b.get("weight", 0.0))
+	if not is_equal_approx(weight_a, weight_b):
+		return weight_a > weight_b
+	var tick_a: int = int(a.get("tick", 0))
+	var tick_b: int = int(b.get("tick", 0))
+	if tick_a != tick_b:
+		return tick_a > tick_b
+	return int(a.get("event_id", 0)) < int(b.get("event_id", 0))
+
+
+## Recency, then weight, then the unique id.
+static func _more_recent(a: Dictionary, b: Dictionary) -> bool:
+	var tick_a: int = int(a.get("tick", 0))
+	var tick_b: int = int(b.get("tick", 0))
+	if tick_a != tick_b:
+		return tick_a > tick_b
+	var weight_a: float = float(a.get("weight", 0.0))
+	var weight_b: float = float(b.get("weight", 0.0))
+	if not is_equal_approx(weight_a, weight_b):
+		return weight_a > weight_b
+	return int(a.get("event_id", 0)) < int(b.get("event_id", 0))
 
 
 ## Neighbours this faction could plausibly act on, with their INTEGER ids. The player is always
@@ -133,13 +170,28 @@ static func valid_targets(core: FactionCoreComponent, generator: DAGGenerator) -
 ## A single comparable number, so "can we take them" is one division rather than a policy.
 static func strength_of(core: FactionCoreComponent) -> float:
 	return float(core.abstract_population) + float(
-		core.abstract_wealth_ledger.get(MaterialLibrary.MAT_IRON, 0)
+		ChunkStreamingSystem.owned_material_total(core.faction_id, MaterialLibrary.MAT_IRON)
 	) * 0.05
 
 
-static func _was_recently_attacked(core: FactionCoreComponent) -> bool:
+## True when this faction has a fresh memory of being wronged. Read from faction memory rather
+## than from the relationship score, because a score says WHO you dislike and a memory says
+## whether something just happened — and "fortify NOW" is a response to the second.
+## "RECENTLY" NOW MEANS RECENTLY. This checked only whether a violent memory existed anywhere in
+## the list, so a murder stayed "recent" until it aged out of the 24-entry cap — which, for a
+## quiet faction, is never. That was harmless while the flag only coloured a prompt; it stopped
+## being harmless when the flag became the crisis trigger for reasoning cadence, where a
+## permanent crisis means a permanently elevated request rate.
+##
+## Case-insensitive because these strings come from two writers: `ReputationSystem` emits
+## `WITNESSED_MURDER`, and the DAG chronicle writes prose.
+static func was_recently_attacked(core: FactionCoreComponent) -> bool:
+	var now: int = GameClock.total_hours()
 	for memory in core.faction_memory:
-		if String(memory.get("text", "")).contains("attacked"):
+		var kind: String = String(memory.get("text", "")).to_upper()
+		if not (kind.contains("MURDER") or kind.contains("ASSAULT") or kind.contains("ATTACK")):
+			continue
+		if now - int(memory.get("tick", 0)) <= ATTACK_MEMORY_WINDOW_HOURS:
 			return true
 	return false
 
