@@ -1,14 +1,22 @@
 # Agent Handoff State
 
-*   **Current Branch:** `dev`. **THE WHOLE SPRINT 3-4 STACK IS MERGED (2026-08-02), on the
+*   **Current Branch:** `dev`. **`dev` IS PROMOTED TO `main` (2026-08-02, PR #11, merge commit
+    `f7fc75b`), on the owner's explicit instruction** ("merge, promote, get everything into
+    main", re-approved when the permission layer first blocked the merge). The promotion was a
+    clean fast-forward: `main` (`ce03868`, the spec baseline) was a strict ancestor of `dev`;
+    56 commits, 696 files, CI green on every `dev` push including the tip. `main` now carries
+    Sprints 1-4, the remediation, and the player UI layer. The standing rules stand: never push
+    directly to `main`; promotions go through a PR the owner authorizes.
+
+*   **THE WHOLE SPRINT 3-4 STACK IS MERGED INTO `dev` (2026-08-02), on the
     owner's explicit instruction** ("merge it all, i'd rather fix things later than get them
     tangled up"): PR #7 (world inspector), #8 (Sprint 3.5), and #10 (Sprint 4 + the Sprints 1-4
     remediation + the player UI pass) are merged into `dev`; all feature branches deleted.
     PR #9 shows CLOSED, not merged — GitHub closed it when its base branch was deleted — but
     every commit in it landed through #10's ancestry (verified with `git merge-base
     --is-ancestor`; noted on the PR). Post-merge `dev` verified locally: 619 tests / 39
-    scripts green, gdlint clean, world scenario prints `ECS_BOOT_OK`. `main` is untouched, per
-    the standing rule. Next feature work: branch off `dev` as usual.
+    scripts green, gdlint clean, world scenario prints `ECS_BOOT_OK`. Next feature work:
+    branch off `dev` as usual.
 
 *   **LAST CHANGE: THE PLAYER UI PASS (2026-08-02). 619 tests across 39 scripts, gdlint clean,
     both scenarios frame-verified, and two subagent beauty reviews (genre + accessibility)
